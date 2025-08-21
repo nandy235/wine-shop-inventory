@@ -11,8 +11,12 @@ function Signup({ onLogin }) {
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
-    setLoading(true);
-    setError('');
+  console.log('API_BASE_URL:', API_BASE_URL, typeof API_BASE_URL);
+  console.log('Full URL:', `${API_BASE_URL}/api/register`);
+  
+  setLoading(true);
+  setError('');
+  
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/register`, {
