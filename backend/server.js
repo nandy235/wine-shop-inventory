@@ -61,62 +61,19 @@ const authenticateToken = (req, res, next) => {
  });
 };
 
-const DATA_FILE = path.join(__dirname, 'data.json');
+// Import database configuration
+const { connectDB, loadData, saveData } = require('./database');
 
-const initData = {
- users: [],
- shopInventory: [],
- dailyStockRecords: [],
- invoice: [],
- expenses: [],
- otherIncome: [],
- cashTransactions: [],
+// Initialize database connection
+let appData = {};
+const initializeApp = async () => {
+  const dbConnected = await connectDB();
+  appData = await loadData();
+  console.log(`App initialized with ${dbConnected ? 'PostgreSQL' : 'file storage'}`);
 };
 
-// Helper function to format size
-const formatSize = (sizeCode, size) => {
-  return `${sizeCode}(${size})`;
-};
-
-function loadData() {
- try {
-  let data = {};
-   if (fs.existsSync(DATA_FILE)) {
-     const fileData = fs.readFileSync(DATA_FILE, 'utf8');
-     data = JSON.parse(fileData);
-     
-     if (!data.dailyStockRecords) data.dailyStockRecords = [];
-     if (!data.invoice) data.invoice = [];
-     if (!data.expenses) data.expenses = [];
-     if (!data.otherIncome) data.otherIncome = [];
-     if (!data.cashTransactions) data.cashTransactions = [];
-     
-     const masterBrandsPath = path.join(__dirname, 'data', 'masterBrands.json');
-     if (fs.existsSync(masterBrandsPath)) {
-       const brandData = fs.readFileSync(masterBrandsPath, 'utf8');
-       data.masterBrands = JSON.parse(brandData);
-     } else {
-       data.masterBrands = [];
-     }
-     return data;
-   } else {
-     saveData(initData);
-     return initData;
-   }
- } catch (error) {
-   return initData;
- }
-}
-
-function saveData(data) {
- try {
-   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
- } catch (error) {
-   // Silent fail
- }
-}
-
-let appData = loadData();
+// Call initialization
+initializeApp();
 appData.masterBrands ??= [];
 
 const generateId = () => Date.now().toString();
