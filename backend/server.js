@@ -1154,6 +1154,7 @@ app.get('/', (req, res) => {
  res.json({ message: 'Wine Shop Inventory API is running!' });
 });
 
+// Start the server
 const startServer = async () => {
   try {
     const dbConnected = await connectDB();
@@ -1171,7 +1172,7 @@ const startServer = async () => {
       console.log('App initialized with PostgreSQL');
     }
 
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server is running on port ${PORT}`);
       console.log('Server connected to PostgreSQL database');
       console.log('Server is ready to accept requests');
