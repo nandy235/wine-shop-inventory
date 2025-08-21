@@ -62,16 +62,17 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Import database configuration
-const { connectDB, loadData, saveData } = require('./database');
-
+const { connectDB, initializeTables, pool } = require('./database');
 // Initialize database connection
 let appData = {};
 const initializeApp = async () => {
   const dbConnected = await connectDB();
-  appData = await loadData();
-  console.log(`App initialized with ${dbConnected ? 'PostgreSQL' : 'file storage'}`);
+  if (dbConnected) {
+    await initializeTables();
+    appData = { users: [], shopInventory: [], dailyStockRecords: [], invoice: [] };
+  }
+  console.log('App initialized with PostgreSQL');
 };
-
 // Call initialization
 initializeApp();
 appData.masterBrands ??= [];
