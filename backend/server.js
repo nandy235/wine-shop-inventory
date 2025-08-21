@@ -17,7 +17,14 @@ const PORT = process.env.PORT || 3001;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-wine-shop-secret-key-2024';
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'https://wine-shop-inventory.vercel.app',
+    'https://wine-shop-inventory-gbaha94u9-nkstories0-5188s-projects.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
