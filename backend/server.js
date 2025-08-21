@@ -41,7 +41,9 @@ app.use(cors({
     'https://wine-shop-inventory.vercel.app',
     'https://wine-shop-inventory-gbaha94u9-nkstories0-5188s-projects.vercel.app'
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
