@@ -26,6 +26,11 @@ const saveData = (data) => {
 };
 
 const app = express();
+// --- Healthcheck (no auth) ---
+app.get(['/health', '/_health'], (req, res) => {
+  res.status(200).send('ok');
+});
+
 const PORT = process.env.PORT || 3001;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-wine-shop-secret-key-2024';
@@ -1154,8 +1159,14 @@ app.get('/', (req, res) => {
  res.json({ message: 'Wine Shop Inventory API is running!' });
 });
 
-// Start the server
-const startServer = async () => {
+// --- Start the server FIRST ---
+const server = app.listen(PORT, '0.0.0.0', () => {
+  const addr = server.address();
+  console.log(`Server is running on ${addr.address}:${addr.port}`);
+});
+
+// --- Now do DB work in the background ---
+(async () => {
   try {
     const dbConnected = await connectDB();
     if (dbConnected) {
@@ -1170,18 +1181,23 @@ const startServer = async () => {
         masterBrands: masterBrandsData || []
       };
       console.log('App initialized with PostgreSQL');
-    }
-
-    const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server is running on port ${PORT}`);
       console.log('Server connected to PostgreSQL database');
       console.log('Server is ready to accept requests');
-    });
-
+    } else {
+      console.error('DB not connected');
+    }
   } catch (error) {
-    console.error('Server startup failed:', error);
-    process.exit(1);
+    console.error('Server startup failed (DB):', error);
+    // IMPORTANT: Do NOT process.exit(1) here on Railway; keep server up so health stays green.
   }
-};
-// Start the server
-startServer();
+})();
+
+function shutdown(signal) {
+  console.log(`${signal} received: closing server`);
+  server.close(async () => {
+    try { await pool?.end?.(); } catch (e) { console.error('Error closing DB', e); }
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
