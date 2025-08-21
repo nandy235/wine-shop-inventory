@@ -1,0 +1,169 @@
+/* ManageStock.css */
+.manage-stock-container {
+  min-height: 100vh;
+  background-color: #f5f5f5;
+}
+
+.manage-stock-container .manage-stock-header {
+  background: white;
+  padding: 20px 40px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.manage-stock-container .logo-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.manage-stock-container .app-title {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+  margin: 0;
+}
+
+.manage-stock-container .app-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 0;
+}
+
+.manage-stock-container .navigation {
+  display: flex;
+  gap: 20px;
+}
+
+.manage-stock-container .nav-btn {
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: #666;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.manage-stock-container .nav-btn.active {
+  color: #7C3AED;
+  font-weight: bold;
+  background-color: #F3F4F6;
+}
+
+.manage-stock-container .nav-btn:hover {
+  background-color: #E5D5FF;
+  color: #7C3AED;
+}
+
+.manage-stock-container .manage-stock-content {
+  padding: 40px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.manage-stock-container .page-title-section {
+  text-align: center;
+  margin-bottom: 50px;
+}
+
+.manage-stock-container .main-title {
+  font-size: 36px;
+  color: #333;
+  margin: 0;
+  font-weight: 700;
+  padding: 15px 30px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  display: inline-block;
+  background-color: #fafafa;
+}
+
+.manage-stock-container .subtitle {
+  font-size: 16px;
+  color: #666;
+  margin: 15px 0 0 0;
+}
+
+.manage-stock-container .stock-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 25px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.manage-stock-container .stock-action-card {
+  background: white;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border: 2px solid transparent;
+  min-height: 120px;
+}
+
+.manage-stock-container .stock-action-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: #7C3AED;
+}
+
+.manage-stock-container .action-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.manage-stock-container .action-icon.invoice {
+  background-color: #7C3AED;
+}
+
+.manage-stock-container .action-icon.transfer {
+  background-color: #10B981;
+}
+
+.manage-stock-container .action-icon.supplier {
+  background-color: #F59E0B;
+}
+
+.manage-stock-container .action-content {
+  flex: 1;
+}
+
+.manage-stock-container .action-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 8px 0;
+}
+
+.manage-stock-container .action-description {
+  font-size: 14px;
+  color: #666;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.manage-stock-container .action-arrow {
+  font-size: 20px;
+  color: #999;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.manage-stock-container .stock-action-card:hover .action-arrow {
+  color: #7C3AED;
+  transform: translateX(5px);
+}
