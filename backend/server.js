@@ -1154,5 +1154,5 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
  console.log(`Server is running on port ${PORT}`);
- console.log(`Data will be saved to: ${DATA_FILE}`);
+ console.log('Server connected to PostgreSQL database');
 });
