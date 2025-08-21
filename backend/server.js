@@ -12,6 +12,19 @@ const masterBrandsData = require('./data/masterBrands.json');
 const HybridInvoiceParser = require('./invoiceParser');
 const invoiceParser = new HybridInvoiceParser();
 
+// Add these helper functions
+const formatSize = (sizeCode, size) => {
+  if (sizeCode && size) {
+    return `${size}${sizeCode}`;
+  }
+  return size || '';
+};
+
+const saveData = (data) => {
+  console.log('Data updated in memory');
+  // TODO: Implement database persistence
+};
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -60,22 +73,10 @@ const authenticateToken = (req, res, next) => {
    next();
  });
 };
-
 // Import database configuration
 const { connectDB, initializeTables, pool } = require('./database');
-// Initialize database connection
+// Declare appData
 let appData = {};
-const initializeApp = async () => {
-  const dbConnected = await connectDB();
-  if (dbConnected) {
-    await initializeTables();
-    appData = { users: [], shopInventory: [], dailyStockRecords: [], invoice: [] };
-  }
-  console.log('App initialized with PostgreSQL');
-};
-// Call initialization
-initializeApp();
-appData.masterBrands ??= [];
 
 const generateId = () => Date.now().toString();
 
@@ -1155,15 +1156,21 @@ app.get('/', (req, res) => {
 
 const startServer = async () => {
   try {
-    // Initialize database first
     const dbConnected = await connectDB();
     if (dbConnected) {
       await initializeTables();
-      appData = { users: [], shopInventory: [], dailyStockRecords: [], invoice: [] };
+      appData = { 
+        users: [], 
+        shopInventory: [], 
+        dailyStockRecords: [], 
+        invoice: [],
+        expenses: [],
+        cashTransactions: [],
+        masterBrands: masterBrandsData || []
+      };
       console.log('App initialized with PostgreSQL');
     }
 
-    // Then start the server and keep it running
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server is running on port ${PORT}`);
       console.log('Server connected to PostgreSQL database');
@@ -1175,6 +1182,5 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-
 // Start the server
 startServer();
