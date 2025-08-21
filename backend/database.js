@@ -1,7 +1,13 @@
 const { Pool } = require('pg');
 
 // Database connection configuration
-const pool = new Pool({
+// Try connection string first, then individual variables
+const connectionString = process.env.DATABASE_URL;
+
+const pool = new Pool(connectionString ? {
+  connectionString: connectionString,
+  ssl: { rejectUnauthorized: false }
+} : {
   host: process.env.PGHOST,
   port: process.env.PGPORT,
   database: process.env.PGDATABASE,
