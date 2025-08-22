@@ -1,8 +1,17 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const { Pool } = require('pg');
 
 // Database connection configuration
-// Try connection string first, then individual variables
-const connectionString = process.env.DATABASE_URL;
+// Use public URL for local development, internal URL for Railway deployment
+const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL;
+
+console.log('🔍 Environment check:');
+console.log('DATABASE_PUBLIC_URL:', process.env.DATABASE_PUBLIC_URL ? 'Set' : 'Not set');
+console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'Set' : 'Not set');
+console.log('Using connection:', process.env.DATABASE_PUBLIC_URL ? 'Public (Local)' : 'Internal (Railway)');
+console.log('PGHOST:', process.env.PGHOST || 'Not set');
 
 const pool = new Pool(connectionString ? {
   connectionString: connectionString,
@@ -37,7 +46,8 @@ const initializeTables = async () => {
       email VARCHAR(255) UNIQUE NOT NULL,
       password VARCHAR(255) NOT NULL,
       shop_name VARCHAR(255) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS shop_inventory (
@@ -54,7 +64,8 @@ const initializeTables = async () => {
       shop_markup DECIMAL(10,2) DEFAULT 0,
       final_price DECIMAL(10,2),
       sort_order INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS daily_stock_records (
@@ -88,8 +99,17 @@ const initializeTables = async () => {
       tcs DECIMAL(10,2),
       items_count INTEGER,
       processed_items_count INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Add indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_shop_inventory_user_id ON shop_inventory(user_id);
+    CREATE INDEX IF NOT EXISTS idx_shop_inventory_brand_number ON shop_inventory(brand_number);
+    CREATE INDEX IF NOT EXISTS idx_daily_stock_records_user_date ON daily_stock_records(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_daily_stock_records_brand_size ON daily_stock_records(brand_number, size);
+    CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
   `;
 
   try {
