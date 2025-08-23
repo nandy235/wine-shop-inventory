@@ -3,7 +3,7 @@ import './Login.css';
 import API_BASE_URL from './config';
 
 function Login({ onLogin, onSignup }) {
-  const [email, setEmail] = useState('');
+  const [licenseNumber, setLicenseNumber] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ function Login({ onLogin, onSignup }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ licenseNumber, password })
       });
 
       const data = await response.json();
@@ -41,12 +41,13 @@ function Login({ onLogin, onSignup }) {
         <h1 className="login-title">Liquor Ledger</h1>
         {error && <div style={{color: 'red', marginBottom: '10px'}}>{error}</div>}
         <div className="form-group">
-          <label className="form-label">Email:</label>
+          <label className="form-label">License Number:</label>
           <input 
-            type="email" 
+            type="text" 
             className="form-input" 
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={licenseNumber}
+            onChange={(e) => setLicenseNumber(e.target.value)}
+            placeholder="Enter your wine shop license number"
           />
         </div>
         <div className="form-group">

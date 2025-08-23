@@ -1,35 +1,122 @@
 const { pool } = require('./database');
 
 class DatabaseService {
-  // User Management
+  // User Management - Updated for new normalized schema
   async createUser(userData) {
-    const { name, email, password, shopName } = userData;
-    const query = `
-      INSERT INTO users (name, email, password, shop_name)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, name, email, shop_name, created_at
-    `;
-    const values = [name, email, password, shopName];
+    const { name, email, password, shopName, gazetteCode, address, licenseNumber } = userData;
+    const client = await pool.connect();
     
     try {
-      const result = await pool.query(query, values);
-      return result.rows[0];
+      await client.query('BEGIN');
+      
+      // Create user first
+      const userQuery = `
+        INSERT INTO users (name, email, password)
+        VALUES ($1, $2, $3)
+        RETURNING id, name, email, created_at
+      `;
+      const userValues = [name, email, password];
+      const userResult = await client.query(userQuery, userValues);
+      const user = userResult.rows[0];
+      
+      // Create shop for the user
+      const shopQuery = `
+        INSERT INTO shops (user_id, shop_name, address, license_number, gazette_code)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, shop_name, address, license_number, gazette_code, created_at
+      `;
+      const shopValues = [user.id, shopName, address || null, licenseNumber || null, gazetteCode || null];
+      const shopResult = await client.query(shopQuery, shopValues);
+      const shop = shopResult.rows[0];
+      
+      await client.query('COMMIT');
+      
+      // Return combined user and shop data for compatibility
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        shop_name: shop.shop_name,
+        shop_id: shop.id,
+        gazette_code: shop.gazette_code,
+        address: shop.address,
+        license_number: shop.license_number,
+        created_at: user.created_at
+      };
     } catch (error) {
+      await client.query('ROLLBACK');
       console.error('Full database error:', error);
       console.error('Error code:', error.code);
       console.error('Error detail:', error.detail);
-      throw error; // Throw the original error, don't wrap it
+      throw error;
+    } finally {
+      client.release();
     }
   }
 
   async findUserByEmail(email) {
-    const query = 'SELECT * FROM users WHERE email = $1';
+    const query = `
+      SELECT 
+        u.id, u.name, u.email, u.password, u.created_at,
+        s.id as shop_id, s.shop_name, s.address, s.license_number, s.gazette_code
+      FROM users u
+      LEFT JOIN shops s ON s.user_id = u.id
+      WHERE u.email = $1
+    `;
     
     try {
       const result = await pool.query(query, [email]);
-      return result.rows[0] || null;
+      const user = result.rows[0];
+      if (!user) return null;
+      
+      // Format for compatibility with existing code
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        password: user.password,
+        shop_name: user.shop_name,
+        shop_id: user.shop_id,
+        gazette_code: user.gazette_code,
+        address: user.address,
+        license_number: user.license_number,
+        created_at: user.created_at
+      };
     } catch (error) {
       throw new Error(`Error finding user: ${error.message}`);
+    }
+  }
+
+  async findUserByLicenseNumber(licenseNumber) {
+    const query = `
+      SELECT 
+        u.id, u.name, u.email, u.password, u.created_at,
+        s.id as shop_id, s.shop_name, s.address, s.license_number, s.gazette_code
+      FROM users u
+      JOIN shops s ON s.user_id = u.id
+      WHERE s.license_number = $1
+    `;
+    
+    try {
+      const result = await pool.query(query, [licenseNumber]);
+      const user = result.rows[0];
+      if (!user) return null;
+      
+      // Format for compatibility with existing code
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        password: user.password,
+        shop_name: user.shop_name,
+        shop_id: user.shop_id,
+        gazette_code: user.gazette_code,
+        address: user.address,
+        license_number: user.license_number,
+        created_at: user.created_at
+      };
+    } catch (error) {
+      throw new Error(`Error finding user by license number: ${error.message}`);
     }
   }
 

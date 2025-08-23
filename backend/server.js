@@ -306,11 +306,11 @@ app.get('/api/invoices', authenticateToken, async (req, res) => {
 // Auth endpoints
 app.post('/api/login', async (req, res) => {
  try {
-   const { email, password } = req.body;
+   const { licenseNumber, password } = req.body;
    
-   const user = await dbService.findUserByEmail(email);
+   const user = await dbService.findUserByLicenseNumber(licenseNumber);
    if (!user) {
-     return res.status(400).json({ message: 'Invalid credentials' });
+     return res.status(400).json({ message: 'Invalid license number or password' });
    }
    
    const isValidPassword = await bcrypt.compare(password, user.password);
@@ -353,11 +353,11 @@ app.get('/api/verify-token', authenticateToken, (req, res) => {
 
 app.post('/api/register', async (req, res) => {
   try {
-    const { name, email, password, shopName } = req.body;
+    const { name, email, password, shopName, gazetteCode, address, licenseNumber } = req.body;
     
     // Validation
-    if (!name || !email || !password || !shopName) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!name || !email || !password || !shopName || !licenseNumber) {
+      return res.status(400).json({ message: 'Name, email, password, shop name, and license number are required' });
     }
     
     // Check if user already exists
@@ -365,17 +365,26 @@ app.post('/api/register', async (req, res) => {
     if (existingUser) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
+
+    // Check if license number already exists
+    const existingLicense = await dbService.findUserByLicenseNumber(licenseNumber);
+    if (existingLicense) {
+      return res.status(400).json({ message: 'This license number is already registered' });
+    }
     
     // Hash password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     
-    // Create new user in database
+    // Create new user and shop in database
     const newUser = await dbService.createUser({
       name: name.trim(),
       email: email.trim().toLowerCase(),
       password: hashedPassword,
-      shopName: shopName.trim()
+      shopName: shopName.trim(),
+      gazetteCode: gazetteCode?.trim() || null,
+      address: address?.trim() || null,
+      licenseNumber: licenseNumber?.trim() || null
     });
     
     res.status(201).json({ 

@@ -1,3 +1,9 @@
+// ===============================================
+// Wine Shop Inventory Management System
+// Enhanced Database Configuration
+// Compatible with new normalized schema
+// ===============================================
+
 // Load environment variables from .env file
 require('dotenv').config();
 
@@ -29,95 +35,137 @@ const pool = new Pool(connectionString ? {
 const connectDB = async () => {
   try {
     await pool.query('SELECT NOW()');
-    console.log('Database connected successfully');
+    console.log('✅ Database connected successfully');
     return true;
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('❌ Database connection failed:', error);
     return false;
   }
 };
 
-// Create tables
-const initializeTables = async () => {
-  const createTablesQuery = `
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL,
-      shop_name VARCHAR(255) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS shop_inventory (
-      id SERIAL PRIMARY KEY,
-      master_brand_id INTEGER,
-      user_id INTEGER NOT NULL,
-      name VARCHAR(255) NOT NULL,
-      brand_number VARCHAR(50),
-      category VARCHAR(100),
-      pack_quantity INTEGER DEFAULT 12,
-      size VARCHAR(50),
-      size_code VARCHAR(10),
-      mrp DECIMAL(10,2),
-      shop_markup DECIMAL(10,2) DEFAULT 0,
-      final_price DECIMAL(10,2),
-      sort_order INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_stock_records (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      date DATE NOT NULL,
-      brand_number VARCHAR(50),
-      brand_name VARCHAR(255),
-      size VARCHAR(50),
-      opening_stock INTEGER DEFAULT 0,
-      received INTEGER DEFAULT 0,
-      total INTEGER DEFAULT 0,
-      closing_stock INTEGER DEFAULT 0,
-      sale INTEGER DEFAULT 0,
-      price DECIMAL(10,2),
-      sale_amount DECIMAL(10,2),
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS invoices (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      invoice_number VARCHAR(255),
-      date DATE,
-      upload_date DATE,
-      total_value DECIMAL(10,2),
-      net_invoice_value DECIMAL(10,2),
-      retail_excise_tax DECIMAL(10,2),
-      special_excise_cess DECIMAL(10,2),
-      tcs DECIMAL(10,2),
-      items_count INTEGER,
-      processed_items_count INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    -- Add indexes for better performance
-    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-    CREATE INDEX IF NOT EXISTS idx_shop_inventory_user_id ON shop_inventory(user_id);
-    CREATE INDEX IF NOT EXISTS idx_shop_inventory_brand_number ON shop_inventory(brand_number);
-    CREATE INDEX IF NOT EXISTS idx_daily_stock_records_user_date ON daily_stock_records(user_id, date);
-    CREATE INDEX IF NOT EXISTS idx_daily_stock_records_brand_size ON daily_stock_records(brand_number, size);
-    CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
-  `;
-
+// Check if new schema is deployed
+const checkSchemaVersion = async () => {
   try {
-    await pool.query(createTablesQuery);
-    console.log('Database tables created successfully');
+    // Check if new tables exist
+    const result = await pool.query(`
+      SELECT COUNT(*) as table_count
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_name IN ('users', 'shops', 'master_brands', 'shop_inventory', 'daily_stock_records', 'invoices', 'invoice_brands', 'expenses', 'other_income', 'daily_payments')
+    `);
+    
+    const tableCount = parseInt(result.rows[0].table_count);
+    
+    if (tableCount === 10) {
+      console.log('✅ New schema fully deployed - all 10 tables found');
+      return 'complete';
+    } else if (tableCount > 0) {
+      console.log(`⚠️  Partial schema detected - found ${tableCount}/10 tables`);
+      return 'partial';
+    } else {
+      console.log('🆕 Fresh database - no tables found');
+      return 'fresh';
+    }
   } catch (error) {
-    console.error('Error creating tables:', error);
+    console.error('❌ Schema version check failed:', error);
+    return 'unknown';
   }
 };
 
-module.exports = { pool, connectDB, initializeTables };
+// Initialize database with new schema
+const initializeTables = async () => {
+  try {
+    const connected = await connectDB();
+    if (!connected) {
+      throw new Error('Database connection failed');
+    }
+    
+    const schemaVersion = await checkSchemaVersion();
+    
+    if (schemaVersion === 'complete') {
+      console.log('✅ New schema is ready!');
+      
+      // Verify critical components
+      await verifySchemaComponents();
+    } else if (schemaVersion === 'partial') {
+      console.log('⚠️  Incomplete schema detected. Please complete deployment:');
+      console.log('📋 Run: cd backend/schema && psql -d your_database -f deploy_schema.sql');
+      throw new Error('Incomplete schema - deployment required');
+    } else {
+      console.log('🚀 Fresh database detected. Deploying new schema...');
+      console.log('📋 Please run: cd backend/schema && psql -d your_database -f deploy_schema.sql');
+      console.log('🔄 Then restart the server');
+      throw new Error('Schema deployment required');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error);
+    console.error('💡 Make sure to deploy the schema first:');
+    console.error('   cd backend/schema && psql -d your_database -f deploy_schema.sql');
+    return false;
+  }
+};
+
+
+
+// Verify new schema components
+const verifySchemaComponents = async () => {
+  try {
+    // Check tables
+    const tablesResult = await pool.query(`
+      SELECT COUNT(*) as count FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    `);
+    
+    // Check views  
+    const viewsResult = await pool.query(`
+      SELECT COUNT(*) as count FROM information_schema.views 
+      WHERE table_schema = 'public' AND table_name LIKE 'v_%'
+    `);
+    
+    // Check triggers
+    const triggersResult = await pool.query(`
+      SELECT COUNT(*) as count FROM information_schema.triggers 
+      WHERE trigger_schema = 'public'
+    `);
+    
+    console.log('📊 Schema Component Verification:');
+    console.log(`   Tables: ${tablesResult.rows[0].count}`);
+    console.log(`   Views: ${viewsResult.rows[0].count}`);
+    console.log(`   Triggers: ${triggersResult.rows[0].count}`);
+    
+    if (parseInt(tablesResult.rows[0].count) >= 10) {
+      console.log('✅ Schema verification passed');
+    } else {
+      console.log('⚠️  Schema verification incomplete - some components missing');
+    }
+  } catch (error) {
+    console.error('❌ Schema verification failed:', error);
+  }
+};
+
+// Health check query
+const healthCheck = async () => {
+  try {
+    const result = await pool.query('SELECT NOW() as current_time, version() as pg_version');
+    return {
+      status: 'healthy',
+      timestamp: result.rows[0].current_time,
+      version: result.rows[0].pg_version
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      error: error.message
+    };
+  }
+};
+
+module.exports = { 
+  pool, 
+  connectDB, 
+  initializeTables,
+  checkSchemaVersion,
+  healthCheck
+};

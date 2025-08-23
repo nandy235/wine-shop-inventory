@@ -7,6 +7,9 @@ function Signup({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [shopName, setShopName] = useState('');
+  const [gazetteCode, setGazetteCode] = useState('');
+  const [address, setAddress] = useState('');
+  const [licenseNumber, setLicenseNumber] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +27,15 @@ function Signup({ onLogin }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, email, password, shopName })
+        body: JSON.stringify({ 
+          name, 
+          email, 
+          password, 
+          shopName, 
+          gazetteCode, 
+          address, 
+          licenseNumber 
+        })
       });
 
       const data = await response.json();
@@ -81,6 +92,46 @@ function Signup({ onLogin }) {
             className="form-input" 
             value={shopName}
             onChange={(e) => setShopName(e.target.value)}
+            required
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Gazette Code:</label>
+          <input 
+            type="number" 
+            className="form-input" 
+            value={gazetteCode}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value.length <= 6) {
+                setGazetteCode(value);
+              }
+            }}
+            placeholder="6-digit number (e.g., 123456)"
+            maxLength="6"
+            min="100000"
+            max="999999"
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Shop Address:</label>
+          <textarea 
+            className="form-input" 
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            rows="3"
+            placeholder="Complete shop address"
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">License Number: *</label>
+          <input 
+            type="text" 
+            className="form-input" 
+            value={licenseNumber}
+            onChange={(e) => setLicenseNumber(e.target.value)}
+            placeholder="Wine shop license number (required for login)"
+            required
           />
         </div>
         <button 
