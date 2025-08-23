@@ -360,17 +360,13 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ message: 'Name, email, password, shop name, and license number are required' });
     }
     
-    // Check if user already exists
-    const existingUser = await dbService.findUserByEmail(email);
-    if (existingUser) {
-      return res.status(400).json({ message: 'User with this email already exists' });
-    }
-
-    // Check if license number already exists
+    // Check if license number already exists (each shop must have unique license)
     const existingLicense = await dbService.findUserByLicenseNumber(licenseNumber);
     if (existingLicense) {
       return res.status(400).json({ message: 'This license number is already registered' });
     }
+
+    // Note: We allow same email for multiple shops (one user can own multiple wine shops)
     
     // Hash password
     const saltRounds = 10;
