@@ -9,17 +9,29 @@ class DatabaseService {
     try {
       await client.query('BEGIN');
       
-      // Create user first
-      const userQuery = `
-        INSERT INTO users (name, email, password)
-        VALUES ($1, $2, $3)
-        RETURNING id, name, email, created_at
-      `;
-      const userValues = [name, email, password];
-      const userResult = await client.query(userQuery, userValues);
-      const user = userResult.rows[0];
+      // Check if user already exists, if so use existing user
+      let user;
+      const existingUserQuery = 'SELECT id, name, email, created_at FROM users WHERE email = $1';
+      const existingUserResult = await client.query(existingUserQuery, [email]);
       
-      // Create shop for the user
+      if (existingUserResult.rows.length > 0) {
+        // User exists, use existing user for new shop
+        user = existingUserResult.rows[0];
+        console.log(`Using existing user ${user.email} for new shop: ${shopName}`);
+      } else {
+        // Create new user
+        const userQuery = `
+          INSERT INTO users (name, email, password)
+          VALUES ($1, $2, $3)
+          RETURNING id, name, email, created_at
+        `;
+        const userValues = [name, email, password];
+        const userResult = await client.query(userQuery, userValues);
+        user = userResult.rows[0];
+        console.log(`Created new user ${user.email}`);
+      }
+      
+      // Create shop for the user (new or existing)
       const shopQuery = `
         INSERT INTO shops (user_id, shop_name, address, license_number, gazette_code)
         VALUES ($1, $2, $3, $4, $5)
