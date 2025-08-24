@@ -42,7 +42,7 @@ CREATE TABLE shops (
     shop_name VARCHAR(255) NOT NULL,
     address TEXT,
     license_number VARCHAR(100),
-    retailer_code VARCHAR(6) NOT NULL CHECK (retailer_code ~ '^\d{6}$'),
+    retailer_code VARCHAR(7) NOT NULL CHECK (retailer_code ~ '^\d{7}$'),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

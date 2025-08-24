@@ -308,9 +308,9 @@ app.post('/api/login', async (req, res) => {
  try {
    const { retailerCode, password } = req.body;
    
-   // Validate retailer code format (exactly 6 digits)
-   if (!retailerCode || !/^\d{6}$/.test(retailerCode)) {
-     return res.status(400).json({ message: 'Retailer code must be exactly 6 digits' });
+   // Validate retailer code format (exactly 7 digits)
+   if (!retailerCode || !/^\d{7}$/.test(retailerCode)) {
+     return res.status(400).json({ message: 'Retailer code must be exactly 7 digits' });
    }
    
    const user = await dbService.findUserByRetailerCode(retailerCode);
@@ -365,9 +365,9 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ message: 'Name, email, password, shop name, and retailer code are required' });
     }
     
-    // Validate retailer code format (exactly 6 digits)
-    if (!/^\d{6}$/.test(retailerCode)) {
-      return res.status(400).json({ message: 'Retailer code must be exactly 6 digits' });
+    // Validate retailer code format (exactly 7 digits)
+    if (!/^\d{7}$/.test(retailerCode)) {
+      return res.status(400).json({ message: 'Retailer code must be exactly 7 digits' });
     }
     
     // Check if retailer code already exists (each shop must have unique retailer code)

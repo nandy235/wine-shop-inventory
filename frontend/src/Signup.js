@@ -103,13 +103,13 @@ function Signup({ onLogin }) {
             value={retailerCode}
             onChange={(e) => {
               const value = e.target.value.replace(/\D/g, ''); // Only allow digits
-              if (value.length <= 6) {
+              if (value.length <= 7) {
                 setRetailerCode(value);
               }
             }}
-            placeholder="6-digit number (e.g., 123456)"
-            maxLength="6"
-            pattern="[0-9]{6}"
+            placeholder="7-digit number (e.g., 1234567)"
+            maxLength="7"
+            pattern="[0-9]{7}"
             inputMode="numeric"
             required
             style={{
