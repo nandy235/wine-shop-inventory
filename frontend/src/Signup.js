@@ -7,7 +7,7 @@ function Signup({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [shopName, setShopName] = useState('');
-  const [gazetteCode, setGazetteCode] = useState('');
+  const [retailerCode, setRetailerCode] = useState('');
   const [address, setAddress] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [error, setError] = useState('');
@@ -32,7 +32,7 @@ function Signup({ onLogin }) {
           email, 
           password, 
           shopName, 
-          gazetteCode, 
+          retailerCode, 
           address, 
           licenseNumber 
         })
@@ -96,21 +96,22 @@ function Signup({ onLogin }) {
           />
         </div>
         <div className="form-group">
-          <label className="form-label">Gazette Code:</label>
+          <label className="form-label">Retailer Code: *</label>
           <input 
             type="number" 
             className="form-input" 
-            value={gazetteCode}
+            value={retailerCode}
             onChange={(e) => {
               const value = e.target.value;
               if (value.length <= 6) {
-                setGazetteCode(value);
+                setRetailerCode(value);
               }
             }}
             placeholder="6-digit number (e.g., 123456)"
             maxLength="6"
             min="100000"
             max="999999"
+            required
           />
         </div>
         <div className="form-group">

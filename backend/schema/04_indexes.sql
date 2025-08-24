@@ -34,7 +34,7 @@ DROP INDEX IF EXISTS idx_payments_shop_date CASCADE;
 -- User and Shop lookups
 CREATE INDEX idx_shops_user ON shops(user_id);
 CREATE INDEX idx_shops_active ON shops(user_id) WHERE shop_name IS NOT NULL;
-CREATE INDEX idx_shops_gazette_code ON shops(gazette_code) WHERE gazette_code IS NOT NULL;
+CREATE UNIQUE INDEX idx_shops_retailer_code ON shops(retailer_code);
 CREATE INDEX idx_shops_license_number ON shops(license_number) WHERE license_number IS NOT NULL;
 
 -- Master brands lookup (most common queries)

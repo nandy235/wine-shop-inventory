@@ -3,7 +3,7 @@ const { pool } = require('./database');
 class DatabaseService {
   // User Management - Updated for new normalized schema
   async createUser(userData) {
-    const { name, email, password, shopName, gazetteCode, address, licenseNumber } = userData;
+    const { name, email, password, shopName, retailerCode, address, licenseNumber } = userData;
     const client = await pool.connect();
     
     try {
@@ -33,11 +33,11 @@ class DatabaseService {
       
       // Create shop for the user (new or existing)
       const shopQuery = `
-        INSERT INTO shops (user_id, shop_name, address, license_number, gazette_code)
+        INSERT INTO shops (user_id, shop_name, address, license_number, retailer_code)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, shop_name, address, license_number, gazette_code, created_at
+        RETURNING id, shop_name, address, license_number, retailer_code, created_at
       `;
-      const shopValues = [user.id, shopName, address || null, licenseNumber || null, gazetteCode || null];
+      const shopValues = [user.id, shopName, address || null, licenseNumber || null, retailerCode];
       const shopResult = await client.query(shopQuery, shopValues);
       const shop = shopResult.rows[0];
       
@@ -50,7 +50,7 @@ class DatabaseService {
         email: user.email,
         shop_name: shop.shop_name,
         shop_id: shop.id,
-        gazette_code: shop.gazette_code,
+        retailer_code: shop.retailer_code,
         address: shop.address,
         license_number: shop.license_number,
         created_at: user.created_at
@@ -103,7 +103,7 @@ class DatabaseService {
     const query = `
       SELECT 
         u.id, u.name, u.email, u.password, u.created_at,
-        s.id as shop_id, s.shop_name, s.address, s.license_number, s.gazette_code
+        s.id as shop_id, s.shop_name, s.address, s.license_number, s.retailer_code
       FROM users u
       JOIN shops s ON s.user_id = u.id
       WHERE s.license_number = $1
@@ -122,13 +122,46 @@ class DatabaseService {
         password: user.password,
         shop_name: user.shop_name,
         shop_id: user.shop_id,
-        gazette_code: user.gazette_code,
+        retailer_code: user.retailer_code,
         address: user.address,
         license_number: user.license_number,
         created_at: user.created_at
       };
     } catch (error) {
       throw new Error(`Error finding user by license number: ${error.message}`);
+    }
+  }
+
+  async findUserByRetailerCode(retailerCode) {
+    const query = `
+      SELECT 
+        u.id, u.name, u.email, u.password, u.created_at,
+        s.id as shop_id, s.shop_name, s.address, s.license_number, s.retailer_code
+      FROM users u
+      JOIN shops s ON s.user_id = u.id
+      WHERE s.retailer_code = $1
+    `;
+    
+    try {
+      const result = await pool.query(query, [retailerCode]);
+      const user = result.rows[0];
+      if (!user) return null;
+      
+      // Format for compatibility with existing code
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        password: user.password,
+        shop_name: user.shop_name,
+        shop_id: user.shop_id,
+        retailer_code: user.retailer_code,
+        address: user.address,
+        license_number: user.license_number,
+        created_at: user.created_at
+      };
+    } catch (error) {
+      throw new Error(`Error finding user by retailer code: ${error.message}`);
     }
   }
 

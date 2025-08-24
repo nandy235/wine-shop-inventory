@@ -3,7 +3,7 @@ import './Login.css';
 import API_BASE_URL from './config';
 
 function Login({ onLogin, onSignup }) {
-  const [licenseNumber, setLicenseNumber] = useState('');
+  const [retailerCode, setRetailerCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ function Login({ onLogin, onSignup }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ licenseNumber, password })
+        body: JSON.stringify({ retailerCode, password })
       });
 
       const data = await response.json();
@@ -41,13 +41,21 @@ function Login({ onLogin, onSignup }) {
         <h1 className="login-title">Liquor Ledger</h1>
         {error && <div style={{color: 'red', marginBottom: '10px'}}>{error}</div>}
         <div className="form-group">
-          <label className="form-label">License Number:</label>
+          <label className="form-label">Retailer Code:</label>
           <input 
-            type="text" 
+            type="number" 
             className="form-input" 
-            value={licenseNumber}
-            onChange={(e) => setLicenseNumber(e.target.value)}
-            placeholder="Enter your wine shop license number"
+            value={retailerCode}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value.length <= 6) {
+                setRetailerCode(value);
+              }
+            }}
+            placeholder="6-digit number (e.g., 123456)"
+            maxLength="6"
+            min="100000"
+            max="999999"
           />
         </div>
         <div className="form-group">

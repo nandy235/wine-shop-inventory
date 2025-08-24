@@ -306,11 +306,16 @@ app.get('/api/invoices', authenticateToken, async (req, res) => {
 // Auth endpoints
 app.post('/api/login', async (req, res) => {
  try {
-   const { licenseNumber, password } = req.body;
+   const { retailerCode, password } = req.body;
    
-   const user = await dbService.findUserByLicenseNumber(licenseNumber);
+   // Validate retailer code format (exactly 6 digits)
+   if (!retailerCode || !/^\d{6}$/.test(retailerCode)) {
+     return res.status(400).json({ message: 'Retailer code must be exactly 6 digits' });
+   }
+   
+   const user = await dbService.findUserByRetailerCode(retailerCode);
    if (!user) {
-     return res.status(400).json({ message: 'Invalid license number or password' });
+     return res.status(400).json({ message: 'Invalid retailer code or password' });
    }
    
    const isValidPassword = await bcrypt.compare(password, user.password);
@@ -353,17 +358,22 @@ app.get('/api/verify-token', authenticateToken, (req, res) => {
 
 app.post('/api/register', async (req, res) => {
   try {
-    const { name, email, password, shopName, gazetteCode, address, licenseNumber } = req.body;
+    const { name, email, password, shopName, retailerCode, address, licenseNumber } = req.body;
     
     // Validation
-    if (!name || !email || !password || !shopName || !licenseNumber) {
-      return res.status(400).json({ message: 'Name, email, password, shop name, and license number are required' });
+    if (!name || !email || !password || !shopName || !retailerCode) {
+      return res.status(400).json({ message: 'Name, email, password, shop name, and retailer code are required' });
     }
     
-    // Check if license number already exists (each shop must have unique license)
-    const existingLicense = await dbService.findUserByLicenseNumber(licenseNumber);
-    if (existingLicense) {
-      return res.status(400).json({ message: 'This license number is already registered' });
+    // Validate retailer code format (exactly 6 digits)
+    if (!/^\d{6}$/.test(retailerCode)) {
+      return res.status(400).json({ message: 'Retailer code must be exactly 6 digits' });
+    }
+    
+    // Check if retailer code already exists (each shop must have unique retailer code)
+    const existingRetailerCode = await dbService.findUserByRetailerCode(retailerCode);
+    if (existingRetailerCode) {
+      return res.status(400).json({ message: 'This retailer code is already registered' });
     }
 
     // Note: We allow same email for multiple shops (one user can own multiple wine shops)
@@ -378,7 +388,7 @@ app.post('/api/register', async (req, res) => {
       email: email.trim().toLowerCase(),
       password: hashedPassword,
       shopName: shopName.trim(),
-      gazetteCode: gazetteCode?.trim() || null,
+      retailerCode: retailerCode?.trim(),
       address: address?.trim() || null,
       licenseNumber: licenseNumber?.trim() || null
     });
