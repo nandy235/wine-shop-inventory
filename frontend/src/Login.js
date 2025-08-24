@@ -43,19 +43,24 @@ function Login({ onLogin, onSignup }) {
         <div className="form-group">
           <label className="form-label">Retailer Code:</label>
           <input 
-            type="number" 
+            type="text" 
             className="form-input" 
             value={retailerCode}
             onChange={(e) => {
-              const value = e.target.value;
+              const value = e.target.value.replace(/\D/g, ''); // Only allow digits
               if (value.length <= 6) {
                 setRetailerCode(value);
               }
             }}
             placeholder="6-digit number (e.g., 123456)"
             maxLength="6"
-            min="100000"
-            max="999999"
+            pattern="[0-9]{6}"
+            inputMode="numeric"
+            style={{
+              MozAppearance: 'textfield',
+              WebkitAppearance: 'none',
+              appearance: 'none'
+            }}
           />
         </div>
         <div className="form-group">

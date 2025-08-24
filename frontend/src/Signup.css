@@ -41,6 +41,17 @@
   font-size: 16px;
 }
 
+/* Remove number input spinners/arrows */
+.form-input[type="text"]::-webkit-outer-spin-button,
+.form-input[type="text"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.form-input[type="text"] {
+  -moz-appearance: textfield;
+}
+
 .signup-button {
   width: 100%;
   padding: 12px;
