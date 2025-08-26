@@ -22,7 +22,8 @@ function StockOnboarding({ onNavigate }) {
 
   const fetchMasterBrands = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/master-brands`, {
+      // Only fetch brands with pack types G, B, C for stock onboarding
+      const response = await fetch(`${API_BASE_URL}/api/master-brands?packTypes=G,B,C`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -163,7 +164,7 @@ function StockOnboarding({ onNavigate }) {
               className="view-btn"
               onClick={() => onNavigate('viewCurrentStock')}
             >
-              Received Stock
+              Current Stock
             </button>
           </div>
         </div>
@@ -246,7 +247,7 @@ function StockOnboarding({ onNavigate }) {
                     Total: {cases} cases + {bottles} bottles = <strong>{calculateTotalBottles()} total bottles</strong>
                   </p>
                   <p className="calc-price">
-                    Final Price: ₹{(currentProduct.mrp + markup).toFixed(2)} per bottle
+                    Final Price: ₹{(parseFloat(currentProduct.mrp || 0) + parseFloat(markup || 0)).toFixed(2)} per bottle
                   </p>
                   <p className="calc-note">
                     This will be added to <strong>"Received"</strong> in today's stock records

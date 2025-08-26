@@ -6,17 +6,74 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const masterBrandsData = require('./data/masterBrands.json');
+// Load master brands from database instead of JSON file
+let masterBrandsData = [];
+
+async function loadMasterBrandsFromDB(packTypeFilter = null) {
+  try {
+    const { pool } = require('./database');
+    
+    let query = `
+      SELECT 
+        id,
+        brand_number as "brandNumber",
+        brand_name as name,
+        size_ml as size,
+        size_code as "sizeCode",
+        product_type as "productType",
+        pack_type as "packType",
+        pack_quantity as "packQuantity",
+        standard_mrp as mrp,
+        issue_price as "issuePrice",
+        special_margin as "specialMargin",
+        special_excise_cess as "specialExciseCess",
+        brand_kind as "brandKind",
+        CASE 
+          WHEN product_type = 'IML' THEN 'IML'
+          WHEN product_type = 'DUTY_PAID' THEN 'Duty Paid'
+          WHEN product_type = 'BEER' THEN 'Beer'
+          WHEN product_type = 'DUTY_FREE' THEN 'Duty Free'
+          ELSE product_type
+        END as category,
+        is_active
+      FROM master_brands 
+      WHERE is_active = true`;
+    
+    const queryParams = [];
+    
+    if (packTypeFilter && packTypeFilter.length > 0) {
+      query += ` AND pack_type = ANY($1)`;
+      queryParams.push(packTypeFilter);
+    }
+    
+    query += ` ORDER BY brand_number, size_ml`;
+    
+    const result = await pool.query(query, queryParams);
+    
+    const loadedData = result.rows;
+    console.log(`✅ Loaded ${loadedData.length} master brands from database${packTypeFilter ? ` (filtered by pack types: ${packTypeFilter.join(', ')})` : ''}`);
+    
+    // Only update global cache if loading all brands
+    if (!packTypeFilter) {
+      masterBrandsData = loadedData;
+    }
+    
+    return loadedData;
+  } catch (error) {
+    console.error('❌ Failed to load master brands from database:', error.message);
+    return packTypeFilter ? [] : masterBrandsData;
+  }
+}
 // Import the enhanced invoice parser
 const HybridInvoiceParser = require('./invoiceParser');
 const invoiceParser = new HybridInvoiceParser();
 // Import database service
 const dbService = require('./databaseService');
 
-// Helper function for formatting size
+// Helper function for formatting size - must match invoiceParser format
 const formatSize = (sizeCode, size) => {
   if (sizeCode && size) {
-    return `${size}${sizeCode}`;
+    return `${sizeCode}(${size})`;
   }
   return size || '';
 };
@@ -101,10 +158,14 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
 
     console.log(`📄 Processing PDF: ${req.file.originalname} (${req.file.size} bytes)`);
 
+    // Load fresh master brands from database for validation
+    const masterBrands = await loadMasterBrandsFromDB();
+    console.log(`📚 Loaded ${masterBrands.length} master brands from database for validation`);
+
     // Parse the PDF using your hybrid parser with masterBrands validation
     const parseResult = await invoiceParser.parseInvoiceWithValidation(
       req.file.buffer, 
-      masterBrandsData // Your loaded masterBrands.json
+      masterBrands // Master brands loaded from database
     );
 
     if (!parseResult.success) {
@@ -132,6 +193,7 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
       date: parseResult.data.date,
       totalAmount: parseResult.data.totalAmount,
       netInvoiceValue: parseResult.data.netInvoiceValue,
+      mrpRoundingOff: parseResult.data.mrpRoundingOff,
       retailExciseTax: parseResult.data.retailExciseTax,
       specialExciseCess: parseResult.data.specialExciseCess,
       tcs: parseResult.data.tcs,
@@ -163,7 +225,15 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'No invoice data or items provided' });
     }
 
-    console.log(`👤 User: ${userId}`);
+    // Get shop_id from user_id
+    const { pool } = require('./database');
+    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+    if (shopQuery.rows.length === 0) {
+      return res.status(404).json({ message: 'Shop not found for user' });
+    }
+    const shopId = shopQuery.rows[0].shop_id;
+
+    console.log(`👤 User: ${userId}, Shop: ${shopId}`);
     console.log(`📅 Date: ${today}`);
     console.log(`📦 Items to process: ${invoiceData.items.length}`);
 
@@ -178,11 +248,18 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
         console.log(`\n📄 Processing: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
 
         // Check if product exists in shop inventory
-        let shopProduct = await dbService.getShopProducts(userId);
-        shopProduct = shopProduct.find(product => 
-          product.brand_number === item.brandNumber &&
-          formatSize(product.size_code, product.size) === item.formattedSize
-        );
+        let shopProducts = await dbService.getShopProducts(userId);
+        console.log(`🔍 Looking for: ${item.brandNumber} ${item.formattedSize}`);
+        console.log(`📦 Available products: ${shopProducts.length}`);
+        
+        let shopProduct = shopProducts.find(product => {
+          const productFormattedSize = formatSize(product.sizeCode, product.size);
+          const matches = product.brandNumber === item.brandNumber && productFormattedSize === item.formattedSize;
+          if (matches) {
+            console.log(`✅ Match found: ${product.brandNumber} ${productFormattedSize}`);
+          }
+          return matches;
+        });
 
         // If not in inventory, add it (using masterBrand data)
         if (!shopProduct) {
@@ -190,32 +267,28 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
           
           const newShopProduct = await dbService.addShopProduct({
             masterBrandId: item.masterBrandId,
-            name: item.description,
-            brandNumber: item.brandNumber,
-            category: item.category,
-            packQuantity: item.packQty || 1,
-            size: item.size.replace('ml', ''),
-            sizeCode: item.sizeCode,
-            mrp: item.mrp,
-            shopMarkup: 0, // Default markup
+            shopId: shopId,
+            markupPrice: 0, // Default markup
             finalPrice: item.mrp, // Can be updated later
-            userId
+            currentQuantity: item.totalQuantity
           });
           
           shopProduct = newShopProduct;
           addedToInventory++;
+        } else {
+          // Product exists, update quantity
+          console.log(`📦 Updating existing product quantity: ${item.brandNumber}`);
+          await dbService.updateShopProductQuantity(shopId, item.masterBrandId, item.totalQuantity, null, null);
         }
 
         // Create or update daily stock record for received quantity
         const stockRecord = await dbService.createOrUpdateDailyStockRecord({
-          userId,
-          date: today,
-          brandNumber: item.brandNumber,
-          brandName: item.description,
-          size: item.formattedSize,
-          price: shopProduct.final_price,
-          received: item.totalQuantity, // received quantity
-          closingStock: null // let closing stock auto-calculate
+          shopInventoryId: shopProduct.id,
+          stockDate: today,
+          openingStock: 0, // Will be handled by the UPSERT logic
+          receivedStock: item.totalQuantity,
+          closingStock: null, // Will auto-calculate
+          pricePerUnit: shopProduct.final_price
         });
 
         updatedCount++;
@@ -224,11 +297,11 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
           description: item.description,
           size: item.formattedSize,
           receivedQuantity: item.totalQuantity,
-          newTotal: stockRecord.total,
+          newTotal: (stockRecord.opening_stock || 0) + (stockRecord.received_stock || 0),
           newClosing: stockRecord.closing_stock
         });
 
-        console.log(`✅ Updated: ${item.brandNumber} - Received: ${item.totalQuantity}, Total: ${stockRecord.total}`);
+        console.log(`✅ Updated: ${item.brandNumber} - Received: ${item.totalQuantity}, Opening: ${stockRecord.opening_stock}, Received: ${stockRecord.received_stock}`);
 
       } catch (itemError) {
         console.error(`❌ Error processing item ${item.brandNumber}:`, itemError);
@@ -239,20 +312,21 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       }
     }
 
-    // Save the invoice record for future reference
-    const invoiceRecord = await dbService.saveInvoice({
+    // Save the invoice record AND individual items to database
+    const invoiceRecord = await dbService.saveInvoiceWithItems({
       userId,
       invoiceNumber: invoiceData.invoiceNumber,
       date: invoiceData.date,
       uploadDate: today,
       totalValue: invoiceData.totalAmount,
       netInvoiceValue: invoiceData.netInvoiceValue,
+      mrpRoundingOff: invoiceData.mrpRoundingOff,
       retailExciseTax: invoiceData.retailExciseTax,
       specialExciseCess: invoiceData.specialExciseCess,
       tcs: invoiceData.tcs,
       itemsCount: invoiceData.items.length,
       processedItemsCount: updatedCount
-    });
+    }, invoiceData.items); // Pass the validated items
 
     console.log(`\n🎉 Invoice processing completed!`);
     console.log(`   ✅ Items processed: ${updatedCount}`);
@@ -278,9 +352,11 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Invoice confirmation error:', error);
+    console.error('❌ Stack trace:', error.stack);
     res.status(500).json({ 
       message: 'Server error during invoice confirmation', 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -423,9 +499,27 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   }
 });
 
-// Master brands endpoint
-app.get('/api/master-brands', authenticateToken, (req, res) => {
- res.json(masterBrandsData);
+// Master brands endpoint - always get fresh data from database
+app.get('/api/master-brands', authenticateToken, async (req, res) => {
+  try {
+    // Check if filtering by pack types for stock onboarding
+    const { packTypes } = req.query;
+    
+    if (packTypes) {
+      // Filter for stock onboarding (G, B, C pack types only)
+      const allowedPackTypes = packTypes.split(',').map(p => p.trim());
+      const freshMasterBrands = await loadMasterBrandsFromDB(allowedPackTypes);
+      res.json(freshMasterBrands);
+    } else {
+      // Get all master brands
+      const freshMasterBrands = await loadMasterBrandsFromDB();
+      res.json(freshMasterBrands);
+    }
+  } catch (error) {
+    console.error('Error fetching master brands:', error);
+    // Fallback to cached data if available
+    res.json(masterBrandsData);
+  }
 });
 
 // Shop product management
@@ -435,48 +529,83 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
    const userId = req.user.userId;
    const today = new Date().toISOString().split('T')[0];
    
-   const masterBrand = masterBrandsData.find(brand => brand.id === parseInt(masterBrandId));
-   if (!masterBrand) {
+   // Get user's shop_id
+   const { pool } = require('./database');
+   const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+   if (shopQuery.rows.length === 0) {
+     return res.status(404).json({ message: 'Shop not found for user' });
+   }
+   const shopId = shopQuery.rows[0].shop_id;
+   
+   // Get master brand from database
+   const masterBrandResult = await pool.query(`
+     SELECT 
+       id,
+       brand_number,
+       brand_name,
+       size_ml,
+       size_code,
+       standard_mrp,
+       product_type,
+       brand_kind,
+       CASE 
+         WHEN product_type = 'IML' THEN 'IML'
+         WHEN product_type = 'DUTY_PAID' THEN 'Duty Paid'
+         WHEN product_type = 'BEER' THEN 'Beer'
+         WHEN product_type = 'DUTY_FREE' THEN 'Duty Free'
+         ELSE product_type
+       END as category
+     FROM master_brands 
+     WHERE id = $1 AND is_active = true
+   `, [masterBrandId]);
+   
+   if (masterBrandResult.rows.length === 0) {
      return res.status(404).json({ message: 'Brand not found in master database' });
    }
    
-   const finalPrice = masterBrand.mrp + parseFloat(shopMarkup);
-   const formattedSize = formatSize(masterBrand.sizeCode, masterBrand.size);
+   const masterBrand = masterBrandResult.rows[0];
+   const markupPrice = parseFloat(shopMarkup);
+   const finalPrice = masterBrand.standard_mrp + markupPrice;
+   const receivedQuantity = parseInt(quantity);
    
-   const existingProduct = await dbService.getShopProducts(userId);
-   const productExists = existingProduct.find(item => item.master_brand_id === parseInt(masterBrandId));
+   // Add or update product using UPSERT (handles both new and existing products)
+   const productResult = await dbService.addShopProduct({
+     masterBrandId: parseInt(masterBrandId),
+     shopId: shopId,
+     markupPrice: markupPrice,
+     finalPrice: finalPrice,
+     currentQuantity: receivedQuantity
+   });
    
-   if (!productExists) {
-     await dbService.addShopProduct({
-       masterBrandId: masterBrand.id,
-       name: masterBrand.name,
-       brandNumber: masterBrand.brandNumber,
-       category: masterBrand.category,
-       packQuantity: masterBrand.packQuantity,
-       size: masterBrand.size,
-       sizeCode: masterBrand.sizeCode,
-       mrp: masterBrand.mrp,
-       shopMarkup: parseFloat(shopMarkup),
-       finalPrice: finalPrice,
-       userId
-     });
+   const shopInventoryId = productResult.id;
+   const wasUpdated = productResult.action === 'updated';
+   
+   if (wasUpdated) {
+     console.log(`✅ Updated existing product: ${masterBrand.brand_name} (${masterBrand.size_ml}ml)`);
+     console.log(`   Added quantity: ${receivedQuantity}, New total: ${productResult.current_quantity}`);
+   } else {
+     console.log(`✅ Added new product: ${masterBrand.brand_name} (${masterBrand.size_ml}ml) - Quantity: ${receivedQuantity}`);
    }
-   
-   await dbService.createOrUpdateDailyStockRecord({
-     userId,
-     date: today,
-     brandNumber: masterBrand.brandNumber,
-     brandName: masterBrand.name,
-     size: formattedSize,
-     price: finalPrice,
-     received: parseInt(quantity),
-     closingStock: null
+  
+  // Add to daily stock records (received column)
+  await dbService.createOrUpdateDailyStockRecord({
+    shopInventoryId: shopInventoryId,
+     stockDate: today,
+     openingStock: 0,
+     receivedStock: receivedQuantity,
+     closingStock: null,
+     pricePerUnit: finalPrice
    });
    
    res.status(201).json({ 
-     message: 'received quantity updated',
-     brandNumber: masterBrand.brandNumber,
-     receivedQuantity: parseInt(quantity)
+     message: wasUpdated ? 'Product quantity updated' : 'New product added',
+     brandNumber: masterBrand.brand_number,
+     brandName: masterBrand.brand_name,
+     size: `${masterBrand.size_code}(${masterBrand.size_ml}ml)`,
+     receivedQuantity: receivedQuantity,
+     finalPrice: finalPrice,
+     isNewProduct: !wasUpdated,
+     totalQuantity: productResult.current_quantity
    });
  } catch (error) {
    console.error('Error adding shop product:', error);
@@ -517,18 +646,55 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
    const { quantity, finalPrice } = req.body;
    const userId = req.user.userId;
    
-   const shopMarkup = finalPrice ? parseFloat(finalPrice) - 0 : undefined; // You'll need to get MRP from database
+   // Get shop_id from user_id
+   const { pool } = require('./database');
+   const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+   if (shopQuery.rows.length === 0) {
+     return res.status(404).json({ message: 'Shop not found for user' });
+   }
+   const shopId = shopQuery.rows[0].shop_id;
    
-   const result = await dbService.updateShopProduct(id, userId, {
-     quantity,
-     finalPrice: finalPrice ? parseFloat(finalPrice) : undefined,
-     shopMarkup
-   });
+   // Get current product to calculate markup
+   const currentProduct = await pool.query(`
+     SELECT si.*, mb.standard_mrp 
+     FROM shop_inventory si 
+     JOIN master_brands mb ON si.master_brand_id = mb.id 
+     WHERE si.id = $1 AND si.shop_id = $2
+   `, [id, shopId]);
    
-   res.json({ 
-     message: 'Product updated - received quantity modified',
-     result
-   });
+   if (currentProduct.rows.length === 0) {
+     return res.status(404).json({ message: 'Product not found' });
+   }
+   
+   const product = currentProduct.rows[0];
+   const newFinalPrice = finalPrice ? parseFloat(finalPrice) : product.final_price;
+   const newMarkupPrice = newFinalPrice - product.standard_mrp;
+   const newQuantity = quantity !== undefined ? parseInt(quantity) : product.current_quantity;
+   
+   // Update the product
+   const updateQuery = `
+     UPDATE shop_inventory 
+     SET 
+       current_quantity = $1,
+       markup_price = $2,
+       final_price = $3,
+       last_updated = CURRENT_TIMESTAMP
+     WHERE id = $4 AND shop_id = $5
+     RETURNING *
+   `;
+   
+   const result = await pool.query(updateQuery, [
+     newQuantity, newMarkupPrice, newFinalPrice, id, shopId
+   ]);
+   
+   if (result.rows.length > 0) {
+     res.json({ 
+       message: 'Product updated successfully',
+       updatedProduct: result.rows[0]
+     });
+   } else {
+     res.status(404).json({ message: 'Product not found or not authorized' });
+   }
  } catch (error) {
    console.error('Error updating shop product:', error);
    res.status(500).json({ message: 'Server error', error: error.message });
@@ -540,14 +706,135 @@ app.delete('/api/shop/delete-product/:id', authenticateToken, async (req, res) =
     const { id } = req.params;
     const userId = req.user.userId;
     
-    const deletedProduct = await dbService.deleteShopProduct(id, userId);
+    // Get shop_id from user_id
+    const { pool } = require('./database');
+    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+    if (shopQuery.rows.length === 0) {
+      return res.status(404).json({ message: 'Shop not found for user' });
+    }
+    const shopId = shopQuery.rows[0].shop_id;
     
-    res.json({ 
-      message: 'Product deleted successfully',
-      deletedProduct
-    });
+    // Verify the product belongs to this shop
+    const productCheck = await pool.query(
+      'SELECT * FROM shop_inventory WHERE id = $1 AND shop_id = $2', 
+      [id, shopId]
+    );
+    
+    if (productCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Product not found or not authorized' });
+    }
+    
+    // Start transaction
+    await pool.query('BEGIN');
+    
+    try {
+      // 1. Delete from daily_stock_records (cascade delete)
+      await pool.query(
+        'DELETE FROM daily_stock_records WHERE shop_inventory_id = $1', 
+        [id]
+      );
+      
+      // 2. Delete from shop_inventory (hard delete)
+      const deleteResult = await pool.query(
+        'DELETE FROM shop_inventory WHERE id = $1 AND shop_id = $2 RETURNING *', 
+        [id, shopId]
+      );
+      
+      // Commit transaction
+      await pool.query('COMMIT');
+      
+      res.json({ 
+        message: 'Product completely deleted from inventory and stock records',
+        deletedProduct: deleteResult.rows[0]
+      });
+      
+    } catch (error) {
+      // Rollback transaction on error
+      await pool.query('ROLLBACK');
+      throw error;
+    }
+    
   } catch (error) {
     console.error('Error deleting shop product:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Update daily stock record (for editing Received and Price)
+app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params; // shop_inventory.id
+    const { receivedStock, finalPrice } = req.body;
+    const userId = req.user.userId;
+    
+    // Get shop_id from user_id
+    const { pool } = require('./database');
+    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+    if (shopQuery.rows.length === 0) {
+      return res.status(404).json({ message: 'Shop not found for user' });
+    }
+    const shopId = shopQuery.rows[0].shop_id;
+    
+    // Verify the shop_inventory item belongs to this shop
+    const inventoryCheck = await pool.query(`
+      SELECT si.*, mb.standard_mrp 
+      FROM shop_inventory si 
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      WHERE si.id = $1 AND si.shop_id = $2
+    `, [id, shopId]);
+    
+    if (inventoryCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Product not found or not authorized' });
+    }
+    
+    const product = inventoryCheck.rows[0];
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Update or create daily stock record
+    const upsertDailyStock = `
+      INSERT INTO daily_stock_records (
+        shop_inventory_id, stock_date, opening_stock, received_stock, price_per_unit
+      ) VALUES ($1, $2, 0, $3, $4)
+      ON CONFLICT (shop_inventory_id, stock_date) 
+      DO UPDATE SET 
+        received_stock = EXCLUDED.received_stock,
+        price_per_unit = EXCLUDED.price_per_unit
+      RETURNING *
+    `;
+    
+    const stockResult = await pool.query(upsertDailyStock, [
+      id, today, receivedStock || 0, finalPrice || 0
+    ]);
+    
+    // Update shop_inventory final_price and current_quantity
+    const newMarkupPrice = (finalPrice || 0) - product.standard_mrp;
+    const updateInventory = `
+      UPDATE shop_inventory 
+      SET 
+        markup_price = $1,
+        final_price = $2,
+        current_quantity = (
+          SELECT COALESCE(opening_stock, 0) + COALESCE(received_stock, 0)
+          FROM daily_stock_records 
+          WHERE shop_inventory_id = $3 AND stock_date = $4
+        ),
+        last_updated = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `;
+    
+    const inventoryResult = await pool.query(updateInventory, [
+      newMarkupPrice, finalPrice, id, today
+    ]);
+    
+    res.json({
+      message: 'Daily stock updated successfully',
+      dailyStock: stockResult.rows[0],
+      inventory: inventoryResult.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Error updating daily stock:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -630,6 +917,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     const dbConnected = await connectDB();
     if (dbConnected) {
       await initializeTables();
+      
+      // Load master brands from database
+      await loadMasterBrandsFromDB();
+      
       console.log('App initialized with PostgreSQL');
       console.log('Server connected to PostgreSQL database');
       console.log('Server is ready to accept requests');

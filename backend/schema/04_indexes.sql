@@ -9,6 +9,7 @@
 DROP INDEX IF EXISTS idx_shops_user CASCADE;
 DROP INDEX IF EXISTS idx_master_brands_lookup CASCADE;
 DROP INDEX IF EXISTS idx_master_brands_active CASCADE;
+DROP INDEX IF EXISTS idx_master_brands_kind CASCADE;
 DROP INDEX IF EXISTS idx_master_brands_similarity CASCADE;
 DROP INDEX IF EXISTS idx_shop_inventory_shop CASCADE;
 DROP INDEX IF EXISTS idx_shop_inventory_brand CASCADE;
@@ -41,6 +42,7 @@ CREATE INDEX idx_shops_license_number ON shops(license_number) WHERE license_num
 CREATE INDEX idx_master_brands_lookup ON master_brands(brand_number, size_ml);
 CREATE INDEX idx_master_brands_active ON master_brands(is_active, brand_number) WHERE is_active = true;
 CREATE INDEX idx_master_brands_type ON master_brands(product_type, is_active) WHERE is_active = true;
+CREATE INDEX idx_master_brands_kind ON master_brands(brand_kind) WHERE brand_kind IS NOT NULL;
 
 -- Shop inventory optimization (frequent joins and filters)
 CREATE INDEX idx_shop_inventory_shop ON shop_inventory(shop_id);

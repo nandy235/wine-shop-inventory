@@ -55,9 +55,10 @@ CREATE TABLE master_brands (
     brand_name VARCHAR(255) NOT NULL,
     size_code VARCHAR(10) NOT NULL,
     product_type VARCHAR(20) NOT NULL CHECK (product_type IN ('IML', 'BEER', 'DUTY_PAID', 'DUTY_FREE')),
-    pack_type CHAR(1) NOT NULL CHECK (pack_type IN ('G', 'P', 'C')),
+    pack_type CHAR(1) NOT NULL CHECK (pack_type IN ('G', 'P', 'C', 'B')),
     pack_quantity INTEGER NOT NULL DEFAULT 12,
     standard_mrp DECIMAL(10,2),
+    brand_kind VARCHAR(50), -- Product sub-category (WHISKY, WINE, BEER, etc.)
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(brand_number, size_ml),

@@ -5,7 +5,8 @@ import API_BASE_URL from './config';
 function Dashboard({ onNavigate }) {
   const [dashboardData, setDashboardData] = useState({
     stockValue: 0,
-    stockLifted: 0,
+    stockLiftedInvoiceValue: 0,
+    stockLiftedMrpValue: 0,
     todaysSale: 0,
     counterBalance: 0
   });
@@ -40,14 +41,16 @@ function Dashboard({ onNavigate }) {
         
         setDashboardData({
           stockValue: data.stockValue || 0,      
-          stockLifted: data.stockLifted || 0,
+          stockLiftedInvoiceValue: data.stockLiftedInvoiceValue || 0,
+          stockLiftedMrpValue: data.stockLiftedMrpValue || 0,
           todaysSale: data.totalSales || 0,      
           counterBalance: data.counterBalance || 0
         });
       } else {
         setDashboardData({
           stockValue: 0,
-          stockLifted: 0,
+          stockLiftedInvoiceValue: 0,
+          stockLiftedMrpValue: 0,
           todaysSale: 0,
           counterBalance: 0
         });
@@ -55,7 +58,8 @@ function Dashboard({ onNavigate }) {
     } catch (error) {
       setDashboardData({
         stockValue: 0,
-        stockLifted: 0,
+        stockLiftedInvoiceValue: 0,
+        stockLiftedMrpValue: 0,
         todaysSale: 0,
         counterBalance: 0
       });
@@ -132,8 +136,17 @@ function Dashboard({ onNavigate }) {
             <div className="metric-icon purple">📤</div>
             <div className="metric-info">
               <h3 className="metric-title">Stock Lifted</h3>
-              <p className="metric-value">{formatCurrency(dashboardData.stockLifted)}</p>
-              <p className="metric-subtitle">Total purchase value (incl. taxes)</p>
+              <div className="dual-value">
+                <div className="value-row">
+                  <span className="value-label">Invoice:</span>
+                  <span className="metric-value">{formatCurrency(dashboardData.stockLiftedInvoiceValue)}</span>
+                </div>
+                <div className="value-row">
+                  <span className="value-label">MRP:</span>
+                  <span className="metric-value">{formatCurrency(dashboardData.stockLiftedMrpValue)}</span>
+                </div>
+              </div>
+              <p className="metric-subtitle">This month's cumulative values</p>
             </div>
           </div>
           

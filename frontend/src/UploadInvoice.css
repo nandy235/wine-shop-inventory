@@ -97,6 +97,15 @@
   flex-direction: column;
   align-items: center;
   gap: 20px;
+  transition: all 0.3s ease;
+  border: 2px dashed transparent;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.upload-invoice-container .upload-area.drag-active {
+  border-color: #667eea;
+  background-color: rgba(102, 126, 234, 0.1);
 }
 
 .upload-invoice-container .upload-icon {
@@ -114,6 +123,13 @@
   color: #666;
   font-size: 14px;
   margin: 0;
+}
+
+.upload-invoice-container .drag-info {
+  color: #888;
+  font-size: 12px;
+  margin: 0;
+  font-style: italic;
 }
 
 .upload-invoice-container .file-select-btn {
@@ -225,6 +241,14 @@
 
 .upload-invoice-container .items-table tr:hover {
   background: #f8f9fa;
+}
+
+/* Serial number column styling */
+.upload-invoice-container .items-table th:first-child,
+.upload-invoice-container .items-table td:first-child {
+  width: 60px;
+  text-align: center;
+  font-weight: 600;
 }
 
 .upload-invoice-container .action-buttons {

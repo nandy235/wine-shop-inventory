@@ -7,6 +7,7 @@ function UploadInvoice({ onNavigate }) {
   const [uploading, setUploading] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
@@ -14,11 +15,69 @@ function UploadInvoice({ onNavigate }) {
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (file && file.type === 'application/pdf') {
-      setSelectedFile(file);
-      setParsedData(null);
+    console.log('File selected:', file); // Debug log
+    console.log('File type:', file?.type); // Debug log
+    console.log('File name:', file?.name); // Debug log
+    
+    if (file) {
+      // Check if it's a PDF file
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      console.log('Is PDF:', isPdf); // Debug log
+      
+      if (isPdf) {
+        console.log('Setting selected file...'); // Debug log
+        setSelectedFile(file);
+        setParsedData(null);
+        console.log('PDF file accepted:', file.name);
+        console.log('Selected file state should now be:', file); // Debug log
+      } else {
+        console.log('File rejected - not a PDF'); // Debug log
+        alert('Please select a PDF file');
+        // Clear the input
+        e.target.value = '';
+      }
     } else {
-      alert('Please select a PDF file');
+      console.log('No file selected'); // Debug log
+    }
+  };
+
+  const handleFileButtonClick = () => {
+    console.log('File button clicked'); // Debug log
+    const fileInput = document.getElementById('file-input');
+    console.log('File input element:', fileInput); // Debug log
+    if (fileInput) {
+      fileInput.click();
+    } else {
+      console.error('File input element not found');
+    }
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      console.log('File dropped:', file);
+      
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        setSelectedFile(file);
+        setParsedData(null);
+        console.log('PDF file accepted via drop:', file.name);
+      } else {
+        alert('Please select a PDF file');
+      }
     }
   };
 
@@ -83,12 +142,18 @@ function UploadInvoice({ onNavigate }) {
         // Navigate to view stock
         onNavigate('viewCurrentStock');
       } else {
-        const error = await response.json();
-        alert(`❌ Error: ${error.message}`);
+        try {
+          const error = await response.json();
+          console.error('Server error response:', error);
+          alert(`❌ Error: ${error.message || 'Server error during invoice confirmation'}`);
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+          alert(`❌ Server error (${response.status}): ${response.statusText}`);
+        }
       }
     } catch (error) {
       console.error('Error confirming invoice:', error);
-      alert('❌ Error processing invoice');
+      alert(`❌ Error processing invoice: ${error.message || 'Network error'}`);
     }
     setProcessing(false);
   };
@@ -131,22 +196,33 @@ function UploadInvoice({ onNavigate }) {
 
         <div className="upload-section">
           <div className="upload-card">
-            <div className="upload-area">
+            <div 
+              className={`upload-area ${dragActive ? 'drag-active' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
               <div className="upload-icon">📄</div>
               <h3>Select Invoice PDF</h3>
               <p className="upload-info">Upload your government invoice to automatically parse and add to received stock</p>
+              <p className="drag-info">You can also drag and drop a PDF file here</p>
               
               <input
                 type="file"
                 id="file-input"
-                accept=".pdf"
+                accept=".pdf,application/pdf"
                 onChange={handleFileSelect}
                 style={{ display: 'none' }}
               />
               
-              <label htmlFor="file-input" className="file-select-btn">
+              <button 
+                type="button"
+                className="file-select-btn"
+                onClick={handleFileButtonClick}
+              >
                 Choose PDF File
-              </label>
+              </button>
               
               {selectedFile && (
                 <div className="selected-file">
@@ -154,6 +230,7 @@ function UploadInvoice({ onNavigate }) {
                   <p className="file-size">Size: {(selectedFile.size / 1024).toFixed(2)} KB</p>
                 </div>
               )}
+
               
               <button 
                 className="upload-btn"
@@ -173,7 +250,8 @@ function UploadInvoice({ onNavigate }) {
                 <p><strong>Invoice Number:</strong> {parsedData.invoiceNumber}</p>
                 <p><strong>Date:</strong> {parsedData.date}</p>
                 <div className="financial-breakdown">
-                  <p><strong>Net Invoice Value:</strong> {formatCurrency(parsedData.netInvoiceValue)}</p>
+                  <p><strong>Invoice Value:</strong> {formatCurrency(parsedData.netInvoiceValue)}</p>
+                  <p><strong>MRP Rounding Off:</strong> {formatCurrency(parsedData.mrpRoundingOff)}</p>
                   <p><strong>Retail Excise Tax:</strong> {formatCurrency(parsedData.retailExciseTax)}</p>
                   <p><strong>Special Excise Cess:</strong> {formatCurrency(parsedData.specialExciseCess)}</p>
                   <p><strong>TCS:</strong> {formatCurrency(parsedData.tcs)}</p>
@@ -188,6 +266,7 @@ function UploadInvoice({ onNavigate }) {
                 <table>
                   <thead>
                     <tr>
+                      <th>S.No</th>
                       <th>Brand Number</th>
                       <th>Description</th>
                       <th>Size</th>
@@ -199,6 +278,7 @@ function UploadInvoice({ onNavigate }) {
                   <tbody>
                     {parsedData.items.map((item, index) => (
                       <tr key={index}>
+                        <td>{item.serial || (index + 1)}</td>
                         <td>{item.brandNumber}</td>
                         <td>{item.description}</td>
                         <td>{formatSize(item.sizeCode, item.size)}</td>

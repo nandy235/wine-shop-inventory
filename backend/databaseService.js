@@ -189,22 +189,25 @@ class DatabaseService {
 
   // Shop Inventory Management
   async addShopProduct(productData) {
-    const {
-      masterBrandId, name, brandNumber, category, packQuantity,
-      size, sizeCode, mrp, shopMarkup, finalPrice, userId
-    } = productData;
+    const { masterBrandId, shopId, markupPrice, finalPrice, currentQuantity } = productData;
     
+    // Use UPSERT to handle potential race conditions
     const query = `
       INSERT INTO shop_inventory 
-      (master_brand_id, user_id, name, brand_number, category, pack_quantity, size, size_code, mrp, shop_markup, final_price)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING *
+      (master_brand_id, shop_id, markup_price, final_price, current_quantity, is_active, last_updated)
+      VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
+      ON CONFLICT (shop_id, master_brand_id) 
+      DO UPDATE SET
+        current_quantity = shop_inventory.current_quantity + EXCLUDED.current_quantity,
+        markup_price = EXCLUDED.markup_price,
+        final_price = EXCLUDED.final_price,
+        is_active = true,
+        last_updated = CURRENT_TIMESTAMP
+      RETURNING *, 
+        CASE WHEN xmax = 0 THEN 'inserted' ELSE 'updated' END as action
     `;
     
-    const values = [
-      masterBrandId, userId, name, brandNumber, category, packQuantity,
-      size, sizeCode, mrp, shopMarkup, finalPrice
-    ];
+    const values = [masterBrandId, shopId, markupPrice, finalPrice, currentQuantity];
     
     try {
       const result = await pool.query(query, values);
@@ -214,22 +217,91 @@ class DatabaseService {
     }
   }
 
-  async getShopProducts(userId, date = null) {
+  async updateShopProductQuantity(shopId, masterBrandId, additionalQuantity, newMarkupPrice = null, newFinalPrice = null) {
     const query = `
-      SELECT si.*, 
-             COALESCE(dsr.closing_stock, 0) as quantity
-      FROM shop_inventory si
-      LEFT JOIN daily_stock_records dsr ON 
-        si.user_id = dsr.user_id AND 
-        si.brand_number = dsr.brand_number AND 
-        si.size = dsr.size AND
-        dsr.date = COALESCE($2, CURRENT_DATE)
-      WHERE si.user_id = $1
-      ORDER BY si.sort_order, si.brand_number
+      UPDATE shop_inventory 
+      SET 
+        current_quantity = current_quantity + $3,
+        markup_price = COALESCE($4, markup_price),
+        final_price = COALESCE($5, final_price),
+        last_updated = CURRENT_TIMESTAMP
+      WHERE shop_id = $1 AND master_brand_id = $2
+      RETURNING *
+    `;
+    
+    const values = [shopId, masterBrandId, additionalQuantity, newMarkupPrice, newFinalPrice];
+    
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error updating shop product quantity: ${error.message}`);
+    }
+  }
+
+  async findShopProduct(shopId, masterBrandId) {
+    const query = `
+      SELECT * FROM shop_inventory 
+      WHERE shop_id = $1 AND master_brand_id = $2 AND is_active = true
     `;
     
     try {
-      const result = await pool.query(query, [userId, date]);
+      const result = await pool.query(query, [shopId, masterBrandId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      throw new Error(`Error finding shop product: ${error.message}`);
+    }
+  }
+
+  async getShopProducts(userId, date = null) {
+    // First get shop_id from user_id
+    const shopQuery = `SELECT id as shop_id FROM shops WHERE user_id = $1`;
+    const shopResult = await pool.query(shopQuery, [userId]);
+    
+    if (shopResult.rows.length === 0) {
+      throw new Error('Shop not found for user');
+    }
+    
+    const shopId = shopResult.rows[0].shop_id;
+    
+    const query = `
+      SELECT 
+        si.id,
+        si.master_brand_id,
+        si.markup_price,
+        si.final_price as "finalPrice",
+        si.current_quantity as quantity,
+        si.is_active,
+        si.last_updated,
+        mb.standard_mrp as mrp,
+        mb.brand_number as "brandNumber",
+        mb.brand_name as name,
+        mb.size_ml as size,
+        mb.size_code as "sizeCode",
+        mb.brand_kind,
+        mb.product_type,
+        CASE 
+          WHEN mb.product_type = 'IML' THEN 'IML'
+          WHEN mb.product_type = 'DUTY_PAID' THEN 'Duty Paid'
+          WHEN mb.product_type = 'BEER' THEN 'Beer'
+          WHEN mb.product_type = 'DUTY_FREE' THEN 'Duty Free'
+          ELSE mb.product_type
+        END as category,
+        -- Get today's stock data
+        COALESCE(dsr.opening_stock, 0) as "openingStock",
+        COALESCE(dsr.received_stock, 0) as "receivedStock",
+        COALESCE(dsr.total_stock, 0) as "totalStock",
+        COALESCE(dsr.closing_stock, dsr.total_stock, 0) as "closingStock"
+      FROM shop_inventory si
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      LEFT JOIN daily_stock_records dsr ON si.id = dsr.shop_inventory_id 
+        AND dsr.stock_date = CURRENT_DATE
+      WHERE si.shop_id = $1 AND si.is_active = true
+      ORDER BY mb.brand_number, mb.size_ml
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId]);
       return result.rows;
     } catch (error) {
       throw new Error(`Error getting shop products: ${error.message}`);
@@ -315,78 +387,40 @@ class DatabaseService {
   // Daily Stock Records Management
   async createOrUpdateDailyStockRecord(recordData) {
     const {
-      userId, date, brandNumber, brandName, size, price,
-      received = 0, closingStock = null
+      shopInventoryId, stockDate, openingStock = 0, receivedStock = 0, 
+      closingStock = null, pricePerUnit = null
     } = recordData;
     
-    // Check if record exists
-    const existingQuery = `
-      SELECT * FROM daily_stock_records 
-      WHERE user_id = $1 AND date = $2 AND brand_number = $3 AND size = $4
-    `;
-    
     try {
-      const existingResult = await pool.query(existingQuery, [userId, date, brandNumber, size]);
-      let record = existingResult.rows[0];
+      // Use UPSERT to create or update the daily stock record
+      const upsertQuery = `
+        INSERT INTO daily_stock_records (
+          shop_inventory_id, stock_date, opening_stock, received_stock, 
+          closing_stock, price_per_unit
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (shop_inventory_id, stock_date) 
+        DO UPDATE SET 
+          opening_stock = CASE 
+            WHEN EXCLUDED.opening_stock > 0 THEN EXCLUDED.opening_stock 
+            ELSE daily_stock_records.opening_stock 
+          END,
+          received_stock = daily_stock_records.received_stock + EXCLUDED.received_stock,
+          closing_stock = COALESCE(EXCLUDED.closing_stock, daily_stock_records.closing_stock),
+          price_per_unit = COALESCE(EXCLUDED.price_per_unit, daily_stock_records.price_per_unit)
+        RETURNING *
+      `;
       
-      if (!record) {
-        // Get previous day's closing stock
-        const openingStock = await this.getPreviousDayClosingStock(userId, date, brandNumber, size);
-        
-        // Create new record
-        const insertQuery = `
-          INSERT INTO daily_stock_records 
-          (user_id, date, brand_number, brand_name, size, opening_stock, received, total, closing_stock, price, sale, sale_amount)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          RETURNING *
-        `;
-        
-        const total = openingStock + received;
-        const closing = closingStock !== null ? closingStock : total;
-        const sale = total - closing;
-        const saleAmount = sale * price;
-        
-        const values = [
-          userId, date, brandNumber, brandName, size, openingStock,
-          received, total, closing, price, sale, saleAmount
-        ];
-        
-        const insertResult = await pool.query(insertQuery, values);
-        record = insertResult.rows[0];
-      } else {
-        // Update existing record
-        if (received !== 0) record.received += received;
-        if (closingStock !== null) {
-          record.closing_stock = Math.max(0, Math.min(closingStock, record.total));
-        }
-        if (price !== 0) record.price = price;
-        
-        // Recalculate derived fields
-        record.total = record.opening_stock + record.received;
-        if (closingStock === null) {
-          record.closing_stock = record.total;
-        }
-        record.sale = record.total - record.closing_stock;
-        record.sale_amount = record.sale * record.price;
-        
-        const updateQuery = `
-          UPDATE daily_stock_records 
-          SET received = $1, total = $2, closing_stock = $3, price = $4, 
-              sale = $5, sale_amount = $6, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $7
-          RETURNING *
-        `;
-        
-        const values = [
-          record.received, record.total, record.closing_stock, record.price,
-          record.sale, record.sale_amount, record.id
-        ];
-        
-        const updateResult = await pool.query(updateQuery, values);
-        record = updateResult.rows[0];
-      }
+      const values = [
+        shopInventoryId, 
+        stockDate, 
+        openingStock, 
+        receivedStock, 
+        closingStock, 
+        pricePerUnit
+      ];
       
-      return record;
+      const result = await pool.query(upsertQuery, values);
+      return result.rows[0];
     } catch (error) {
       throw new Error(`Error managing daily stock record: ${error.message}`);
     }
@@ -486,22 +520,28 @@ class DatabaseService {
   // Invoice Management
   async saveInvoice(invoiceData) {
     const {
-      userId, invoiceNumber, date, uploadDate, totalValue,
-      netInvoiceValue, retailExciseTax, specialExciseCess, tcs,
-      itemsCount, processedItemsCount
+      userId, invoiceNumber, date, totalValue,
+      netInvoiceValue, retailExciseTax, specialExciseCess, tcs
     } = invoiceData;
+    
+    // Get shop_id from user_id
+    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+    if (shopQuery.rows.length === 0) {
+      throw new Error('Shop not found for user');
+    }
+    const shopId = shopQuery.rows[0].shop_id;
     
     const query = `
       INSERT INTO invoices 
-      (user_id, invoice_number, date, upload_date, total_value, net_invoice_value, 
-       retail_excise_tax, special_excise_cess, tcs, items_count, processed_items_count)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      (shop_id, icdc_number, invoice_date, invoice_value, 
+       retail_shop_excise_tax, special_excise_cess, tcs)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `;
     
     const values = [
-      userId, invoiceNumber, date, uploadDate, totalValue, netInvoiceValue,
-      retailExciseTax, specialExciseCess, tcs, itemsCount, processedItemsCount
+      shopId, invoiceNumber, date, totalValue,
+      retailExciseTax, specialExciseCess, tcs
     ];
     
     try {
@@ -512,15 +552,122 @@ class DatabaseService {
     }
   }
 
+  async saveInvoiceWithItems(invoiceData, items) {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // 1. Save invoice record
+      const {
+        userId, invoiceNumber, date, totalValue,
+        netInvoiceValue, mrpRoundingOff, retailExciseTax, specialExciseCess, tcs
+      } = invoiceData;
+      
+      // Get shop_id from user_id
+      const shopQuery = await client.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+      if (shopQuery.rows.length === 0) {
+        throw new Error('Shop not found for user');
+      }
+      const shopId = shopQuery.rows[0].shop_id;
+      
+      // Check if invoice already exists
+      const existingInvoiceQuery = `
+        SELECT id FROM invoices 
+        WHERE shop_id = $1 AND icdc_number = $2
+      `;
+      const existingInvoice = await client.query(existingInvoiceQuery, [shopId, invoiceNumber]);
+      
+      if (existingInvoice.rows.length > 0) {
+        throw new Error(`Invoice ${invoiceNumber} has already been processed for this shop. Each invoice can only be confirmed once.`);
+      }
+      
+      const invoiceQuery = `
+        INSERT INTO invoices 
+        (shop_id, icdc_number, invoice_date, invoice_value, mrp_rounding_off,
+         retail_shop_excise_tax, special_excise_cess, tcs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `;
+      
+      const invoiceValues = [
+        shopId, invoiceNumber, date, totalValue, mrpRoundingOff,
+        retailExciseTax, specialExciseCess, tcs
+      ];
+      
+      const invoiceResult = await client.query(invoiceQuery, invoiceValues);
+      const invoiceId = invoiceResult.rows[0].id;
+      
+      console.log(`💾 Invoice saved with ID: ${invoiceId}`);
+      
+      // 2. Save invoice items (invoice_brands)
+      if (items && items.length > 0) {
+        const itemQuery = `
+          INSERT INTO invoice_brands 
+          (invoice_id, brand_number, brand_name, product_type, size_ml, size_code, 
+           cases, bottles, pack_quantity, pack_type, unit_price, master_brand_id, 
+           match_confidence, match_method, matched_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `;
+        
+        for (const item of items) {
+          const itemValues = [
+            invoiceId,
+            item.brandNumber,
+            item.description || item.brandName,
+            item.productType || 'IML',
+            parseInt(item.size.replace('ml', '')), // Convert "750ml" to 750
+            item.sizeCode,
+            item.cases || 0,
+            item.bottles || 0,
+            item.packQty || 12,
+            item.packType || 'G', // Pack type (G, B, C, P)
+            item.unitPrice || null, // Can be null if not provided
+            item.masterBrandId || null, // Will be null for unmatched items
+            item.matched ? 95.0 : null, // High confidence for matched items
+            item.matched ? 'exact' : null, // Match method
+            item.matched ? new Date() : null // Matched timestamp
+          ];
+          
+          await client.query(itemQuery, itemValues);
+          console.log(`📦 Item saved: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
+        }
+        
+        console.log(`💾 Saved ${items.length} invoice items`);
+      }
+      
+      await client.query('COMMIT');
+      
+      return {
+        invoiceId: invoiceId,
+        itemsCount: items ? items.length : 0,
+        success: true
+      };
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Error saving invoice with items: ${error.message}`);
+    } finally {
+      client.release();
+    }
+  }
+
   async getInvoices(userId) {
+    // Get shop_id from user_id
+    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+    if (shopQuery.rows.length === 0) {
+      throw new Error('Shop not found for user');
+    }
+    const shopId = shopQuery.rows[0].shop_id;
+    
     const query = `
       SELECT * FROM invoices 
-      WHERE user_id = $1 
+      WHERE shop_id = $1 
       ORDER BY created_at DESC
     `;
     
     try {
-      const result = await pool.query(query, [userId]);
+      const result = await pool.query(query, [shopId]);
       return result.rows;
     } catch (error) {
       throw new Error(`Error getting invoices: ${error.message}`);
@@ -530,76 +677,161 @@ class DatabaseService {
   // Summary and Analytics
   async getSummary(userId, date) {
     try {
-      // Get today's stock records
-      const stockRecords = await this.getDailyStockRecords(userId, date);
+      // Get user's shop_id
+      const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
+      if (shopQuery.rows.length === 0) {
+        throw new Error('Shop not found for user');
+      }
+      const shopId = shopQuery.rows[0].shop_id;
       
-      // Calculate total sales
-      const totalSalesAmount = stockRecords.reduce((sum, record) => sum + (record.sale_amount || 0), 0);
+      // Get today's stock records with product details
+      const stockRecordsQuery = `
+        SELECT 
+          dsr.*,
+          mb.standard_mrp,
+          mb.brand_name,
+          mb.brand_number,
+          mb.size_ml
+        FROM daily_stock_records dsr
+        JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
+        JOIN master_brands mb ON si.master_brand_id = mb.id
+        WHERE si.shop_id = $1 AND dsr.stock_date = $2
+        ORDER BY mb.brand_number, mb.size_ml
+      `;
       
-      // Calculate stock value
+      const stockRecords = await pool.query(stockRecordsQuery, [shopId, date]);
+      
+      // Calculate metrics from current stock
       let stockValue = 0;
-      let recordsUsed = 0;
+      let totalSalesAmount = 0;
       
-      if (stockRecords.length > 0) {
-        for (const record of stockRecords) {
-          if (record.closing_stock > 0) {
-            // Get MRP from shop inventory
-            const productQuery = `
-              SELECT mrp FROM shop_inventory 
-              WHERE user_id = $1 AND brand_number = $2 AND size = $3
-            `;
-            const productResult = await pool.query(productQuery, [userId, record.brand_number, record.size]);
-            
-            if (productResult.rows.length > 0) {
-              recordsUsed++;
-              stockValue += record.closing_stock * productResult.rows[0].mrp;
-            }
+      // If we have daily stock records, use them
+      if (stockRecords.rows.length > 0) {
+        for (const record of stockRecords.rows) {
+          const closingStock = record.closing_stock || record.total_stock || 0;
+          const sales = record.sales || 0;
+          
+          // Stock value = closing stock * MRP
+          if (closingStock > 0 && record.standard_mrp) {
+            stockValue += closingStock * parseFloat(record.standard_mrp);
+          }
+          
+          // Sales value = sales * price_per_unit
+          if (sales > 0 && record.price_per_unit) {
+            totalSalesAmount += sales * parseFloat(record.price_per_unit);
           }
         }
       } else {
-        // If no records for today, use the most recent closing stock
-        const latestStockQuery = `
-          SELECT DISTINCT ON (brand_number, size) 
-            brand_number, size, closing_stock
-          FROM daily_stock_records 
-          WHERE user_id = $1 
-          ORDER BY brand_number, size, date DESC
+        // If no daily records, calculate from current shop inventory
+        const inventoryQuery = `
+          SELECT 
+            si.current_quantity,
+            mb.standard_mrp,
+            si.final_price
+          FROM shop_inventory si
+          JOIN master_brands mb ON si.master_brand_id = mb.id
+          WHERE si.shop_id = $1 AND si.is_active = true AND si.current_quantity > 0
         `;
         
-        const latestStockResult = await pool.query(latestStockQuery, [userId]);
+        const inventoryResult = await pool.query(inventoryQuery, [shopId]);
         
-        for (const record of latestStockResult.rows) {
-          if (record.closing_stock > 0) {
-            const productQuery = `
-              SELECT mrp FROM shop_inventory 
-              WHERE user_id = $1 AND brand_number = $2 AND size = $3
-            `;
-            const productResult = await pool.query(productQuery, [userId, record.brand_number, record.size]);
-            
-            if (productResult.rows.length > 0) {
-              recordsUsed++;
-              stockValue += record.closing_stock * productResult.rows[0].mrp;
-            }
+        for (const item of inventoryResult.rows) {
+          if (item.current_quantity > 0 && item.standard_mrp) {
+            stockValue += item.current_quantity * parseFloat(item.standard_mrp);
           }
         }
       }
       
-      // Calculate stock lifted (total purchase value)
-      const invoices = await this.getInvoices(userId);
-      const stockLifted = invoices.reduce((sum, invoice) => sum + (invoice.total_value || 0), 0);
+      // Calculate stock lifted - two values for this month
+      const currentMonth = new Date(date).getMonth() + 1; // 1-12
+      const currentYear = new Date(date).getFullYear();
       
-      // Calculate counter balance (simplified - you can add expenses tracking later)
-      const counterBalance = totalSalesAmount - stockLifted;
+      // 1. Cumulative Invoice Value (at actual invoice prices)
+      const invoiceValueQuery = `
+        SELECT COALESCE(SUM(invoice_value), 0) as cumulative_invoice_value
+        FROM invoices 
+        WHERE shop_id = $1 
+        AND EXTRACT(MONTH FROM invoice_date) = $2 
+        AND EXTRACT(YEAR FROM invoice_date) = $3
+      `;
+      const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, currentMonth, currentYear]);
+      const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
+      
+      // 2. Cumulative MRP Value (same products but at MRP prices)
+      const mrpValueQuery = `
+        SELECT COALESCE(SUM(
+          ib.total_quantity * COALESCE(mb.standard_mrp, 0)
+        ), 0) as cumulative_mrp_value
+        FROM invoices i
+        JOIN invoice_brands ib ON i.id = ib.invoice_id
+        LEFT JOIN master_brands mb ON ib.master_brand_id = mb.id
+        WHERE i.shop_id = $1 
+        AND EXTRACT(MONTH FROM i.invoice_date) = $2 
+        AND EXTRACT(YEAR FROM i.invoice_date) = $3
+      `;
+      const mrpValueResult = await pool.query(mrpValueQuery, [shopId, currentMonth, currentYear]);
+      const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
+      
+      // Get today's expenses
+      const expensesQuery = `
+        SELECT COALESCE(SUM(amount), 0) as total_expenses
+        FROM expenses 
+        WHERE shop_id = $1 AND expense_date = $2
+      `;
+      const expensesResult = await pool.query(expensesQuery, [shopId, date]);
+      const totalExpenses = parseFloat(expensesResult.rows[0].total_expenses || 0);
+      
+      // Get today's other income
+      const otherIncomeQuery = `
+        SELECT COALESCE(SUM(amount), 0) as total_other_income
+        FROM other_income 
+        WHERE shop_id = $1 AND income_date = $2
+      `;
+      const otherIncomeResult = await pool.query(otherIncomeQuery, [shopId, date]);
+      const totalOtherIncome = parseFloat(otherIncomeResult.rows[0].total_other_income || 0);
+      
+      // Get today's total amount collected (cash + upi + card)
+      const paymentsQuery = `
+        SELECT 
+          COALESCE(cash_amount, 0) as cash,
+          COALESCE(upi_amount, 0) as upi,
+          COALESCE(card_amount, 0) as card
+        FROM daily_payments 
+        WHERE shop_id = $1 AND payment_date = $2
+      `;
+      const paymentsResult = await pool.query(paymentsQuery, [shopId, date]);
+      const payments = paymentsResult.rows[0] || { cash: 0, upi: 0, card: 0 };
+      const totalAmountCollected = parseFloat(payments.cash) + parseFloat(payments.upi) + parseFloat(payments.card);
+      
+      // Get opening counter balance (previous day's closing counter balance or 0)
+      // TODO: Add UI option to manually input opening balance when needed
+      const openingBalanceQuery = `
+        SELECT closing_counter_balance
+        FROM daily_payments 
+        WHERE shop_id = $1 AND payment_date < $2
+        ORDER BY payment_date DESC
+        LIMIT 1
+      `;
+      const openingBalanceResult = await pool.query(openingBalanceQuery, [shopId, date]);
+      const openingBalance = parseFloat(openingBalanceResult.rows[0]?.closing_counter_balance || 0);
+      
+      // Counter Balance = Opening + Sales + Other Income - Expenses - Total Amount Collected
+      // > 0 = Short (missing money), < 0 = Surplus (extra money)
+      const counterBalance = openingBalance + totalSalesAmount + totalOtherIncome - totalExpenses - totalAmountCollected;
       
       return {
         date,
-        stockValue,
-        stockLifted,
-        totalSales: totalSalesAmount,
-        counterBalance,
-        todayStockRecords: stockRecords.length,
-        recordsWithStock: stockRecords.filter(r => r.closing_stock > 0).length,
-        hasRecordsForToday: stockRecords.length > 0
+        stockValue: Math.round(stockValue * 100) / 100,
+        stockLiftedInvoiceValue: Math.round(cumulativeInvoiceValue * 100) / 100,
+        stockLiftedMrpValue: Math.round(cumulativeMrpValue * 100) / 100,
+        totalSales: Math.round(totalSalesAmount * 100) / 100,
+        counterBalance: Math.round(counterBalance * 100) / 100,
+        totalExpenses: Math.round(totalExpenses * 100) / 100,
+        totalOtherIncome: Math.round(totalOtherIncome * 100) / 100,
+        totalAmountCollected: Math.round(totalAmountCollected * 100) / 100,
+        openingBalance: Math.round(openingBalance * 100) / 100,
+        balanceStatus: counterBalance > 0 ? 'SHORT' : counterBalance < 0 ? 'SURPLUS' : 'BALANCED',
+        currentMonth: `${currentYear}-${currentMonth.toString().padStart(2, '0')}`
       };
     } catch (error) {
       throw new Error(`Error getting summary: ${error.message}`);

@@ -46,3 +46,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Invoice PDFs and CSV files
+Icdc/
+masterbrands.csv
+*.csv
