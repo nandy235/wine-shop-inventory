@@ -9,7 +9,7 @@ class DatabaseService {
     try {
       await client.query('BEGIN');
       
-      // Check if user already exists, if so use existing user
+      // Check if user already exists (for multiple shops per user)
       let user;
       const existingUserQuery = 'SELECT id, name, email, created_at FROM users WHERE email = $1';
       const existingUserResult = await client.query(existingUserQuery, [email]);
@@ -19,29 +19,31 @@ class DatabaseService {
         user = existingUserResult.rows[0];
         console.log(`Using existing user ${user.email} for new shop: ${shopName}`);
       } else {
-        // Create new user
+        // Create new user (without password - password is shop-specific)
         const userQuery = `
-          INSERT INTO users (name, email, password)
-          VALUES ($1, $2, $3)
+          INSERT INTO users (name, email)
+          VALUES ($1, $2)
           RETURNING id, name, email, created_at
         `;
-        const userValues = [name, email, password];
+        const userValues = [name, email];
         const userResult = await client.query(userQuery, userValues);
         user = userResult.rows[0];
-        console.log(`Created new user ${user.email}`);
+        console.log(`Created new user: ${user.email}`);
       }
       
-      // Create shop for the user (new or existing)
+      // Create shop with password and link to user
       const shopQuery = `
-        INSERT INTO shops (user_id, shop_name, address, license_number, retailer_code)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO shops (user_id, shop_name, address, license_number, retailer_code, password)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, shop_name, address, license_number, retailer_code, created_at
       `;
-      const shopValues = [user.id, shopName, address || null, licenseNumber || null, retailerCode];
+      const shopValues = [user.id, shopName, address || null, licenseNumber || null, retailerCode, password];
       const shopResult = await client.query(shopQuery, shopValues);
       const shop = shopResult.rows[0];
       
       await client.query('COMMIT');
+      
+      console.log(`Created shop: ${shop.shop_name} for user: ${user.email}`);
       
       // Return combined user and shop data for compatibility
       return {
@@ -66,10 +68,28 @@ class DatabaseService {
     }
   }
 
+  // Get all shops for a user (for multi-shop dashboard)
+  async getUserShops(userId) {
+    const query = `
+      SELECT 
+        id, shop_name, retailer_code, address, license_number, created_at
+      FROM shops 
+      WHERE user_id = $1
+      ORDER BY created_at ASC
+    `;
+    
+    try {
+      const result = await pool.query(query, [userId]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting user shops: ${error.message}`);
+    }
+  }
+
   async findUserByEmail(email) {
     const query = `
       SELECT 
-        u.id, u.name, u.email, u.password, u.created_at,
+        u.id, u.name, u.email, u.created_at,
         s.id as shop_id, s.shop_name, s.address, s.license_number, s.gazette_code
       FROM users u
       LEFT JOIN shops s ON s.user_id = u.id
@@ -135,10 +155,10 @@ class DatabaseService {
   async findUserByRetailerCode(retailerCode) {
     const query = `
       SELECT 
-        u.id, u.name, u.email, u.password, u.created_at,
-        s.id as shop_id, s.shop_name, s.address, s.license_number, s.retailer_code
-      FROM users u
-      JOIN shops s ON s.user_id = u.id
+        u.id, u.name, u.email, u.created_at,
+        s.id as shop_id, s.shop_name, s.address, s.license_number, s.retailer_code, s.password
+      FROM shops s
+      JOIN users u ON s.user_id = u.id
       WHERE s.retailer_code = $1
     `;
     
@@ -152,7 +172,7 @@ class DatabaseService {
         id: user.id,
         name: user.name,
         email: user.email,
-        password: user.password,
+        password: user.password,        // Now from shops table
         shop_name: user.shop_name,
         shop_id: user.shop_id,
         retailer_code: user.retailer_code,
@@ -253,16 +273,7 @@ class DatabaseService {
     }
   }
 
-  async getShopProducts(userId, date = null) {
-    // First get shop_id from user_id
-    const shopQuery = `SELECT id as shop_id FROM shops WHERE user_id = $1`;
-    const shopResult = await pool.query(shopQuery, [userId]);
-    
-    if (shopResult.rows.length === 0) {
-      throw new Error('Shop not found for user');
-    }
-    
-    const shopId = shopResult.rows[0].shop_id;
+  async getShopProducts(shopId, date = null) {
     
     const query = `
       SELECT 
@@ -273,6 +284,7 @@ class DatabaseService {
         si.current_quantity as quantity,
         si.is_active,
         si.last_updated,
+        COALESCE(si.sort_order, 999) as sort_order,
         mb.standard_mrp as mrp,
         mb.brand_number as "brandNumber",
         mb.brand_name as name,
@@ -297,7 +309,7 @@ class DatabaseService {
       LEFT JOIN daily_stock_records dsr ON si.id = dsr.shop_inventory_id 
         AND dsr.stock_date = CURRENT_DATE
       WHERE si.shop_id = $1 AND si.is_active = true
-      ORDER BY mb.brand_number, mb.size_ml
+      ORDER BY COALESCE(si.sort_order, 999), mb.brand_number, mb.size_ml
     `;
     
     try {
@@ -305,6 +317,48 @@ class DatabaseService {
       return result.rows;
     } catch (error) {
       throw new Error(`Error getting shop products: ${error.message}`);
+    }
+  }
+
+  async updateSortOrder(shopId, sortedBrandGroups) {
+    try {
+      console.log('🔄 Updating sort order for shop:', shopId);
+      console.log('📋 Sorted groups:', sortedBrandGroups);
+      
+      const client = await pool.connect();
+      
+      try {
+        await client.query('BEGIN');
+        
+        let sortOrder = 1;
+        
+        for (const group of sortedBrandGroups) {
+          // Update sort order for each product in the group
+          for (const productId of group.productIds) {
+            await client.query(
+              'UPDATE shop_inventory SET sort_order = $1 WHERE id = $2 AND shop_id = $3',
+              [sortOrder, productId, shopId]
+            );
+            sortOrder++;
+          }
+        }
+        
+        await client.query('COMMIT');
+        console.log('✅ Sort order updated successfully');
+        
+        return { 
+          message: 'Sort order updated successfully',
+          totalUpdated: sortOrder - 1
+        };
+        
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      throw new Error(`Error updating sort order: ${error.message}`);
     }
   }
 
@@ -364,25 +418,7 @@ class DatabaseService {
     }
   }
 
-  async updateSortOrder(userId, sortedBrandGroups) {
-    try {
-      let sortOrder = 1;
-      
-      for (const brandNumber of sortedBrandGroups) {
-        const updateQuery = `
-          UPDATE shop_inventory 
-          SET sort_order = $1 
-          WHERE user_id = $2 AND brand_number = $3
-        `;
-        await pool.query(updateQuery, [sortOrder, userId, brandNumber]);
-        sortOrder++;
-      }
-      
-      return { message: 'Sort order updated successfully' };
-    } catch (error) {
-      throw new Error(`Error updating sort order: ${error.message}`);
-    }
-  }
+
 
   // Daily Stock Records Management
   async createOrUpdateDailyStockRecord(recordData) {
@@ -426,32 +462,37 @@ class DatabaseService {
     }
   }
 
-  async getPreviousDayClosingStock(userId, currentDate, brandNumber, size) {
+  async getPreviousDayClosingStock(shopId, currentDate, brandNumber, size) {
     const query = `
-      SELECT closing_stock 
-      FROM daily_stock_records 
-      WHERE user_id = $1 AND brand_number = $2 AND size = $3 AND date < $4
-      ORDER BY date DESC 
+      SELECT dsr.closing_stock 
+      FROM daily_stock_records dsr
+      JOIN shop_inventory si ON dsr.shop_inventory_id = si.id  
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      WHERE si.shop_id = $1 AND mb.brand_number = $2 AND mb.size_ml = $3 AND dsr.stock_date < $4
+      ORDER BY dsr.stock_date DESC 
       LIMIT 1
     `;
     
     try {
-      const result = await pool.query(query, [userId, brandNumber, size, currentDate]);
+      const result = await pool.query(query, [shopId, brandNumber, size, currentDate]);
       return result.rows.length > 0 ? result.rows[0].closing_stock : 0;
     } catch (error) {
       throw new Error(`Error getting previous closing stock: ${error.message}`);
     }
   }
 
-  async getDailyStockRecords(userId, date) {
+  async getDailyStockRecords(shopId, date) {
     const query = `
-      SELECT * FROM daily_stock_records 
-      WHERE user_id = $1 AND date = $2
-      ORDER BY brand_number, size
+      SELECT dsr.*, mb.brand_number, mb.size_ml as size
+      FROM daily_stock_records dsr
+      JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      WHERE si.shop_id = $1 AND dsr.stock_date = $2
+      ORDER BY mb.brand_number, mb.size_ml
     `;
     
     try {
-      const result = await pool.query(query, [userId, date]);
+      const result = await pool.query(query, [shopId, date]);
       return result.rows;
     } catch (error) {
       throw new Error(`Error getting daily stock records: ${error.message}`);
@@ -675,14 +716,12 @@ class DatabaseService {
   }
 
   // Summary and Analytics
-  async getSummary(userId, date) {
+  async getSummary(shopId, date) {
     try {
-      // Get user's shop_id
-      const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-      if (shopQuery.rows.length === 0) {
-        throw new Error('Shop not found for user');
+      // Validate shopId parameter
+      if (!shopId) {
+        throw new Error('Shop ID is required');
       }
-      const shopId = shopQuery.rows[0].shop_id;
       
       // Get today's stock records with product details
       const stockRecordsQuery = `
@@ -751,8 +790,8 @@ class DatabaseService {
         SELECT COALESCE(SUM(invoice_value), 0) as cumulative_invoice_value
         FROM invoices 
         WHERE shop_id = $1 
-        AND EXTRACT(MONTH FROM invoice_date) = $2 
-        AND EXTRACT(YEAR FROM invoice_date) = $3
+        AND EXTRACT(MONTH FROM created_at) = $2 
+        AND EXTRACT(YEAR FROM created_at) = $3
       `;
       const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
@@ -766,8 +805,8 @@ class DatabaseService {
         JOIN invoice_brands ib ON i.id = ib.invoice_id
         LEFT JOIN master_brands mb ON ib.master_brand_id = mb.id
         WHERE i.shop_id = $1 
-        AND EXTRACT(MONTH FROM i.invoice_date) = $2 
-        AND EXTRACT(YEAR FROM i.invoice_date) = $3
+        AND EXTRACT(MONTH FROM i.created_at) = $2 
+        AND EXTRACT(YEAR FROM i.created_at) = $3
       `;
       const mrpValueResult = await pool.query(mrpValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
@@ -839,10 +878,10 @@ class DatabaseService {
   }
 
   // Initialize today's stock records
-  async initializeTodayStock(userId, date) {
+  async initializeTodayStock(shopId, date) {
     try {
       // Check if records already exist for today
-      const existingRecords = await this.getDailyStockRecords(userId, date);
+      const existingRecords = await this.getDailyStockRecords(shopId, date);
       
       if (existingRecords.length > 0) {
         // Fix existing records if needed
@@ -851,7 +890,7 @@ class DatabaseService {
         
         for (const record of existingRecords) {
           const correctOpeningStock = await this.getPreviousDayClosingStock(
-            userId, date, record.brand_number, record.size
+            shopId, date, record.brand_number, record.size
           );
           
           if ((correctOpeningStock > 0 && record.opening_stock === 0) || 
@@ -891,7 +930,7 @@ class DatabaseService {
       }
       
       // Get all products in shop inventory
-      const shopProducts = await this.getShopProducts(userId);
+      const shopProducts = await this.getShopProducts(shopId);
       
       if (shopProducts.length === 0) {
         return { 
@@ -906,11 +945,11 @@ class DatabaseService {
       // Create today's record for each product
       for (const product of shopProducts) {
         const openingStock = await this.getPreviousDayClosingStock(
-          userId, date, product.brand_number, product.size
+          shopId, date, product.brand_number, product.size
         );
         
         await this.createOrUpdateDailyStockRecord({
-          userId,
+          shopId,
           date,
           brandNumber: product.brand_number,
           brandName: product.name,

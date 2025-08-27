@@ -116,7 +116,7 @@ function UploadInvoice({ onNavigate }) {
   };
 
   const handleConfirmAndAdd = async () => {
-    if (!parsedData) return;
+    if (!parsedData || !parsedData.tempId) return;
 
     setProcessing(true);
     try {
@@ -127,7 +127,7 @@ function UploadInvoice({ onNavigate }) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          invoiceData: parsedData
+          tempId: parsedData.tempId
         })
       });
 
@@ -156,6 +156,35 @@ function UploadInvoice({ onNavigate }) {
       alert(`❌ Error processing invoice: ${error.message || 'Network error'}`);
     }
     setProcessing(false);
+  };
+
+  const handleCancel = async () => {
+    if (!parsedData || !parsedData.tempId) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/invoice/cancel`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          tempId: parsedData.tempId
+        })
+      });
+
+      if (response.ok) {
+        console.log('Invoice cancelled successfully');
+      } else {
+        console.warn('Failed to cancel invoice on server');
+      }
+    } catch (error) {
+      console.warn('Error cancelling invoice:', error);
+    }
+
+    // Reset form regardless of server response
+    setSelectedFile(null);
+    setParsedData(null);
   };
 
   const formatSize = (sizeCode, size) => {
@@ -301,10 +330,7 @@ function UploadInvoice({ onNavigate }) {
                 </button>
                 <button 
                   className="cancel-btn"
-                  onClick={() => {
-                    setParsedData(null);
-                    setSelectedFile(null);
-                  }}
+                  onClick={handleCancel}
                 >
                   Cancel
                 </button>

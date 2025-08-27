@@ -64,7 +64,7 @@ async function testDatabase() {
     
     // Test summary
     console.log('\n6. Testing summary generation...');
-    const summary = await dbService.getSummary(testUser.id, today);
+    const summary = await dbService.getSummary(testShop.id, today);
     console.log('✅ Summary generated:', summary);
     
     console.log('\n🎉 All database tests passed successfully!');

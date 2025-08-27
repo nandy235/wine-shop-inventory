@@ -138,7 +138,47 @@ const { connectDB, initializeTables } = require('./database');
 
 const generateId = () => Date.now().toString();
 
+// ===== IN-MEMORY STORAGE FOR PENDING INVOICES =====
+const pendingInvoices = new Map();
 
+// Generate temporary ID for pending invoices
+const generateTempId = () => {
+  return 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+};
+
+// Store pending invoice with TTL (30 minutes)
+const storePendingInvoice = (tempId, data, userId, shopId) => {
+  pendingInvoices.set(tempId, {
+    data: data,
+    userId: userId,
+    shopId: shopId,
+    createdAt: new Date(),
+    lastAccessed: new Date(),
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000)  // 30 min TTL
+  });
+  
+  console.log(`📦 Stored pending invoice ${tempId}, total pending: ${pendingInvoices.size}`);
+};
+
+// Cleanup expired invoices
+const cleanupExpiredInvoices = () => {
+  const now = new Date();
+  let cleanedCount = 0;
+  
+  for (const [tempId, invoice] of pendingInvoices) {
+    if (now > invoice.expiresAt) {
+      pendingInvoices.delete(tempId);
+      cleanedCount++;
+    }
+  }
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 Cleaned up ${cleanedCount} expired invoices. Remaining: ${pendingInvoices.size}`);
+  }
+};
+
+// Run cleanup every 10 minutes
+setInterval(cleanupExpiredInvoices, 10 * 60 * 1000);
 
 // ===== INVOICE UPLOAD & PARSING ENDPOINTS =====
 
@@ -146,6 +186,14 @@ const generateId = () => Date.now().toString();
 app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), async (req, res) => {
   try {
     console.log('\n🚀 Invoice upload started...');
+    
+    // Get user and shop info from JWT token
+    const userId = req.user.userId;
+    const shopId = req.user.shopId;
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
     
     if (!req.file) {
       return res.status(400).json({ message: 'No PDF file uploaded' });
@@ -155,7 +203,7 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
       return res.status(400).json({ message: 'Only PDF files are allowed' });
     }
     
-
+    console.log(`👤 User: ${userId}, Shop: ${shopId}`);
     console.log(`📄 Processing PDF: ${req.file.originalname} (${req.file.size} bytes)`);
 
     // Load fresh master brands from database for validation
@@ -184,8 +232,13 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
     console.log(`   Items validated: ${parseResult.data.summary.validatedItems}`);
     console.log(`   Items skipped: ${parseResult.data.summary.skippedItems}`);
 
-    // Return the parsed and validated data
+    // Generate temp ID and store data in memory
+    const tempId = generateTempId();
+    storePendingInvoice(tempId, parseResult.data, userId, shopId);
+
+    // Return the parsed and validated data WITH tempId for frontend display
     res.json({
+      tempId: tempId,
       message: 'Invoice parsed successfully',
       confidence: parseResult.confidence,
       method: parseResult.method,
@@ -197,7 +250,7 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
       retailExciseTax: parseResult.data.retailExciseTax,
       specialExciseCess: parseResult.data.specialExciseCess,
       tcs: parseResult.data.tcs,
-      items: parseResult.data.items, // Only validated items
+      items: parseResult.data.items, // Only validated items for display
       summary: parseResult.data.summary,
       warnings: parseResult.warnings || [],
       skippedItems: parseResult.data.skippedItems || []
@@ -217,25 +270,46 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
   try {
     console.log('\n📦 Invoice confirmation started...');
     
-    const { invoiceData } = req.body;
+    const { tempId } = req.body;
     const userId = req.user.userId;
+    const shopId = req.user.shopId;
     const today = new Date().toISOString().split('T')[0];
 
-    if (!invoiceData || !invoiceData.items || invoiceData.items.length === 0) {
-      return res.status(400).json({ message: 'No invoice data or items provided' });
+    if (!tempId) {
+      return res.status(400).json({ message: 'No tempId provided' });
     }
 
-    // Get shop_id from user_id
-    const { pool } = require('./database');
-    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-    if (shopQuery.rows.length === 0) {
-      return res.status(404).json({ message: 'Shop not found for user' });
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
     }
-    const shopId = shopQuery.rows[0].shop_id;
+
+    // Retrieve stored invoice data from memory
+    const pendingInvoice = pendingInvoices.get(tempId);
+    if (!pendingInvoice) {
+      return res.status(404).json({ 
+        message: 'Invoice data expired or not found. Please upload again.',
+        code: 'INVOICE_EXPIRED'
+      });
+    }
+
+    // Verify ownership
+    if (pendingInvoice.userId !== userId || pendingInvoice.shopId !== shopId) {
+      return res.status(403).json({ message: 'Unauthorized access to invoice data' });
+    }
+
+    // Update last accessed time
+    pendingInvoice.lastAccessed = new Date();
+    
+    const invoiceData = pendingInvoice.data;
+
+    if (!invoiceData || !invoiceData.items || invoiceData.items.length === 0) {
+      return res.status(400).json({ message: 'No invoice data or items found' });
+    }
 
     console.log(`👤 User: ${userId}, Shop: ${shopId}`);
     console.log(`📅 Date: ${today}`);
     console.log(`📦 Items to process: ${invoiceData.items.length}`);
+    console.log(`🗂️ Processing tempId: ${tempId}`);
 
     let updatedCount = 0;
     let addedToInventory = 0;
@@ -318,7 +392,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       invoiceNumber: invoiceData.invoiceNumber,
       date: invoiceData.date,
       uploadDate: today,
-      totalValue: invoiceData.totalAmount,
+      totalValue: invoiceData.invoiceValue, // Store actual Invoice Value from PDF
       netInvoiceValue: invoiceData.netInvoiceValue,
       mrpRoundingOff: invoiceData.mrpRoundingOff,
       retailExciseTax: invoiceData.retailExciseTax,
@@ -327,6 +401,10 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       itemsCount: invoiceData.items.length,
       processedItemsCount: updatedCount
     }, invoiceData.items); // Pass the validated items
+
+    // Clean up - remove from memory after successful processing
+    pendingInvoices.delete(tempId);
+    console.log(`🗑️ Cleaned up tempId: ${tempId}`);
 
     console.log(`\n🎉 Invoice processing completed!`);
     console.log(`   ✅ Items processed: ${updatedCount}`);
@@ -361,23 +439,90 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
   }
 });
 
+// Cancel pending invoice (manual cleanup)
+app.post('/api/invoice/cancel', authenticateToken, async (req, res) => {
+  try {
+    const { tempId } = req.body;
+    const userId = req.user.userId;
+    const shopId = req.user.shopId;
+
+    if (!tempId) {
+      return res.status(400).json({ message: 'No tempId provided' });
+    }
+
+    const pendingInvoice = pendingInvoices.get(tempId);
+    if (!pendingInvoice) {
+      return res.status(404).json({ message: 'Invoice data not found or already expired' });
+    }
+
+    // Verify ownership
+    if (pendingInvoice.userId !== userId || pendingInvoice.shopId !== shopId) {
+      return res.status(403).json({ message: 'Unauthorized access to invoice data' });
+    }
+
+    // Remove from memory
+    pendingInvoices.delete(tempId);
+    console.log(`❌ Cancelled and cleaned up tempId: ${tempId}`);
+
+    res.json({
+      message: 'Invoice upload cancelled successfully',
+      tempId: tempId
+    });
+
+  } catch (error) {
+    console.error('❌ Invoice cancel error:', error);
+    res.status(500).json({ 
+      message: 'Server error during invoice cancellation', 
+      error: error.message 
+    });
+  }
+});
+
 // Optional: Get invoice history
 app.get('/api/invoices', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    const shopId = req.user.shopId;
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
     
     const userInvoices = await dbService.getInvoices(userId);
 
     res.json({
       invoices: userInvoices,
       totalCount: userInvoices.length,
-      totalValue: userInvoices.reduce((sum, inv) => sum + (inv.total_value || 0), 0)
+      totalValue: userInvoices.reduce((sum, inv) => sum + (inv.total_value || 0), 0),
+      shopId: shopId
     });
   } catch (error) {
     console.error('Error getting invoices:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
+// Debug endpoint to check pending invoices (development only)
+if (process.env.NODE_ENV === 'development') {
+  app.get('/api/debug/pending-invoices', authenticateToken, (req, res) => {
+    const pendingList = [];
+    for (const [tempId, invoice] of pendingInvoices) {
+      pendingList.push({
+        tempId,
+        userId: invoice.userId,
+        shopId: invoice.shopId,
+        createdAt: invoice.createdAt,
+        expiresAt: invoice.expiresAt,
+        itemCount: invoice.data.items?.length || 0
+      });
+    }
+    
+    res.json({
+      totalPending: pendingInvoices.size,
+      invoices: pendingList
+    });
+  });
+}
 
 // Auth endpoints
 app.post('/api/login', async (req, res) => {
@@ -399,15 +544,17 @@ app.post('/api/login', async (req, res) => {
      return res.status(400).json({ message: 'Invalid credentials' });
    }
    
-   const token = jwt.sign(
-     { 
-       userId: user.id, 
-       email: user.email,
-       shopName: user.shop_name 
-     },
-     JWT_SECRET,
-     { expiresIn: '24h' }
-   );
+     const token = jwt.sign(
+    { 
+      userId: user.id, 
+      shopId: user.shop_id,
+      email: user.email,
+      shopName: user.shop_name,
+      retailerCode: user.retailer_code
+    },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
    
    res.json({ 
      message: 'Login successful',
@@ -487,10 +634,10 @@ app.post('/api/register', async (req, res) => {
 // Enhanced stock initialization with auto-recovery
 app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     const today = new Date().toISOString().split('T')[0];
     
-    const result = await dbService.initializeTodayStock(userId, today);
+    const result = await dbService.initializeTodayStock(shopId, today);
     res.json(result);
     
   } catch (error) {
@@ -526,16 +673,9 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
 app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
  try {
    const { masterBrandId, quantity, shopMarkup = 0 } = req.body;
-   const userId = req.user.userId;
+   const shopId = req.user.shopId;
    const today = new Date().toISOString().split('T')[0];
-   
-   // Get user's shop_id
    const { pool } = require('./database');
-   const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-   if (shopQuery.rows.length === 0) {
-     return res.status(404).json({ message: 'Shop not found for user' });
-   }
-   const shopId = shopQuery.rows[0].shop_id;
    
    // Get master brand from database
    const masterBrandResult = await pool.query(`
@@ -616,9 +756,9 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
 app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
   try {
     const { sortedBrandGroups } = req.body;
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     
-    const result = await dbService.updateSortOrder(userId, sortedBrandGroups);
+    const result = await dbService.updateSortOrder(shopId, sortedBrandGroups);
     res.json(result);
   } catch (error) {
     console.error('Error updating sort order:', error);
@@ -628,11 +768,11 @@ app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
 
 app.get('/api/shop/products', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     const { date } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
     
-    const products = await dbService.getShopProducts(userId, targetDate);
+    const products = await dbService.getShopProducts(shopId, targetDate);
     res.json(products);
   } catch (error) {
     console.error('Error getting shop products:', error);
@@ -644,15 +784,9 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
  try {
    const { id } = req.params;
    const { quantity, finalPrice } = req.body;
-   const userId = req.user.userId;
+   const shopId = req.user.shopId;
    
-   // Get shop_id from user_id
    const { pool } = require('./database');
-   const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-   if (shopQuery.rows.length === 0) {
-     return res.status(404).json({ message: 'Shop not found for user' });
-   }
-   const shopId = shopQuery.rows[0].shop_id;
    
    // Get current product to calculate markup
    const currentProduct = await pool.query(`
@@ -704,15 +838,9 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
 app.delete('/api/shop/delete-product/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     
-    // Get shop_id from user_id
     const { pool } = require('./database');
-    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-    if (shopQuery.rows.length === 0) {
-      return res.status(404).json({ message: 'Shop not found for user' });
-    }
-    const shopId = shopQuery.rows[0].shop_id;
     
     // Verify the product belongs to this shop
     const productCheck = await pool.query(
@@ -765,15 +893,9 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
   try {
     const { id } = req.params; // shop_inventory.id
     const { receivedStock, finalPrice } = req.body;
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     
-    // Get shop_id from user_id
     const { pool } = require('./database');
-    const shopQuery = await pool.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-    if (shopQuery.rows.length === 0) {
-      return res.status(404).json({ message: 'Shop not found for user' });
-    }
-    const shopId = shopQuery.rows[0].shop_id;
     
     // Verify the shop_inventory item belongs to this shop
     const inventoryCheck = await pool.query(`
@@ -843,9 +965,9 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
 app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
   try {
     const { date, stockUpdates } = req.body;
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     
-    const result = await dbService.updateClosingStock(userId, date, stockUpdates);
+    const result = await dbService.updateClosingStock(shopId, date, stockUpdates);
     
     res.json({
       message: 'Closing stock updated successfully',
@@ -869,10 +991,14 @@ app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
 // Summary endpoint with improved stock value calculation
 app.get('/api/summary', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const shopId = req.user.shopId;
     const today = new Date().toISOString().split('T')[0];
     
-    const summary = await dbService.getSummary(userId, today);
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    const summary = await dbService.getSummary(shopId, today);
     res.json(summary);
   } catch (error) {
     console.error('Error getting summary:', error);

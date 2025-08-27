@@ -256,3 +256,33 @@
   background-color: #f8fafc ;
   font-weight: 600 ;
 }
+
+/* Drag and Drop Styles */
+.drag-handle {
+ cursor: grab !important;
+ user-select: none;
+ color: #999;
+ font-weight: bold;
+}
+
+.drag-handle:active {
+ cursor: grabbing !important;
+}
+
+tr.dragging {
+ opacity: 0.5;
+ background-color: #f0f8ff;
+}
+
+tr.drag-over {
+ border-top: 3px solid #7C3AED;
+ background-color: #f8f4ff;
+}
+
+tr[draggable="true"] {
+ cursor: grab;
+}
+
+tr[draggable="true"]:active {
+ cursor: grabbing;
+}

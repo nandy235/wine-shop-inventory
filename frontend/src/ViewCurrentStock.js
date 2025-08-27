@@ -7,6 +7,8 @@ function ViewCurrentStock({ onNavigate }) {
  const [loading, setLoading] = useState(true);
  const [editingRow, setEditingRow] = useState(null);
  const [editValues, setEditValues] = useState({});
+ const [draggedItem, setDraggedItem] = useState(null);
+ const [dragOverItem, setDragOverItem] = useState(null);
 
 
  const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -132,6 +134,80 @@ Object.keys(groupedInventory).forEach(baseName => {
    setEditValues({});
  };
 
+ // Drag and drop handlers
+ const handleDragStart = (e, brandName) => {
+   setDraggedItem(brandName);
+   e.dataTransfer.effectAllowed = 'move';
+   e.dataTransfer.setData('text/html', e.target.outerHTML);
+   e.dataTransfer.setDragImage(e.target, 0, 0);
+ };
+
+ const handleDragOver = (e, brandName) => {
+   e.preventDefault();
+   e.dataTransfer.dropEffect = 'move';
+   if (draggedItem !== brandName) {
+     setDragOverItem(brandName);
+   }
+ };
+
+ const handleDragLeave = () => {
+   setDragOverItem(null);
+ };
+
+ const handleDrop = async (e, targetBrandName) => {
+   e.preventDefault();
+   
+   if (!draggedItem || draggedItem === targetBrandName) {
+     setDraggedItem(null);
+     setDragOverItem(null);
+     return;
+   }
+
+   try {
+     // Get current order of brand groups
+     const brandNames = Object.keys(groupedInventory);
+     const currentOrder = [...brandNames];
+     
+     // Remove dragged item and insert at new position
+     const draggedIndex = currentOrder.indexOf(draggedItem);
+     const targetIndex = currentOrder.indexOf(targetBrandName);
+     
+     currentOrder.splice(draggedIndex, 1);
+     currentOrder.splice(targetIndex, 0, draggedItem);
+     
+     // Create sorted brand groups with product IDs
+     const sortedBrandGroups = currentOrder.map(brandName => ({
+       brandName,
+       productIds: groupedInventory[brandName].map(item => item.id)
+     }));
+
+     // Send to server
+     const response = await fetch(`${API_BASE_URL}/api/shop/update-sort-order`, {
+       method: 'PUT',
+       headers: {
+         'Authorization': `Bearer ${token}`,
+         'Content-Type': 'application/json'
+       },
+       body: JSON.stringify({ sortedBrandGroups })
+     });
+
+     if (response.ok) {
+       console.log('✅ Sort order updated successfully');
+       // Refresh inventory to show new order
+       fetchInventory();
+     } else {
+       console.error('❌ Error updating sort order');
+       alert('❌ Error updating sort order');
+     }
+   } catch (error) {
+     console.error('❌ Network error:', error);
+     alert('❌ Network error updating sort order');
+   }
+
+   setDraggedItem(null);
+   setDragOverItem(null);
+ };
+
  if (loading) {
    return <div>Loading...</div>;
  }
@@ -173,19 +249,30 @@ Object.keys(groupedInventory).forEach(baseName => {
              </tr>
            </thead>
            <tbody>
-  {Object.entries(groupedInventory).map(([baseName, items]) => 
+  {Object.entries(groupedInventory).map(([baseName, items], groupIndex) => 
     items.map((item, itemIndex) => {
       // Calculate TTL = Opening Stock + Received
       const ttl = (item.openingStock || 0) + (item.receivedStock || 0);
       
+      const isDraggedOver = dragOverItem === baseName;
+      const isDragged = draggedItem === baseName;
+      
       return (
-        <tr key={item.id} className={itemIndex === 0 ? 'brand-group-start' : ''}>
+        <tr 
+          key={item.id} 
+          className={`${itemIndex === 0 ? 'brand-group-start' : ''} ${isDraggedOver ? 'drag-over' : ''} ${isDragged ? 'dragging' : ''}`}
+          draggable={itemIndex === 0}
+          onDragStart={itemIndex === 0 ? (e) => handleDragStart(e, baseName) : undefined}
+          onDragOver={itemIndex === 0 ? (e) => handleDragOver(e, baseName) : undefined}
+          onDragLeave={itemIndex === 0 ? handleDragLeave : undefined}
+          onDrop={itemIndex === 0 ? (e) => handleDrop(e, baseName) : undefined}
+        >
           {itemIndex === 0 && (
             <>
               <td rowSpan={items.length}>
                 <div className="brand-code-cell">
-                  <span className="drag-handle">⋮⋮</span>
-                  {items.length}
+                  <span className="drag-handle" style={{ cursor: 'grab' }}>⋮⋮</span>
+                  {groupIndex + 1}
                 </div>
               </td>
               <td rowSpan={items.length} className="brand-name-cell">
