@@ -83,6 +83,7 @@ function Dashboard({ onNavigate }) {
   };
 
   const formatDate = () => {
+    // Always show current system date for display
     const date = new Date();
     const day = date.getDate().toString().padStart(2, '0');
     const month = date.toLocaleString('en-US', { month: 'long' });
