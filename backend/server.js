@@ -9,6 +9,20 @@ const pdfParse = require('pdf-parse');
 // Load master brands from database instead of JSON file
 let masterBrandsData = [];
 
+// Helper function to get business date (day starts at 11:30 AM)
+function getBusinessDate() {
+  const now = new Date();
+  if (now.getHours() < 11 || (now.getHours() === 11 && now.getMinutes() < 30)) {
+    // Before 11:30 AM - use previous day
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toLocaleDateString('en-CA');
+  } else {
+    // After 11:30 AM - use current day
+    return now.toLocaleDateString('en-CA');
+  }
+}
+
 async function loadMasterBrandsFromDB(packTypeFilter = null) {
   try {
     const { pool } = require('./database');
@@ -180,6 +194,69 @@ const cleanupExpiredInvoices = () => {
 // Run cleanup every 10 minutes
 setInterval(cleanupExpiredInvoices, 10 * 60 * 1000);
 
+// ===== CLOSING STOCK UPDATE ENDPOINT =====
+
+// Update closing stock for multiple products
+app.post('/api/closing-stock/update', authenticateToken, async (req, res) => {
+  try {
+    console.log('\n📦 Closing stock update started...');
+    
+    const { date, stockUpdates } = req.body;
+    const userId = req.user.userId;
+    const shopId = req.user.shopId;
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    if (!date || !stockUpdates || !Array.isArray(stockUpdates)) {
+      return res.status(400).json({ message: 'Invalid request data' });
+    }
+    
+    console.log(`👤 User: ${userId}, Shop: ${shopId}`);
+    console.log(`📅 Date: ${date}`);
+    console.log(`📊 Updating ${stockUpdates.length} products`);
+
+    let updatedCount = 0;
+    
+    // Process each stock update
+    for (const update of stockUpdates) {
+      try {
+        const { id, closingStock } = update;
+        
+        if (typeof id === 'undefined' || typeof closingStock === 'undefined') {
+          console.warn(`⚠️ Skipping invalid update:`, update);
+          continue;
+        }
+
+        // Update closing stock specifically
+        await dbService.updateClosingStock(id, date, parseInt(closingStock));
+        
+        updatedCount++;
+        
+      } catch (error) {
+        console.error(`❌ Error updating stock for product ${update.id}:`, error);
+        // Continue with other updates even if one fails
+      }
+    }
+    
+    console.log(`✅ Successfully updated ${updatedCount} products`);
+    
+    res.json({
+      message: 'Closing stock updated successfully',
+      updatedCount: updatedCount,
+      totalRequested: stockUpdates.length
+    });
+
+  } catch (error) {
+    console.error('❌ Closing stock update error:', error);
+    res.status(500).json({ 
+      message: 'Server error during closing stock update', 
+      error: error.message 
+    });
+  }
+});
+
 // ===== INVOICE UPLOAD & PARSING ENDPOINTS =====
 
 // Parse uploaded invoice PDF
@@ -273,7 +350,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
     const { tempId } = req.body;
     const userId = req.user.userId;
     const shopId = req.user.shopId;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBusinessDate();
 
     if (!tempId) {
       return res.status(400).json({ message: 'No tempId provided' });
@@ -635,7 +712,7 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   try {
     const shopId = req.user.shopId;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBusinessDate();
     
     const result = await dbService.initializeTodayStock(shopId, today);
     res.json(result);
@@ -674,7 +751,7 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
  try {
    const { masterBrandId, quantity, shopMarkup = 0 } = req.body;
    const shopId = req.user.shopId;
-   const today = new Date().toISOString().split('T')[0];
+   const today = getBusinessDate();
    const { pool } = require('./database');
    
    // Get master brand from database
@@ -770,10 +847,25 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
   try {
     const shopId = req.user.shopId;
     const { date } = req.query;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || getBusinessDate();
+    
+    console.log(`📊 Fetching products for shop ${shopId} on date ${targetDate}`);
+    
+    // Initialize today's stock records if they don't exist
+    const initializedCount = await dbService.initializeTodayStock(shopId, targetDate);
+    console.log(`📦 Initialized ${initializedCount} stock records for today`);
     
     const products = await dbService.getShopProducts(shopId, targetDate);
-    res.json(products);
+    console.log(`📋 Found ${products.length} products in shop inventory`);
+    
+    // Check if closing stock is already saved
+    const closingStockStatus = await dbService.isClosingStockSaved(shopId, targetDate);
+    
+    res.json({
+      products: products,
+      closingStockStatus: closingStockStatus,
+      businessDate: targetDate
+    });
   } catch (error) {
     console.error('Error getting shop products:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -910,7 +1002,7 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
     }
     
     const product = inventoryCheck.rows[0];
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBusinessDate();
     
     // Update or create daily stock record
     const upsertDailyStock = `
@@ -992,7 +1084,7 @@ app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
 app.get('/api/summary', authenticateToken, async (req, res) => {
   try {
     const shopId = req.user.shopId;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBusinessDate();
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
@@ -1002,6 +1094,79 @@ app.get('/api/summary', authenticateToken, async (req, res) => {
     res.json(summary);
   } catch (error) {
     console.error('Error getting summary:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Income and Expenses endpoints
+app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.query;
+    const targetDate = date || getBusinessDate();
+    
+    console.log(`📊 Fetching income for shop ${shopId} on date ${targetDate}`);
+    
+    const result = await dbService.getIncome(shopId, targetDate);
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching income:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.get('/api/income-expenses/expenses', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.query;
+    const targetDate = date || getBusinessDate();
+    
+    console.log(`📊 Fetching expenses for shop ${shopId} on date ${targetDate}`);
+    
+    const result = await dbService.getExpenses(shopId, targetDate);
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching expenses:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.post('/api/income-expenses/save-income', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date, income } = req.body;
+    const targetDate = date || getBusinessDate();
+    
+    if (!income || !Array.isArray(income)) {
+      return res.status(400).json({ message: 'Income array is required' });
+    }
+    
+    console.log(`💰 Saving income for shop ${shopId} on date ${targetDate}`);
+    
+    const result = await dbService.saveIncome(shopId, targetDate, income);
+    res.json(result);
+  } catch (error) {
+    console.error('Error saving income:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date, expenses } = req.body;
+    const targetDate = date || getBusinessDate();
+    
+    if (!expenses || !Array.isArray(expenses)) {
+      return res.status(400).json({ message: 'Expenses array is required' });
+    }
+    
+    console.log(`💸 Saving expenses for shop ${shopId} on date ${targetDate}`);
+    
+    const result = await dbService.saveExpenses(shopId, targetDate, expenses);
+    res.json(result);
+  } catch (error) {
+    console.error('Error saving expenses:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

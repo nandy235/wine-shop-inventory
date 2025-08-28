@@ -110,7 +110,7 @@ function Dashboard({ onNavigate }) {
           <button className="nav-button active">Dashboard</button>
           <button className="nav-button" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
           <button className="nav-button" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="nav-button">Sheets</button>
+          <button className="nav-button" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-button">Reports</button>
           <button className="nav-button">Settings</button>
         </nav>

@@ -6,6 +6,9 @@ import StockOnboarding from './StockOnboarding';
 import ViewCurrentStock from './ViewCurrentStock';
 import ManageStock from './ManageStock';
 import UploadInvoice from './UploadInvoice';
+import Sheets from './Sheets';
+import UpdateClosingStock from './UpdateClosingStock';
+import IncomeExpenses from './IncomeExpenses';
 import './App.css';
 import API_BASE_URL from './config';
 
@@ -101,6 +104,15 @@ function App() {
       )}
       {currentView === 'uploadInvoice' && (
         <UploadInvoice onNavigate={handleNavigate} />
+      )}
+      {currentView === 'sheets' && (
+        <Sheets onNavigate={handleNavigate} />
+      )}
+      {currentView === 'updateClosingStock' && (
+        <UpdateClosingStock onNavigate={handleNavigate} />
+      )}
+      {currentView === 'incomeExpenses' && (
+        <IncomeExpenses onNavigate={handleNavigate} />
       )}
     </div>
   );

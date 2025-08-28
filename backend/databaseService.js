@@ -274,6 +274,7 @@ class DatabaseService {
   }
 
   async getShopProducts(shopId, date = null) {
+    const targetDate = date || new Date().toISOString().split('T')[0];
     
     const query = `
       SELECT 
@@ -299,21 +300,21 @@ class DatabaseService {
           WHEN mb.product_type = 'DUTY_FREE' THEN 'Duty Free'
           ELSE mb.product_type
         END as category,
-        -- Get today's stock data
+        -- Get stock data for the specified date
         COALESCE(dsr.opening_stock, 0) as "openingStock",
         COALESCE(dsr.received_stock, 0) as "receivedStock",
-        COALESCE(dsr.total_stock, 0) as "totalStock",
-        COALESCE(dsr.closing_stock, dsr.total_stock, 0) as "closingStock"
+        COALESCE(dsr.total_stock, COALESCE(dsr.opening_stock, 0) + COALESCE(dsr.received_stock, 0)) as "totalStock",
+        dsr.closing_stock as "closingStock"
       FROM shop_inventory si
       JOIN master_brands mb ON si.master_brand_id = mb.id
       LEFT JOIN daily_stock_records dsr ON si.id = dsr.shop_inventory_id 
-        AND dsr.stock_date = CURRENT_DATE
+        AND dsr.stock_date = $2
       WHERE si.shop_id = $1 AND si.is_active = true
       ORDER BY COALESCE(si.sort_order, 999), mb.brand_number, mb.size_ml
     `;
     
     try {
-      const result = await pool.query(query, [shopId]);
+      const result = await pool.query(query, [shopId, targetDate]);
       return result.rows;
     } catch (error) {
       throw new Error(`Error getting shop products: ${error.message}`);
@@ -462,6 +463,126 @@ class DatabaseService {
     }
   }
 
+  // Specific method for updating closing stock only
+  async updateClosingStock(shopInventoryId, stockDate, closingStock) {
+    try {
+      const updateQuery = `
+        UPDATE daily_stock_records 
+        SET closing_stock = $3
+        WHERE shop_inventory_id = $1 AND stock_date = $2
+        RETURNING *
+      `;
+      
+      const values = [shopInventoryId, stockDate, closingStock];
+      const result = await pool.query(updateQuery, values);
+      
+      if (result.rows.length === 0) {
+        // If no record exists, we need to get the previous day's closing stock as opening stock
+        const prevClosingQuery = `
+          SELECT closing_stock 
+          FROM daily_stock_records 
+          WHERE shop_inventory_id = $1 AND stock_date < $2 
+          ORDER BY stock_date DESC 
+          LIMIT 1
+        `;
+        
+        const prevResult = await pool.query(prevClosingQuery, [shopInventoryId, stockDate]);
+        const openingStock = prevResult.rows[0]?.closing_stock || 0;
+        
+        // Create new record with proper opening stock
+        return await this.createOrUpdateDailyStockRecord({
+          shopInventoryId,
+          stockDate,
+          openingStock,
+          receivedStock: 0,
+          closingStock,
+          pricePerUnit: null
+        });
+      }
+      
+      return result;
+    } catch (error) {
+      throw new Error(`Error updating closing stock: ${error.message}`);
+    }
+  }
+
+  // Initialize today's stock records for all shop products
+  async initializeTodayStock(shopId, date) {
+    try {
+      console.log(`🔄 Initializing stock for shop ${shopId} on date ${date}`);
+      
+      // First, let's check how many products exist in shop_inventory
+      const inventoryCheck = await pool.query(
+        'SELECT COUNT(*) as count FROM shop_inventory WHERE shop_id = $1 AND is_active = true',
+        [shopId]
+      );
+      console.log(`📦 Found ${inventoryCheck.rows[0].count} active products in shop inventory`);
+      
+      // Check if any daily stock records already exist for this date
+      const existingCheck = await pool.query(
+        'SELECT COUNT(*) as count FROM daily_stock_records dsr JOIN shop_inventory si ON dsr.shop_inventory_id = si.id WHERE si.shop_id = $1 AND dsr.stock_date = $2',
+        [shopId, date]
+      );
+      console.log(`📅 Found ${existingCheck.rows[0].count} existing daily stock records for ${date}`);
+      
+      // Debug: Check previous day's data
+      const prevDayCheck = await pool.query(`
+        SELECT COUNT(*) as count, 
+               COUNT(CASE WHEN closing_stock IS NOT NULL THEN 1 END) as with_closing,
+               COUNT(CASE WHEN closing_stock IS NULL THEN 1 END) as without_closing
+        FROM daily_stock_records dsr 
+        JOIN shop_inventory si ON dsr.shop_inventory_id = si.id 
+        WHERE si.shop_id = $1 AND dsr.stock_date < $2
+      `, [shopId, date]);
+      console.log(`📊 Previous days data: ${prevDayCheck.rows[0].count} total, ${prevDayCheck.rows[0].with_closing} with closing, ${prevDayCheck.rows[0].without_closing} without closing`);
+      
+      const query = `
+        INSERT INTO daily_stock_records (shop_inventory_id, stock_date, opening_stock, received_stock, closing_stock)
+        SELECT 
+          si.id,
+          $2,
+          CASE 
+            WHEN prev.closing_stock IS NOT NULL THEN prev.closing_stock
+            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL THEN prev.opening_stock
+            ELSE si.current_quantity
+          END as opening_stock,
+          CASE 
+            WHEN prev.closing_stock IS NOT NULL THEN 0
+            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL THEN prev.received_stock
+            ELSE 0
+          END as received_stock,
+          NULL as closing_stock
+        FROM shop_inventory si
+        LEFT JOIN daily_stock_records prev ON prev.shop_inventory_id = si.id 
+          AND prev.stock_date = (
+            SELECT MAX(stock_date) 
+            FROM daily_stock_records 
+            WHERE shop_inventory_id = si.id AND stock_date < $2
+          )
+        WHERE si.shop_id = $1 
+          AND si.is_active = true
+        ON CONFLICT (shop_inventory_id, stock_date) 
+        DO UPDATE SET 
+          opening_stock = CASE 
+            WHEN EXCLUDED.opening_stock > 0 THEN EXCLUDED.opening_stock 
+            ELSE daily_stock_records.opening_stock 
+          END,
+          -- Only reset received_stock to 0 if it's currently NULL
+          received_stock = CASE 
+            WHEN daily_stock_records.received_stock IS NULL THEN 0
+            ELSE daily_stock_records.received_stock 
+          END
+      `;
+      
+      const result = await pool.query(query, [shopId, date]);
+      console.log(`✅ Initialized/Updated ${result.rowCount} daily stock records`);
+      return result.rowCount;
+    } catch (error) {
+      console.error(`❌ Error initializing stock for shop ${shopId}:`, error);
+      throw new Error(`Error initializing today's stock: ${error.message}`);
+    }
+  }
+
   async getPreviousDayClosingStock(shopId, currentDate, brandNumber, size) {
     const query = `
       SELECT dsr.closing_stock 
@@ -499,64 +620,31 @@ class DatabaseService {
     }
   }
 
-  async updateClosingStock(userId, date, stockUpdates) {
-    const updatedRecords = [];
-    const warnings = [];
+  async isClosingStockSaved(shopId, date) {
+    const query = `
+      SELECT COUNT(*) as total_products,
+             COUNT(CASE WHEN dsr.closing_stock IS NOT NULL THEN 1 END) as saved_products
+      FROM shop_inventory si
+      LEFT JOIN daily_stock_records dsr ON si.id = dsr.shop_inventory_id AND dsr.stock_date = $2
+      WHERE si.shop_id = $1 AND si.is_active = true
+    `;
     
     try {
-      for (const update of stockUpdates) {
-        const { brandNumber, size, closingStock } = update;
-        
-        const recordQuery = `
-          SELECT * FROM daily_stock_records 
-          WHERE user_id = $1 AND date = $2 AND brand_number = $3 AND size = $4
-        `;
-        
-        const recordResult = await pool.query(recordQuery, [userId, date, brandNumber, size]);
-        let record = recordResult.rows[0];
-        
-        if (record) {
-          const closingStockNum = parseInt(closingStock);
-          
-          // Validation
-          if (closingStockNum > record.total) {
-            warnings.push({
-              product: `${brandNumber} - ${size}`,
-              issue: `Closing stock (${closingStockNum}) exceeds total available (${record.total})`,
-              action: `Capped at ${record.total}`
-            });
-          }
-          
-          if (closingStockNum < 0) {
-            warnings.push({
-              product: `${brandNumber} - ${size}`,
-              issue: 'Negative closing stock not allowed',
-              action: 'Set to 0'
-            });
-          }
-          
-          // Update with validation
-          const validatedClosingStock = Math.max(0, Math.min(closingStockNum, record.total));
-          const sale = record.total - validatedClosingStock;
-          const saleAmount = sale * record.price;
-          
-          const updateQuery = `
-            UPDATE daily_stock_records 
-            SET closing_stock = $1, sale = $2, sale_amount = $3, updated_at = CURRENT_TIMESTAMP
-            WHERE id = $4
-            RETURNING *
-          `;
-          
-          const updateResult = await pool.query(updateQuery, [validatedClosingStock, sale, saleAmount, record.id]);
-          updatedRecords.push(updateResult.rows[0]);
-        }
-      }
+      const result = await pool.query(query, [shopId, date]);
+      const { total_products, saved_products } = result.rows[0];
       
-      return { updatedRecords, warnings };
+      return {
+        totalProducts: parseInt(total_products),
+        savedProducts: parseInt(saved_products),
+        isFullySaved: parseInt(total_products) > 0 && parseInt(total_products) === parseInt(saved_products),
+        isPartiallySaved: parseInt(saved_products) > 0
+      };
     } catch (error) {
-      throw new Error(`Error updating closing stock: ${error.message}`);
+      throw new Error(`Error checking closing stock status: ${error.message}`);
     }
   }
+
+
 
   // Invoice Management
   async saveInvoice(invoiceData) {
@@ -877,109 +965,108 @@ class DatabaseService {
     }
   }
 
-  // Initialize today's stock records
-  async initializeTodayStock(shopId, date) {
+  // Income and Expenses methods
+  async getIncome(shopId, date) {
+    const query = `
+      SELECT source, amount, description 
+      FROM other_income 
+      WHERE shop_id = $1 AND income_date = $2
+      ORDER BY source
+    `;
+    
     try {
-      // Check if records already exist for today
-      const existingRecords = await this.getDailyStockRecords(shopId, date);
-      
-      if (existingRecords.length > 0) {
-        // Fix existing records if needed
-        let recordsFixed = 0;
-        const fixedRecords = [];
-        
-        for (const record of existingRecords) {
-          const correctOpeningStock = await this.getPreviousDayClosingStock(
-            shopId, date, record.brand_number, record.size
-          );
-          
-          if ((correctOpeningStock > 0 && record.opening_stock === 0) || 
-              (record.opening_stock !== correctOpeningStock && correctOpeningStock > 0)) {
-            
-            const updateQuery = `
-              UPDATE daily_stock_records 
-              SET opening_stock = $1, total = $2, updated_at = CURRENT_TIMESTAMP
-              WHERE id = $3
-            `;
-            
-            const newTotal = correctOpeningStock + record.received;
-            await pool.query(updateQuery, [correctOpeningStock, newTotal, record.id]);
-            
-            recordsFixed++;
-            fixedRecords.push({
-              product: `${record.brand_number} - ${record.size}`,
-              oldOpening: 0,
-              newOpening: correctOpeningStock,
-              closingStock: record.closing_stock
-            });
-          }
-        }
-        
-        if (recordsFixed > 0) {
-          return { 
-            message: 'Fixed existing records with continuity issues',
-            recordsFixed,
-            details: fixedRecords
-          };
-        }
-        
-        return { 
-          message: 'Records already exist for today',
-          recordsCount: existingRecords.length
-        };
-      }
-      
-      // Get all products in shop inventory
-      const shopProducts = await this.getShopProducts(shopId);
-      
-      if (shopProducts.length === 0) {
-        return { 
-          message: 'No products in inventory',
-          recordsCount: 0 
-        };
-      }
-      
-      let recordsCreated = 0;
-      const createdRecords = [];
-      
-      // Create today's record for each product
-      for (const product of shopProducts) {
-        const openingStock = await this.getPreviousDayClosingStock(
-          shopId, date, product.brand_number, product.size
-        );
-        
-        await this.createOrUpdateDailyStockRecord({
-          shopId,
-          date,
-          brandNumber: product.brand_number,
-          brandName: product.name,
-          size: product.size,
-          price: product.final_price,
-          received: 0,
-          closingStock: openingStock
-        });
-        
-        recordsCreated++;
-        createdRecords.push({
-          product: `${product.brand_number} - ${product.name}`,
-          size: product.size,
-          openingStock: openingStock,
-          closingStock: openingStock
-        });
-      }
-      
-      return {
-        message: 'Stock records initialized for today with proper continuity',
-        date,
-        recordsCreated,
-        recordsWithStock: createdRecords.filter(r => r.openingStock > 0).length,
-        details: createdRecords
-      };
-      
+      const result = await pool.query(query, [shopId, date]);
+      return result.rows;
     } catch (error) {
-      throw new Error(`Error initializing today stock: ${error.message}`);
+      console.error('Error fetching income:', error);
+      throw error;
     }
   }
+
+  async getExpenses(shopId, date) {
+    const query = `
+      SELECT category, amount, description 
+      FROM expenses 
+      WHERE shop_id = $1 AND expense_date = $2
+      ORDER BY category
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, date]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+      throw error;
+    }
+  }
+
+  async saveIncome(shopId, date, incomeEntries) {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Delete existing income for this date
+      await client.query(
+        'DELETE FROM other_income WHERE shop_id = $1 AND income_date = $2',
+        [shopId, date]
+      );
+      
+      // Insert new income entries
+      for (const entry of incomeEntries) {
+        if (entry.amount > 0) {
+          await client.query(
+            'INSERT INTO other_income (shop_id, income_date, source, amount, description) VALUES ($1, $2, $3, $4, $5)',
+            [shopId, date, entry.category, entry.amount, entry.description || null]
+          );
+        }
+      }
+      
+      await client.query('COMMIT');
+      return { success: true, message: 'Income saved successfully' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error saving income:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async saveExpenses(shopId, date, expenseEntries) {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Delete existing expenses for this date
+      await client.query(
+        'DELETE FROM expenses WHERE shop_id = $1 AND expense_date = $2',
+        [shopId, date]
+      );
+      
+      // Insert new expense entries
+      for (const entry of expenseEntries) {
+        if (entry.amount > 0) {
+          await client.query(
+            'INSERT INTO expenses (shop_id, expense_date, category, amount, description) VALUES ($1, $2, $3, $4, $5)',
+            [shopId, date, entry.category, entry.amount, entry.description || null]
+          );
+        }
+      }
+      
+      await client.query('COMMIT');
+      return { success: true, message: 'Expenses saved successfully' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error saving expenses:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+
 }
 
 module.exports = new DatabaseService();
