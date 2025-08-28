@@ -544,7 +544,7 @@ class DatabaseService {
           CASE 
             WHEN prev.closing_stock IS NOT NULL THEN prev.closing_stock
             WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL THEN prev.opening_stock
-            ELSE si.current_quantity
+            ELSE 0
           END as opening_stock,
           CASE 
             WHEN prev.closing_stock IS NOT NULL THEN 0
