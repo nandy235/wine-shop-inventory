@@ -28,13 +28,14 @@ function ViewCurrentStock({ onNavigate }) {
        }
      });
 
-     if (response.ok) {
-       const data = await response.json();
-       setInventory(data);
-     }
-   } catch (error) {
-     console.error('Error fetching inventory:', error);
-   }
+         if (response.ok) {
+      const data = await response.json();
+      setInventory(data.products || []);
+    }
+     } catch (error) {
+    console.error('Error fetching inventory:', error);
+    setInventory([]);
+  }
    setLoading(false);
  };
 
@@ -50,7 +51,7 @@ function ViewCurrentStock({ onNavigate }) {
  return productName.replace(/\s+(90ml|180ml|375ml|750ml|1000ml|2000ml|60ml|500ml|650ml|330ml|275ml).*$/i, '').trim();
 };
 
-const groupedInventory = inventory.reduce((groups, item) => {
+const groupedInventory = (Array.isArray(inventory) ? inventory : []).reduce((groups, item) => {
  // Group by base brand name (without size)
  const baseName = getBaseName(item.name);
  if (!groups[baseName]) {
