@@ -2,6 +2,20 @@ import React, { useState, useEffect } from 'react';
 import './UpdateClosingStock.css';
 import API_BASE_URL from './config';
 
+// Helper function to get business date (day starts at 11:30 AM)
+function getBusinessDate() {
+  const now = new Date();
+  if (now.getHours() < 11 || (now.getHours() === 11 && now.getMinutes() < 30)) {
+    // Before 11:30 AM - use previous day
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toLocaleDateString('en-CA');
+  } else {
+    // After 11:30 AM - use current day
+    return now.toLocaleDateString('en-CA');
+  }
+}
+
 function UpdateClosingStock({ onNavigate }) {
  const [stockData, setStockData] = useState([]);
  const [filteredData, setFilteredData] = useState([]);
@@ -11,6 +25,7 @@ function UpdateClosingStock({ onNavigate }) {
  const [editingValues, setEditingValues] = useState({});
  const [closingStockStatus, setClosingStockStatus] = useState(null);
  const [businessDate, setBusinessDate] = useState(null);
+ const [originalValues, setOriginalValues] = useState({});
 
  const user = JSON.parse(localStorage.getItem('user') || '{}');
  const token = localStorage.getItem('token');
@@ -76,6 +91,13 @@ function UpdateClosingStock({ onNavigate }) {
       setFilteredData(processedData);
       setClosingStockStatus(closingStatus);
       setBusinessDate(bizDate);
+      
+      // Store original closing stock values for change tracking
+      const originalClosingStocks = {};
+      processedData.forEach(item => {
+        originalClosingStocks[item.id] = item.closingStock;
+      });
+      setOriginalValues(originalClosingStocks);
      } else {
        console.error('Failed to fetch stock data');
      }
@@ -126,10 +148,45 @@ function UpdateClosingStock({ onNavigate }) {
    setStockData(updatedStockData);
  };
 
+ // Helper function to check if there are unsaved changes
+ const hasUnsavedChanges = () => {
+   return stockData.some(item => {
+     const currentValue = item.closingStock;
+     const originalValue = originalValues[item.id];
+     return currentValue !== originalValue;
+   });
+ };
+
+ // Helper function to get button CSS class
+ const getButtonClass = () => {
+   if (hasUnsavedChanges()) {
+     return 'has-changes';
+   } else if (closingStockStatus?.isFullySaved) {
+     return 'already-saved';
+   }
+   return '';
+ };
+
+ // Helper function to get button text
+ const getButtonText = () => {
+   if (saving) {
+     return 'Saving...';
+   } else if (hasUnsavedChanges()) {
+     return 'Save Changes';
+   } else if (closingStockStatus?.isFullySaved) {
+     return 'Already Saved ✓';
+   } else if (closingStockStatus?.isPartiallySaved) {
+     return 'Save Remaining Changes';
+   } else {
+     return 'Save All Changes';
+   }
+ };
+
  const handleSave = async () => {
    setSaving(true);
    try {
-     const today = new Date().toISOString().split('T')[0];
+     // Use business date instead of regular date
+     const targetDate = businessDate || getBusinessDate();
      
      const response = await fetch(`${API_BASE_URL}/api/closing-stock/update`, {
        method: 'POST',
@@ -138,7 +195,7 @@ function UpdateClosingStock({ onNavigate }) {
          'Content-Type': 'application/json'
        },
        body: JSON.stringify({
-         date: today,
+         date: targetDate,
          stockUpdates: stockData.map(item => ({
            id: item.id,
            closingStock: item.closingStock
@@ -206,19 +263,17 @@ function UpdateClosingStock({ onNavigate }) {
          
                  <div className="update-closing-stock-save-section">
           <button 
-            className={`update-closing-stock-save-btn ${closingStockStatus?.isFullySaved ? 'already-saved' : ''}`}
+            className={`update-closing-stock-save-btn ${getButtonClass()}`}
             onClick={handleSave}
             disabled={saving}
           >
-            {saving ? 'Saving...' : 
-             closingStockStatus?.isFullySaved ? 'Already Saved ✓' : 
-             closingStockStatus?.isPartiallySaved ? 'Save Remaining Changes' : 
-             'Save All Changes'}
+            {getButtonText()}
           </button>
           {closingStockStatus && (
             <div className="save-status-info">
               {closingStockStatus.savedProducts} of {closingStockStatus.totalProducts} products saved
               {businessDate && <span className="business-date"> • Business Date: {businessDate}</span>}
+              {hasUnsavedChanges() && <span className="changes-indicator"> • Unsaved changes detected</span>}
             </div>
           )}
         </div>

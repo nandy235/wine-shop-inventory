@@ -143,6 +143,28 @@
   box-shadow: 0 8px 25px rgba(40, 167, 69, 0.4);
 }
 
+.update-closing-stock-save-btn.has-changes {
+  background: linear-gradient(135deg, #fd7e14, #e63946);
+  box-shadow: 0 4px 15px rgba(253, 126, 20, 0.4);
+  animation: pulse 2s infinite;
+}
+
+.update-closing-stock-save-btn.has-changes:hover {
+  box-shadow: 0 8px 25px rgba(253, 126, 20, 0.6);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .save-status-info {
   margin-top: 8px;
   font-size: 0.875rem;
@@ -153,6 +175,11 @@
 .business-date {
   font-weight: 500;
   color: #495057;
+}
+
+.changes-indicator {
+  color: #fd7e14;
+  font-weight: 600;
 }
 
 .update-closing-stock-table-container {
