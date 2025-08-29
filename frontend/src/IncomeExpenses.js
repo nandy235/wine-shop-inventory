@@ -5,14 +5,29 @@ import API_BASE_URL from './config';
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
   const now = new Date();
-  if (now.getHours() < 11 || (now.getHours() === 11 && now.getMinutes() < 30)) {
-    // Before 11:30 AM - use previous day
-    const yesterday = new Date(now);
+  
+  // Check if browser is already in IST timezone
+  const browserTimezoneOffset = now.getTimezoneOffset();
+  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
+  
+  let istTime;
+  if (browserTimezoneOffset === istTimezoneOffset) {
+    // Browser is already in IST, use current time
+    istTime = now;
+  } else {
+    // Browser is in different timezone, convert to IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    istTime = new Date(now.getTime() + istOffset);
+  }
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
     yesterday.setDate(yesterday.getDate() - 1);
     return yesterday.toLocaleDateString('en-CA');
   } else {
-    // After 11:30 AM - use current day
-    return now.toLocaleDateString('en-CA');
+    // After 11:30 AM IST - use current day
+    return istTime.toLocaleDateString('en-CA');
   }
 }
 
@@ -80,6 +95,10 @@ function IncomeExpenses({ onNavigate }) {
       const incomeResult = incomeResponse.ok ? await incomeResponse.json() : [];
       const expensesResult = expensesResponse.ok ? await expensesResponse.json() : [];
 
+      // Check if there's actually saved data (not just zeros)
+      const hasIncomeData = incomeResult.length > 0 && incomeResult.some(item => item.amount > 0);
+      const hasExpensesData = expensesResult.length > 0 && expensesResult.some(item => item.amount > 0);
+
       // Initialize income data with categories
       const initialIncomeData = incomeCategories.map(category => {
         const existingEntry = incomeResult.find(item => item.source === category);
@@ -102,13 +121,19 @@ function IncomeExpenses({ onNavigate }) {
 
       setIncomeData(initialIncomeData);
       setExpensesData(initialExpensesData);
-      setIncomeModified(false);
-      setExpensesModified(false);
+      
+      // Only set as "not modified" if there's actually saved data
+      // If no saved data exists, treat as new/unsaved so button shows "Save"
+      setIncomeModified(!hasIncomeData);
+      setExpensesModified(!hasExpensesData);
     } catch (error) {
       console.error('Error fetching income/expenses data:', error);
       // Initialize with empty data if fetch fails
       setIncomeData(incomeCategories.map(category => ({ category, amount: 0, description: '' })));
       setExpensesData(expenseCategories.map(category => ({ category, amount: 0, description: '' })));
+      // New day with no data - should show "Save" button
+      setIncomeModified(true);
+      setExpensesModified(true);
     }
     setLoading(false);
   };
