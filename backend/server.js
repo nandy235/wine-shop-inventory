@@ -13,13 +13,26 @@ let masterBrandsData = [];
 function getBusinessDate() {
   const now = new Date();
   
-  // Convert to IST (UTC+5:30) to handle Railway's UTC timezone
-  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-  const istTime = new Date(now.getTime() + istOffset);
+  // Check if server is already in IST timezone
+  const serverTimezoneOffset = now.getTimezoneOffset();
+  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
   
-  console.log('Server UTC time:', now.toString());
+  let istTime;
+  if (serverTimezoneOffset === istTimezoneOffset) {
+    // Server is already in IST (local server), use current time
+    istTime = now;
+    console.log('Server already in IST timezone');
+  } else {
+    // Server is in UTC (Railway), convert to IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    istTime = new Date(now.getTime() + istOffset);
+    console.log('Converting from UTC to IST');
+  }
+  
+  console.log('Server time:', now.toString());
   console.log('IST time:', istTime.toString());
   console.log('IST hours:', istTime.getHours(), 'minutes:', istTime.getMinutes());
+  console.log('Timezone offset (minutes):', serverTimezoneOffset);
   
   if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
     // Before 11:30 AM IST - use previous day
