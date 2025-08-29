@@ -5,14 +5,27 @@ import API_BASE_URL from './config';
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
   const now = new Date();
-  if (now.getHours() < 11 || (now.getHours() === 11 && now.getMinutes() < 30)) {
-    // Before 11:30 AM - use previous day
-    const yesterday = new Date(now);
+  
+  // Convert to IST (UTC+5:30) to handle server timezone differences
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  console.log('Frontend - Browser time:', now.toString());
+  console.log('Frontend - IST time:', istTime.toString());
+  console.log('Frontend - IST hours:', istTime.getHours(), 'minutes:', istTime.getMinutes());
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
     yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toLocaleDateString('en-CA');
+    const businessDate = yesterday.toLocaleDateString('en-CA');
+    console.log('Frontend - Business date (before 11:30 AM):', businessDate);
+    return businessDate;
   } else {
-    // After 11:30 AM - use current day
-    return now.toLocaleDateString('en-CA');
+    // After 11:30 AM IST - use current day
+    const businessDate = istTime.toLocaleDateString('en-CA');
+    console.log('Frontend - Business date (after 11:30 AM):', businessDate);
+    return businessDate;
   }
 }
 
