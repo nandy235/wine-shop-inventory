@@ -12,14 +12,27 @@ let masterBrandsData = [];
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
   const now = new Date();
-  if (now.getHours() < 11 || (now.getHours() === 11 && now.getMinutes() < 30)) {
-    // Before 11:30 AM - use previous day
-    const yesterday = new Date(now);
+  
+  // Convert to IST (UTC+5:30) to handle Railway's UTC timezone
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  console.log('Server UTC time:', now.toString());
+  console.log('IST time:', istTime.toString());
+  console.log('IST hours:', istTime.getHours(), 'minutes:', istTime.getMinutes());
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
     yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toLocaleDateString('en-CA');
+    const businessDate = yesterday.toLocaleDateString('en-CA');
+    console.log('Business date (before 11:30 AM):', businessDate);
+    return businessDate;
   } else {
-    // After 11:30 AM - use current day
-    return now.toLocaleDateString('en-CA');
+    // After 11:30 AM IST - use current day
+    const businessDate = istTime.toLocaleDateString('en-CA');
+    console.log('Business date (after 11:30 AM):', businessDate);
+    return businessDate;
   }
 }
 
@@ -1189,6 +1202,23 @@ app.post('/api/analytics/web-vitals', (req, res) => {
     // Silent fail - don't break the frontend
     res.status(200).json({ received: false });
   }
+});
+
+// Debug endpoint to check timezone and business date
+app.get('/api/debug/time', (req, res) => {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  res.json({
+    serverUTCTime: now.toString(),
+    serverISTTime: istTime.toString(),
+    serverHours: istTime.getHours(),
+    serverMinutes: istTime.getMinutes(),
+    businessDate: getBusinessDate(),
+    timezone: process.env.TZ || 'Not set',
+    currentBusinessLogic: istTime.getHours() >= 11 && !(istTime.getHours() === 11 && istTime.getMinutes() < 30) ? 'After 11:30 AM - using today' : 'Before 11:30 AM - using yesterday'
+  });
 });
 
 // Basic route
