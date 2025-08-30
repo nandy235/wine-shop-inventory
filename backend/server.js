@@ -1,3 +1,6 @@
+// Load environment variables first
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -1194,6 +1197,83 @@ app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, re
   } catch (error) {
     console.error('Error saving expenses:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// ===== PAYMENTS ENDPOINTS =====
+
+// Get payment record for a specific date
+app.get('/api/payments', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.query;
+
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+
+    if (!date) {
+      return res.status(400).json({ message: 'Date parameter is required' });
+    }
+
+    console.log(`💰 Getting payment record for shop ${shopId} on ${date}`);
+
+    const payment = await dbService.getPaymentRecord(shopId, date);
+    const recentPayments = await dbService.getRecentPayments(shopId, 7); // Last 7 days
+
+    res.json({
+      payment,
+      recentPayments
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting payment record:', error);
+    res.status(500).json({ 
+      message: 'Server error getting payment record',
+      error: error.message 
+    });
+  }
+});
+
+// Save or update payment record
+app.post('/api/payments', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { payment_date, cash_amount, upi_amount, card_amount } = req.body;
+
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+
+    if (!payment_date) {
+      return res.status(400).json({ message: 'Payment date is required' });
+    }
+
+    // Validate amounts are non-negative numbers
+    const cash = parseFloat(cash_amount) || 0;
+    const upi = parseFloat(upi_amount) || 0;
+    const card = parseFloat(card_amount) || 0;
+
+    if (cash < 0 || upi < 0 || card < 0) {
+      return res.status(400).json({ message: 'Payment amounts must be non-negative' });
+    }
+
+    console.log(`💰 Saving payment record for shop ${shopId} on ${payment_date}`);
+    console.log(`💵 Cash: ${cash}, 📱 UPI: ${upi}, 💳 Card: ${card}`);
+
+    const result = await dbService.savePaymentRecord(shopId, payment_date, cash, upi, card);
+
+    res.json({
+      message: 'Payment record saved successfully',
+      payment: result
+    });
+
+  } catch (error) {
+    console.error('❌ Error saving payment record:', error);
+    res.status(500).json({ 
+      message: 'Server error saving payment record',
+      error: error.message 
+    });
   }
 });
 

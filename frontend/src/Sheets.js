@@ -18,7 +18,7 @@ function Sheets({ onNavigate }) {
          <button className="sheets-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
          <button className="sheets-nav-btn sheets-nav-btn-active">Sheets</button>
  
-         <button className="sheets-nav-btn">Reports</button>
+         <button className="sheets-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
          <button className="sheets-nav-btn">Settings</button>
        </nav>
      </header>

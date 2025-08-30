@@ -272,7 +272,7 @@ function IncomeExpenses({ onNavigate }) {
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="income-expenses-nav-btn">Reports</button>
+          <button className="income-expenses-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
           <button className="income-expenses-nav-btn">Settings</button>
         </nav>
       </header>

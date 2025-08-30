@@ -12,30 +12,30 @@
   align-items: center;
 }
 
-.logo-section {
+.dashboard-container .logo-section {
   display: flex;
   flex-direction: column;
 }
 
-.app-title {
+.dashboard-container .app-title {
   font-size: 24px;
   font-weight: bold;
   color: #333;
   margin: 0;
 }
 
-.app-subtitle {
+.dashboard-container .app-subtitle {
   font-size: 14px;
   color: #666;
   margin: 0;
 }
 
-.navigation {
+.dashboard-container .navigation {
   display: flex;
   gap: 20px;
 }
 
-.nav-button {
+.dashboard-container .nav-button {
   padding: 10px 20px;
   border: none;
   background: transparent;
@@ -46,12 +46,12 @@
   transition: all 0.3s ease;
 }
 
-.nav-button.active {
+.dashboard-container .nav-button.active {
   color: #7C3AED;
   font-weight: bold;
 }
 
-.nav-button:hover {
+.dashboard-container .nav-button:hover {
   background-color: #E5D5FF;
   font-weight: bold;
   color: #7C3AED;

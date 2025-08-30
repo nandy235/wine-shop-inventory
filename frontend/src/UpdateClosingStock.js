@@ -10,24 +10,18 @@ function getBusinessDate() {
   const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
   const istTime = new Date(now.getTime() + istOffset);
   
-  console.log('Frontend - Browser time:', now.toString());
-  console.log('Frontend - IST time:', istTime.toString());
-  console.log('Frontend - IST hours:', istTime.getHours(), 'minutes:', istTime.getMinutes());
-  
   if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
     // Before 11:30 AM IST - use previous day
     const yesterday = new Date(istTime);
     yesterday.setDate(yesterday.getDate() - 1);
-    const businessDate = yesterday.toLocaleDateString('en-CA');
-    console.log('Frontend - Business date (before 11:30 AM):', businessDate);
-    return businessDate;
+    return yesterday.toLocaleDateString('en-CA');
   } else {
     // After 11:30 AM IST - use current day
-    const businessDate = istTime.toLocaleDateString('en-CA');
-    console.log('Frontend - Business date (after 11:30 AM):', businessDate);
-    return businessDate;
+    return istTime.toLocaleDateString('en-CA');
   }
 }
+
+
 
 function UpdateClosingStock({ onNavigate }) {
  const [stockData, setStockData] = useState([]);
@@ -37,12 +31,21 @@ function UpdateClosingStock({ onNavigate }) {
  const [saving, setSaving] = useState(false);
  const [editingValues, setEditingValues] = useState({});
  const [closingStockStatus, setClosingStockStatus] = useState(null);
- const [businessDate, setBusinessDate] = useState(null);
+ const [businessDate, setBusinessDate] = useState(getBusinessDate());
  const [originalValues, setOriginalValues] = useState({});
 
  const user = JSON.parse(localStorage.getItem('user') || '{}');
  const token = localStorage.getItem('token');
  const shopName = user.shopName || 'Liquor Ledger';
+
+ const formatBusinessDate = (dateString) => {
+   // Format business date as DD-MM-YYYY
+   const date = new Date(dateString);
+   const day = date.getDate().toString().padStart(2, '0');
+   const month = (date.getMonth() + 1).toString().padStart(2, '0');
+   const year = date.getFullYear();
+   return `${day}-${month}-${year}`;
+ };
 
  useEffect(() => {
    fetchTodayStock();
@@ -252,7 +255,7 @@ function UpdateClosingStock({ onNavigate }) {
          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
                    <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="update-closing-stock-nav-btn">Reports</button>
+          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
          <button className="update-closing-stock-nav-btn">Settings</button>
        </nav>
      </header>
@@ -264,15 +267,15 @@ function UpdateClosingStock({ onNavigate }) {
        </div>
 
        <div className="update-closing-stock-controls">
-         <div className="update-closing-stock-search-box">
-           <input
-             type="text"
-             className="update-closing-stock-search-input"
-             placeholder="Search by brand name or number..."
-             value={searchTerm}
-             onChange={(e) => setSearchTerm(e.target.value)}
-           />
-         </div>
+        <div className="update-closing-stock-search-box">
+          <input
+            type="text"
+            className="update-closing-stock-search-input"
+            placeholder="Search by brand name or number..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
          
                  <div className="update-closing-stock-save-section">
           <button 
@@ -285,7 +288,7 @@ function UpdateClosingStock({ onNavigate }) {
           {closingStockStatus && (
             <div className="save-status-info">
               {closingStockStatus.savedProducts} of {closingStockStatus.totalProducts} products saved
-              {businessDate && <span className="business-date"> • Business Date: {businessDate}</span>}
+              {businessDate && <span className="business-date"> • <strong>Business Date: {formatBusinessDate(businessDate)}</strong></span>}
               {hasUnsavedChanges() && <span className="changes-indicator"> • Unsaved changes detected</span>}
             </div>
           )}

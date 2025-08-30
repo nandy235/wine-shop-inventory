@@ -21,21 +21,47 @@ console.log('PGHOST:', process.env.PGHOST || 'Not set');
 
 const pool = new Pool(connectionString ? {
   connectionString: connectionString,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  // Connection pool configuration
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
+  maxUses: 7500, // Close (and replace) a connection after it has been used 7500 times
 } : {
   host: process.env.PGHOST,
   port: process.env.PGPORT,
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  // Connection pool configuration
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+  maxUses: 7500,
+});
+
+// Add connection pool event listeners
+pool.on('connect', (client) => {
+  console.log('🔗 New client connected to database');
+});
+
+pool.on('error', (err, client) => {
+  console.error('❌ Unexpected error on idle client:', err);
+});
+
+pool.on('remove', (client) => {
+  console.log('🔌 Client removed from pool');
 });
 
 // Test connection
 const connectDB = async () => {
   try {
-    await pool.query('SELECT NOW()');
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
     console.log('✅ Database connected successfully');
+    console.log(`📊 Pool status: ${pool.totalCount} total, ${pool.idleCount} idle, ${pool.waitingCount} waiting`);
     return true;
   } catch (error) {
     console.error('❌ Database connection failed:', error);

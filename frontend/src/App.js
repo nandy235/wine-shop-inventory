@@ -9,6 +9,9 @@ import UploadInvoice from './UploadInvoice';
 import Sheets from './Sheets';
 import UpdateClosingStock from './UpdateClosingStock';
 import IncomeExpenses from './IncomeExpenses';
+import TrackPayments from './TrackPayments';
+import DownloadSaleSheet from './DownloadSaleSheet';
+import Reports from './Reports';
 import './App.css';
 import API_BASE_URL from './config';
 
@@ -113,6 +116,15 @@ function App() {
       )}
       {currentView === 'incomeExpenses' && (
         <IncomeExpenses onNavigate={handleNavigate} />
+      )}
+      {currentView === 'trackPayments' && (
+        <TrackPayments onNavigate={handleNavigate} />
+      )}
+      {currentView === 'downloadSaleSheet' && (
+        <DownloadSaleSheet onNavigate={handleNavigate} />
+      )}
+      {currentView === 'reports' && (
+        <Reports onNavigate={handleNavigate} />
       )}
     </div>
   );

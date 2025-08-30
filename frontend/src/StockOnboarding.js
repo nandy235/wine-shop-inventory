@@ -137,7 +137,7 @@ function StockOnboarding({ onNavigate }) {
           <button className="nav-btn active">Stock Onboarding</button>
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn">Reports</button>
+          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
           <button className="nav-btn">Settings</button>
         </nav>
       </header>

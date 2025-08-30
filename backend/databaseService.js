@@ -1066,6 +1066,86 @@ class DatabaseService {
     }
   }
 
+  // Payment methods
+  async getPaymentRecord(shopId, date) {
+    const query = `
+      SELECT id, payment_date, cash_amount, upi_amount, card_amount, total_amount, created_at
+      FROM daily_payments 
+      WHERE shop_id = $1 AND payment_date = $2
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, date]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error fetching payment record:', error);
+      throw error;
+    }
+  }
+
+  async getRecentPayments(shopId, days = 7) {
+    const query = `
+      SELECT id, payment_date, cash_amount, upi_amount, card_amount, total_amount, created_at
+      FROM daily_payments 
+      WHERE shop_id = $1 AND payment_date >= CURRENT_DATE - INTERVAL '${days} days'
+      ORDER BY payment_date DESC
+      LIMIT 10
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching recent payments:', error);
+      throw error;
+    }
+  }
+
+  async savePaymentRecord(shopId, paymentDate, cashAmount, upiAmount, cardAmount) {
+    const query = `
+      INSERT INTO daily_payments (shop_id, payment_date, cash_amount, upi_amount, card_amount)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (shop_id, payment_date)
+      DO UPDATE SET
+        cash_amount = EXCLUDED.cash_amount,
+        upi_amount = EXCLUDED.upi_amount,
+        card_amount = EXCLUDED.card_amount
+      RETURNING id, payment_date, cash_amount, upi_amount, card_amount, total_amount, created_at
+    `;
+    
+    // Retry logic for database connection issues
+    const maxRetries = 3;
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`💾 Attempting to save payment record (attempt ${attempt}/${maxRetries})`);
+        const result = await pool.query(query, [shopId, paymentDate, cashAmount, upiAmount, cardAmount]);
+        console.log(`✅ Payment record saved successfully on attempt ${attempt}`);
+        return result.rows[0];
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ Attempt ${attempt} failed:`, error.message);
+        
+        // Check if it's a connection error that might be retryable
+        if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.errno === -54) {
+          if (attempt < maxRetries) {
+            console.log(`🔄 Retrying in ${attempt * 1000}ms...`);
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            continue;
+          }
+        }
+        
+        // If it's not a retryable error or we've exhausted retries, throw immediately
+        console.error('❌ Final error saving payment record:', error);
+        throw error;
+      }
+    }
+    
+    // If we get here, all retries failed
+    throw lastError;
+  }
+
 
 }
 

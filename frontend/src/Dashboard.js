@@ -2,6 +2,35 @@ import React, { useState, useEffect } from 'react';
 import './Dashboard.css';
 import API_BASE_URL from './config';
 
+// Helper function to get business date (day starts at 11:30 AM IST)
+function getBusinessDate() {
+  const now = new Date();
+  
+  // Check if browser is already in IST timezone
+  const browserTimezoneOffset = now.getTimezoneOffset();
+  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
+  
+  let istTime;
+  if (browserTimezoneOffset === istTimezoneOffset) {
+    // Browser is already in IST (local machine), use current time
+    istTime = now;
+  } else {
+    // Browser is in UTC or other timezone, convert to IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    istTime = new Date(now.getTime() + istOffset);
+  }
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toLocaleDateString('en-CA');
+  } else {
+    // After 11:30 AM IST - use current day
+    return istTime.toLocaleDateString('en-CA');
+  }
+}
+
 function Dashboard({ onNavigate }) {
   const [dashboardData, setDashboardData] = useState({
     stockValue: 0,
@@ -11,10 +40,34 @@ function Dashboard({ onNavigate }) {
     counterBalance: 0
   });
   const [loading, setLoading] = useState(true);
+  const [businessDate, setBusinessDate] = useState(getBusinessDate());
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
   const shopName = user.shopName || 'Liquor Ledger';
+
+  // Monitor business date changes
+  useEffect(() => {
+    const checkBusinessDate = () => {
+      const newBusinessDate = getBusinessDate();
+      if (newBusinessDate !== businessDate) {
+        setBusinessDate(newBusinessDate);
+      }
+    };
+
+    // Check immediately
+    checkBusinessDate();
+    
+    // Check every minute for business date changes
+    const interval = setInterval(checkBusinessDate, 60000);
+    
+    return () => clearInterval(interval);
+  }, [businessDate]);
+
+  // Fetch data when business date changes
+  useEffect(() => {
+    fetchDashboardData();
+  }, [businessDate]);
 
   const fetchDashboardData = async () => {
     try { 
@@ -29,7 +82,7 @@ function Dashboard({ onNavigate }) {
         const initData = await initResponse.json();
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/summary`, {
+      const response = await fetch(`${API_BASE_URL}/api/summary?date=${businessDate}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -67,9 +120,8 @@ function Dashboard({ onNavigate }) {
     setLoading(false);
   };
 
+  // Refresh dashboard data every 30 seconds
   useEffect(() => {
-    fetchDashboardData();
-    // Refresh dashboard data every 30 seconds
     const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -83,12 +135,21 @@ function Dashboard({ onNavigate }) {
   };
 
   const formatDate = () => {
-    // Always show current system date for display
-    const date = new Date();
+    // Show business date for display
+    const date = new Date(businessDate);
     const day = date.getDate().toString().padStart(2, '0');
     const month = date.toLocaleString('en-US', { month: 'long' });
     const year = date.getFullYear();
     return `${day} ${month} ${year}`;
+  };
+
+  const formatBusinessDate = () => {
+    // Format business date as DD-MM-YYYY
+    const date = new Date(businessDate);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
   };
 
   if (loading) {
@@ -112,15 +173,15 @@ function Dashboard({ onNavigate }) {
           <button className="nav-button" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
           <button className="nav-button" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-button" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-button">Reports</button>
+          <button className="nav-button" onClick={() => onNavigate('reports')}>Reports</button>
           <button className="nav-button">Settings</button>
         </nav>
       </header>
       
       <main className="dashboard-content">
-        <div className="page-header">
+        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 className="page-title">Dashboard Overview</h2>
-          <p className="page-date"><strong>{formatDate()}</strong></p>
+          <p className="business-date-right" style={{ margin: 0, marginRight: '20px', fontSize: '16px', fontWeight: 'bold' }}>Business Date: {formatBusinessDate()}</p>
         </div>
         
         <div className="metrics-grid">

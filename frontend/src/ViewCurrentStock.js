@@ -2,6 +2,35 @@ import React, { useState, useEffect } from 'react';
 import './ViewCurrentStock.css';
 import API_BASE_URL from './config';
 
+// Helper function to get business date (day starts at 11:30 AM IST)
+function getBusinessDate() {
+  const now = new Date();
+  
+  // Check if browser is already in IST timezone
+  const browserTimezoneOffset = now.getTimezoneOffset();
+  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
+  
+  let istTime;
+  if (browserTimezoneOffset === istTimezoneOffset) {
+    // Browser is already in IST (local machine), use current time
+    istTime = now;
+  } else {
+    // Browser is in UTC or other timezone, convert to IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    istTime = new Date(now.getTime() + istOffset);
+  }
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toLocaleDateString('en-CA');
+  } else {
+    // After 11:30 AM IST - use current day
+    return istTime.toLocaleDateString('en-CA');
+  }
+}
+
 function ViewCurrentStock({ onNavigate }) {
  const [inventory, setInventory] = useState([]);
  const [loading, setLoading] = useState(true);
@@ -9,11 +38,30 @@ function ViewCurrentStock({ onNavigate }) {
  const [editValues, setEditValues] = useState({});
  const [draggedItem, setDraggedItem] = useState(null);
  const [dragOverItem, setDragOverItem] = useState(null);
+ const [businessDate, setBusinessDate] = useState(getBusinessDate());
 
 
  const user = JSON.parse(localStorage.getItem('user') || '{}');
  const token = localStorage.getItem('token');
  const shopName = user.shopName || 'test wines';
+
+ // Monitor business date changes
+ useEffect(() => {
+   const checkBusinessDate = () => {
+     const newBusinessDate = getBusinessDate();
+     if (newBusinessDate !== businessDate) {
+       setBusinessDate(newBusinessDate);
+     }
+   };
+
+   // Check immediately
+   checkBusinessDate();
+   
+   // Check every minute for business date changes
+   const interval = setInterval(checkBusinessDate, 60000);
+   
+   return () => clearInterval(interval);
+ }, [businessDate]);
 
  useEffect(() => {
    fetchInventory();
@@ -49,6 +97,15 @@ function ViewCurrentStock({ onNavigate }) {
  const getBaseName = (productName) => {
  // Remove size information to get base brand name
  return productName.replace(/\s+(90ml|180ml|375ml|750ml|1000ml|2000ml|60ml|500ml|650ml|330ml|275ml).*$/i, '').trim();
+};
+
+const formatBusinessDate = () => {
+  // Format business date as DD-MM-YYYY
+  const date = new Date(businessDate);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
 };
 
 const groupedInventory = (Array.isArray(inventory) ? inventory : []).reduce((groups, item) => {
@@ -225,14 +282,26 @@ Object.keys(groupedInventory).forEach(baseName => {
          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
          <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
                    <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn">Reports</button>
+          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
          <button className="nav-btn">Settings</button>
        </nav>
      </header>
 
      <main className="view-stock-content">
-       <div className="page-title-section">
-         <h2 className="main-title"> Current Stock </h2>
+       <div className="page-title-section" style={{ textAlign: 'center', marginBottom: '3rem' }}>
+         <h2 className="main-title" style={{ 
+           fontSize: '2.5rem', 
+           fontWeight: '700', 
+           color: '#2d3748', 
+           margin: '0 0 0.5rem 0',
+           textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+         }}>Current Stock</h2>
+         <p className="business-date-subtitle" style={{ 
+           margin: 0, 
+           fontSize: '1.125rem', 
+           color: '#718096',
+           fontWeight: '400'
+         }}>Business Date: {formatBusinessDate()}</p>
        </div>
 
        <div className="table-container">
