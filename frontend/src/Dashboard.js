@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './Dashboard.css';
 import API_BASE_URL from './config';
 
@@ -37,7 +37,9 @@ function Dashboard({ onNavigate }) {
     stockLiftedInvoiceValue: 0,
     stockLiftedMrpValue: 0,
     todaysSale: 0,
-    counterBalance: 0
+    counterBalance: 0,
+    totalAmountCollected: 0,
+    balanceStatus: 'BALANCED'
   });
   const [loading, setLoading] = useState(true);
   const [businessDate, setBusinessDate] = useState(getBusinessDate());
@@ -64,12 +66,7 @@ function Dashboard({ onNavigate }) {
     return () => clearInterval(interval);
   }, [businessDate]);
 
-  // Fetch data when business date changes
-  useEffect(() => {
-    fetchDashboardData();
-  }, [businessDate]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try { 
       const initResponse = await fetch(`${API_BASE_URL}/api/stock/initialize-today`, {
         headers: {
@@ -97,34 +94,47 @@ function Dashboard({ onNavigate }) {
           stockLiftedInvoiceValue: data.stockLiftedInvoiceValue || 0,
           stockLiftedMrpValue: data.stockLiftedMrpValue || 0,
           todaysSale: data.totalSales || 0,      
-          counterBalance: data.counterBalance || 0
+          counterBalance: data.counterBalance || 0,
+          totalAmountCollected: data.totalAmountCollected || 0,
+          balanceStatus: data.balanceStatus || 'BALANCED'
         });
       } else {
+        console.error('Failed to fetch dashboard data:', response.status, response.statusText);
         setDashboardData({
           stockValue: 0,
           stockLiftedInvoiceValue: 0,
           stockLiftedMrpValue: 0,
           todaysSale: 0,
-          counterBalance: 0
+          counterBalance: 0,
+          totalAmountCollected: 0,
+          balanceStatus: 'BALANCED'
         });
       }
     } catch (error) {
+      console.error('Error fetching dashboard data:', error);
       setDashboardData({
         stockValue: 0,
         stockLiftedInvoiceValue: 0,
         stockLiftedMrpValue: 0,
         todaysSale: 0,
-        counterBalance: 0
+        counterBalance: 0,
+        totalAmountCollected: 0,
+        balanceStatus: 'BALANCED'
       });
     }
     setLoading(false);
-  };
+  }, [businessDate, token]);
+
+  // Fetch data when business date changes
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   // Refresh dashboard data every 30 seconds
   useEffect(() => {
     const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDashboardData]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', {
@@ -227,7 +237,8 @@ function Dashboard({ onNavigate }) {
               <h3 className="metric-title">Counter Balance</h3>
               <p className="metric-value">{formatCurrency(dashboardData.counterBalance)}</p>
               <p className="metric-subtitle">
-                {dashboardData.counterBalance >= 0 ? 'cash short' : 'cash surplus'}
+                {dashboardData.balanceStatus === 'SHORT' ? 'Cash Short' : 
+                 dashboardData.balanceStatus === 'SURPLUS' ? 'Cash Surplus' : 'Balanced'}
               </p>
             </div>
           </div>

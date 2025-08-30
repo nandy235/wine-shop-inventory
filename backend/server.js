@@ -470,7 +470,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
         console.log(`\n📄 Processing: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
 
         // Check if product exists in shop inventory
-        let shopProducts = await dbService.getShopProducts(userId);
+        let shopProducts = await dbService.getShopProducts(shopId);
         console.log(`🔍 Looking for: ${item.brandNumber} ${item.formattedSize}`);
         console.log(`📦 Available products: ${shopProducts.length}`);
         
@@ -1158,13 +1158,15 @@ app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
 app.get('/api/summary', authenticateToken, async (req, res) => {
   try {
     const shopId = req.user.shopId;
-    const today = getBusinessDate();
+    const { date } = req.query;
+    const targetDate = date || getBusinessDate();
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
     }
     
-    const summary = await dbService.getSummary(shopId, today);
+    console.log(`📊 Getting summary for shop ${shopId} on date ${targetDate}`);
+    const summary = await dbService.getSummary(shopId, targetDate);
     res.json(summary);
   } catch (error) {
     console.error('Error getting summary:', error);

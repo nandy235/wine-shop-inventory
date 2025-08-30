@@ -75,8 +75,7 @@ function TrackPayments({ onNavigate }) {
   const [openingBalance, setOpeningBalance] = useState('');
   const [paymentsModified, setPaymentsModified] = useState(false);
   const [openingBalanceSet, setOpeningBalanceSet] = useState(false);
-  const [showBalanceDialog, setShowBalanceDialog] = useState(false);
-  const [tempOpeningBalance, setTempOpeningBalance] = useState('');
+  // Removed manual balance setting - now automatically uses previous day's closing balance
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const shopName = user.shopName || 'Liquor Ledger';
@@ -104,6 +103,7 @@ function TrackPayments({ onNavigate }) {
   }, [currentBusinessDate, selectedDate]);
 
   useEffect(() => {
+    console.log(`🔄 TrackPayments: Date changed to ${selectedDate}, loading data...`);
     loadData();
   }, [selectedDate]);
 
@@ -162,6 +162,13 @@ function TrackPayments({ onNavigate }) {
 
       if (summaryResponse.ok) {
         const summary = await summaryResponse.json();
+        console.log(`📊 Summary API Response for ${selectedDate}:`, {
+          totalSales: summary.totalSales,
+          totalOtherIncome: summary.totalOtherIncome,
+          totalExpenses: summary.totalExpenses,
+          counterBalance: summary.counterBalance,
+          openingBalance: summary.openingBalance
+        });
         setSummaryData(prev => ({
           ...prev,
           todaysSale: summary.totalSales || 0,
@@ -169,19 +176,9 @@ function TrackPayments({ onNavigate }) {
           totalExpenses: summary.totalExpenses || 0
         }));
         
-        // Check if opening balance was ever manually set (lifetime setting)
-        const balanceKey = `openingBalance_lifetime`;
-        const manuallySet = localStorage.getItem(balanceKey);
-        
-        if (manuallySet) {
-          // Opening balance was set once for lifetime, now use previous day's closing balance
-          setOpeningBalance((summary.openingBalance || 0).toString());
-          setOpeningBalanceSet(true);
-        } else {
-          // Never been set, allow manual setting
-          setOpeningBalance((summary.openingBalance || 0).toString());
-          setOpeningBalanceSet(false);
-        }
+        // Always use previous day's closing balance as opening balance
+        setOpeningBalance((summary.openingBalance || 0).toString());
+        setOpeningBalanceSet(true); // Always set as automatic (no manual override needed)
       }
 
     } catch (error) {
@@ -201,39 +198,7 @@ function TrackPayments({ onNavigate }) {
     }
   };
 
-  const handleOpeningBalanceClick = () => {
-    if (!openingBalanceSet) {
-      setTempOpeningBalance(openingBalance);
-      setShowBalanceDialog(true);
-    }
-  };
-
-  const handleBalanceDialogSave = () => {
-    if (tempOpeningBalance && /^\d+\.?\d{0,2}$/.test(tempOpeningBalance)) {
-      setOpeningBalance(tempOpeningBalance);
-      // Save to localStorage as lifetime setting
-      const balanceKey = `openingBalance_lifetime`;
-      localStorage.setItem(balanceKey, 'true');
-      setOpeningBalanceSet(true);
-      setShowBalanceDialog(false);
-      setMessage('Opening balance set successfully! From now on, it will use previous day closing balance.');
-      setMessageType('success');
-    }
-  };
-
-  const handleBalanceDialogCancel = () => {
-    setTempOpeningBalance('');
-    setShowBalanceDialog(false);
-  };
-
-  const handleResetOpeningBalance = () => {
-    const balanceKey = `openingBalance_lifetime`;
-    localStorage.removeItem(balanceKey);
-    setOpeningBalanceSet(false);
-    setOpeningBalance('0');
-    setMessage('Opening balance reset successfully! You can now set it for the first time again.');
-    setMessageType('success');
-  };
+  // Manual opening balance functions removed - now automatically uses previous day's closing balance
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -336,26 +301,10 @@ function TrackPayments({ onNavigate }) {
                   <span className="balance-label">Opening Counter Balance:</span>
                   <span className="balance-amount">{formatCurrency(parseFloat(openingBalance) || 0)}</span>
                 </div>
-                <div className="balance-button-section">
-                  {!openingBalanceSet && (
-                    <button 
-                      type="button" 
-                      onClick={handleOpeningBalanceClick}
-                      className="set-balance-btn"
-                    >
-                      SET
-                    </button>
-                  )}
-                  {openingBalanceSet && (
-                    <button 
-                      type="button" 
-                      onClick={handleResetOpeningBalance}
-                      className="reset-balance-btn"
-                      title="Reset opening balance"
-                    >
-                      Reset
-                    </button>
-                  )}
+                <div className="balance-note">
+                  <small style={{color: '#666', fontStyle: 'italic'}}>
+                    Automatically set from previous day's closing balance
+                  </small>
                 </div>
               </div>
               
@@ -365,11 +314,7 @@ function TrackPayments({ onNavigate }) {
               </div>
             </div>
 
-            {openingBalanceSet && (
-              <div className="balance-status">
-                <small>Opening balance was set (lifetime). Now using previous day's closing balance.</small>
-              </div>
-            )}
+
 
             <table className="payments-table">
               <thead>
@@ -450,50 +395,7 @@ function TrackPayments({ onNavigate }) {
         </div>
 
         {/* Opening Balance Dialog */}
-        {showBalanceDialog && (
-          <div className="dialog-overlay">
-            <div className="dialog-box">
-              <h3>Set Opening Counter Balance</h3>
-              <p className="dialog-warning">
-                ⚠️ <strong>Important:</strong> Opening balance can be set only once for the lifetime of your shop. 
-                After this, the system will automatically use the previous day's closing balance as opening balance. 
-                You will need admin permission to manually update it later.
-              </p>
-              <div className="dialog-input-section">
-                <label>Enter Opening Balance:</label>
-                <input
-                  type="text"
-                  value={tempOpeningBalance}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === '' || /^\d+\.?\d{0,2}$/.test(value)) {
-                      setTempOpeningBalance(value);
-                    }
-                  }}
-                  placeholder="0.0"
-                  autoFocus
-                />
-              </div>
-              <div className="dialog-buttons">
-                <button 
-                  type="button" 
-                  onClick={handleBalanceDialogCancel}
-                  className="dialog-btn-cancel"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="button" 
-                  onClick={handleBalanceDialogSave}
-                  className="dialog-btn-save"
-                  disabled={!tempOpeningBalance}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+d         {/* Manual balance dialog removed - now automatically uses previous day's closing balance */}
 
         {existingPayments.length > 0 && (
           <div className="track-payments-history-section">

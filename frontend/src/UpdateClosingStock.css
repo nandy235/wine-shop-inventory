@@ -188,6 +188,8 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   margin-bottom: 2rem;
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
 .update-closing-stock-table {
@@ -204,6 +206,9 @@
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .update-closing-stock-table td {

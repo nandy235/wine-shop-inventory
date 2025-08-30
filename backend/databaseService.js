@@ -1102,15 +1102,19 @@ class DatabaseService {
   }
 
   async savePaymentRecord(shopId, paymentDate, cashAmount, upiAmount, cardAmount) {
+    // First, calculate the closing counter balance
+    const closingBalance = await this.calculateClosingCounterBalance(shopId, paymentDate, cashAmount, upiAmount, cardAmount);
+    
     const query = `
-      INSERT INTO daily_payments (shop_id, payment_date, cash_amount, upi_amount, card_amount)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO daily_payments (shop_id, payment_date, cash_amount, upi_amount, card_amount, closing_counter_balance)
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (shop_id, payment_date)
       DO UPDATE SET
         cash_amount = EXCLUDED.cash_amount,
         upi_amount = EXCLUDED.upi_amount,
-        card_amount = EXCLUDED.card_amount
-      RETURNING id, payment_date, cash_amount, upi_amount, card_amount, total_amount, created_at
+        card_amount = EXCLUDED.card_amount,
+        closing_counter_balance = EXCLUDED.closing_counter_balance
+      RETURNING id, payment_date, cash_amount, upi_amount, card_amount, total_amount, closing_counter_balance, created_at
     `;
     
     // Retry logic for database connection issues
@@ -1119,9 +1123,9 @@ class DatabaseService {
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`💾 Attempting to save payment record (attempt ${attempt}/${maxRetries})`);
-        const result = await pool.query(query, [shopId, paymentDate, cashAmount, upiAmount, cardAmount]);
-        console.log(`✅ Payment record saved successfully on attempt ${attempt}`);
+        console.log(`💾 Attempting to save payment record with closing balance (attempt ${attempt}/${maxRetries})`);
+        const result = await pool.query(query, [shopId, paymentDate, cashAmount, upiAmount, cardAmount, closingBalance]);
+        console.log(`✅ Payment record saved successfully on attempt ${attempt} with closing balance: ${closingBalance}`);
         return result.rows[0];
       } catch (error) {
         lastError = error;
@@ -1144,6 +1148,29 @@ class DatabaseService {
     
     // If we get here, all retries failed
     throw lastError;
+  }
+
+  // Helper method to calculate closing counter balance
+  async calculateClosingCounterBalance(shopId, paymentDate, cashAmount, upiAmount, cardAmount) {
+    try {
+      console.log(`🔄 Calculating closing counter balance for shop ${shopId} on ${paymentDate}`);
+      
+      // Get the summary data for the date to calculate closing balance
+      const summaryData = await this.getSummary(shopId, paymentDate);
+      
+      // Calculate total amount collected
+      const totalAmountCollected = parseFloat(cashAmount) + parseFloat(upiAmount) + parseFloat(cardAmount);
+      
+      // Closing Balance = Opening + Sales + Other Income - Expenses - Total Amount Collected
+      const closingBalance = summaryData.openingBalance + summaryData.totalSales + summaryData.totalOtherIncome - summaryData.totalExpenses - totalAmountCollected;
+      
+      console.log(`💾 Closing balance calculated: ${closingBalance} (will be saved to daily_payments)`);
+      
+      return Math.round(closingBalance * 100) / 100; // Round to 2 decimal places
+    } catch (error) {
+      console.error('❌ Error calculating closing counter balance:', error);
+      return 0; // Default to 0 if calculation fails
+    }
   }
 
 
