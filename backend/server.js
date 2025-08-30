@@ -52,7 +52,7 @@ function getBusinessDate() {
   }
 }
 
-async function loadMasterBrandsFromDB(packTypeFilter = null) {
+async function loadMasterBrandsFromDB(packTypeFilter = null, applyStockOnboardingLogic = false) {
   try {
     const { pool } = require('./database');
     
@@ -89,15 +89,57 @@ async function loadMasterBrandsFromDB(packTypeFilter = null) {
       queryParams.push(packTypeFilter);
     }
     
-    query += ` ORDER BY brand_number, size_ml`;
+    query += ` ORDER BY brand_number, size_ml, pack_type`;
     
     const result = await pool.query(query, queryParams);
     
-    const loadedData = result.rows;
-    console.log(`✅ Loaded ${loadedData.length} master brands from database${packTypeFilter ? ` (filtered by pack types: ${packTypeFilter.join(', ')})` : ''}`);
+    let loadedData = result.rows;
     
-    // Only update global cache if loading all brands
-    if (!packTypeFilter) {
+    // Apply stock onboarding logic if requested
+    if (applyStockOnboardingLogic) {
+      const filteredData = [];
+      const processedKeys = new Set();
+      
+      // Group by brand_number + size_code to handle G/P preference logic
+      const brandGroups = {};
+      
+      loadedData.forEach(brand => {
+        const key = `${brand.brandNumber}_${brand.sizeCode}`;
+        if (!brandGroups[key]) {
+          brandGroups[key] = [];
+        }
+        brandGroups[key].push(brand);
+      });
+      
+      // Process each group
+      Object.values(brandGroups).forEach(group => {
+        // Always include C and B types
+        const cAndBTypes = group.filter(brand => ['C', 'B'].includes(brand.packType));
+        filteredData.push(...cAndBTypes);
+        
+        // Handle G and P types with preference logic
+        const gTypes = group.filter(brand => brand.packType === 'G');
+        const pTypes = group.filter(brand => brand.packType === 'P');
+        
+        if (gTypes.length > 0 && pTypes.length > 0) {
+          // Both G and P exist - prefer G
+          filteredData.push(...gTypes);
+        } else if (gTypes.length > 0) {
+          // Only G exists
+          filteredData.push(...gTypes);
+        } else if (pTypes.length > 0) {
+          // Only P exists
+          filteredData.push(...pTypes);
+        }
+      });
+      
+      loadedData = filteredData;
+    }
+    
+    console.log(`✅ Loaded ${loadedData.length} master brands from database${packTypeFilter ? ` (filtered by pack types: ${packTypeFilter.join(', ')})` : ''}${applyStockOnboardingLogic ? ' with stock onboarding logic' : ''}`);
+    
+    // Only update global cache if loading all brands without special logic
+    if (!packTypeFilter && !applyStockOnboardingLogic) {
       masterBrandsData = loadedData;
     }
     
@@ -756,12 +798,15 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
 app.get('/api/master-brands', authenticateToken, async (req, res) => {
   try {
     // Check if filtering by pack types for stock onboarding
-    const { packTypes } = req.query;
+    const { packTypes, stockOnboarding } = req.query;
     
     if (packTypes) {
-      // Filter for stock onboarding (G, B, C pack types only)
       const allowedPackTypes = packTypes.split(',').map(p => p.trim());
-      const freshMasterBrands = await loadMasterBrandsFromDB(allowedPackTypes);
+      
+      // Apply special stock onboarding logic if requested
+      const applyStockOnboardingLogic = stockOnboarding === 'true';
+      
+      const freshMasterBrands = await loadMasterBrandsFromDB(allowedPackTypes, applyStockOnboardingLogic);
       res.json(freshMasterBrands);
     } else {
       // Get all master brands

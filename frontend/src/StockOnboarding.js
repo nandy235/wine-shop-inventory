@@ -22,8 +22,9 @@ function StockOnboarding({ onNavigate }) {
 
   const fetchMasterBrands = async () => {
     try {
-      // Only fetch brands with pack types G, B, C for stock onboarding
-      const response = await fetch(`${API_BASE_URL}/api/master-brands?packTypes=G,B,C`, {
+      // Fetch brands with pack types C, B, G, P with stock onboarding logic
+      // Logic: All C and B types + G/P preference (G preferred if both exist, otherwise the available one)
+      const response = await fetch(`${API_BASE_URL}/api/master-brands?packTypes=C,B,G,P&stockOnboarding=true`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
