@@ -92,7 +92,7 @@ psql -d your_database -f 05_sanity_checks.sql
 5. **Auto-calculation**: Sales and sale_value update automatically
 
 ### Invoice Processing Workflow
-1. Parse invoice PDF → Extract brand details
+1. Read invoice PDF → Extract brand details
 2. Insert into `invoice_brands` → Auto-linking trigger fires
 3. Check `match_confidence` and `match_method` for quality
 4. Manual review for unmatched brands (`master_brand_id IS NULL`)

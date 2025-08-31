@@ -98,14 +98,12 @@
   align-items: center;
   gap: 20px;
   transition: all 0.3s ease;
-  border: 2px dashed transparent;
   border-radius: 12px;
-  padding: 20px;
+  padding: 40px 20px;
 }
 
-.upload-invoice-container .upload-area.drag-active {
-  border-color: #667eea;
-  background-color: rgba(102, 126, 234, 0.1);
+.upload-invoice-container .upload-area.has-file {
+  background-color: rgba(72, 187, 120, 0.05);
 }
 
 .upload-invoice-container .upload-icon {
@@ -125,12 +123,7 @@
   margin: 0;
 }
 
-.upload-invoice-container .drag-info {
-  color: #888;
-  font-size: 12px;
-  margin: 0;
-  font-style: italic;
-}
+
 
 .upload-invoice-container .file-select-btn {
   padding: 12px 30px;
@@ -146,6 +139,13 @@
 .upload-invoice-container .file-select-btn:hover {
   background: #5a67d8;
   transform: translateY(-1px);
+}
+
+.upload-invoice-container .file-requirements {
+  font-size: 14px;
+  color: #666;
+  margin: 0 0 20px 0;
+  font-style: italic;
 }
 
 .upload-invoice-container .selected-file {
@@ -164,6 +164,8 @@
   font-size: 12px;
   color: #666;
 }
+
+
 
 .upload-invoice-container .upload-btn {
   padding: 12px 40px;

@@ -272,10 +272,21 @@
 }
 
 .stock-onboarding-container .field-input:focus {
- outline: none;
- border-color: #7C3AED;
- background-color: white;
- box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  outline: none;
+  border-color: #7C3AED;
+  background-color: white;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+/* Hide number input spinners/arrows */
+.stock-onboarding-container .field-input::-webkit-outer-spin-button,
+.stock-onboarding-container .field-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.stock-onboarding-container .field-input[type=number] {
+  -moz-appearance: textfield;
 }
 
 .stock-onboarding-container .calc-display {

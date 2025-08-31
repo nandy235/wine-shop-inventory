@@ -7,7 +7,7 @@ function UploadInvoice({ onNavigate }) {
   const [uploading, setUploading] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
+
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
@@ -52,34 +52,7 @@ function UploadInvoice({ onNavigate }) {
     }
   };
 
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      console.log('File dropped:', file);
-      
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        setSelectedFile(file);
-        setParsedData(null);
-        console.log('PDF file accepted via drop:', file.name);
-      } else {
-        alert('Please select a PDF file');
-      }
-    }
-  };
 
   const handleUpload = async () => {
     if (!selectedFile) {
@@ -103,7 +76,7 @@ function UploadInvoice({ onNavigate }) {
       if (response.ok) {
         const data = await response.json();
         setParsedData(data);
-        alert(`✅ Invoice parsed successfully! Found ${data.items.length} items.`);
+        alert(`✅ Invoice processed successfully! Found ${data.items.length} items.`);
       } else {
         const error = await response.json();
         alert(`❌ Error: ${error.message}`);
@@ -225,17 +198,21 @@ function UploadInvoice({ onNavigate }) {
 
         <div className="upload-section">
           <div className="upload-card">
-            <div 
-              className={`upload-area ${dragActive ? 'drag-active' : ''}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-            >
-              <div className="upload-icon">📄</div>
-              <h3>Select Invoice PDF</h3>
-              <p className="upload-info">Upload your government invoice to automatically parse and add to received stock</p>
-              <p className="drag-info">You can also drag and drop a PDF file here</p>
+            <div className={`upload-area ${selectedFile ? 'has-file' : ''}`}>
+              <div className="upload-icon">
+                {selectedFile ? '✅' : '📄'}
+              </div>
+              <h3>{selectedFile ? 'File Selected' : 'Select Invoice PDF'}</h3>
+              {!selectedFile && (
+                <p className="file-requirements">
+                  (PDF files only, max 5MB)
+                </p>
+              )}
+              {!selectedFile && (
+                <p className="upload-info">
+                  Upload your government invoice to automatically read and add to received stock
+                </p>
+              )}
               
               <input
                 type="file"
@@ -266,7 +243,7 @@ function UploadInvoice({ onNavigate }) {
                 onClick={handleUpload}
                 disabled={!selectedFile || uploading}
               >
-                {uploading ? 'Parsing Invoice...' : 'Parse Invoice'}
+                {uploading ? 'Reading Invoice...' : 'Read Invoice'}
               </button>
             </div>
           </div>

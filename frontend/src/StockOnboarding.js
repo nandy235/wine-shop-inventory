@@ -49,22 +49,27 @@ function StockOnboarding({ onNavigate }) {
   };
 
   const handleProductClick = (product) => {
-    setCurrentProduct(product);
-    setCases(0);
-    setBottles(0);
-    setMarkup(0);
+    // Only reset values if selecting a different product
+    if (!currentProduct || currentProduct.id !== product.id) {
+      setCurrentProduct(product);
+      setCases(0);
+      setBottles(0);
+      setMarkup(0);
+    }
   };
 
   const handleBottlesChange = (value) => {
     const newBottles = parseInt(value) || 0;
     const packQuantity = currentProduct.packQuantity;
     
-    if (newBottles >= packQuantity) {
+    // Only convert bottles to cases if cases field has a value (> 0)
+    if (cases > 0 && newBottles >= packQuantity) {
       const extraCases = Math.floor(newBottles / packQuantity);
       const remainingBottles = newBottles % packQuantity;
       setCases(cases + extraCases);
       setBottles(remainingBottles);
     } else {
+      // If cases is 0 or empty, just set bottles without conversion
       setBottles(newBottles);
     }
   };
@@ -82,6 +87,14 @@ function StockOnboarding({ onNavigate }) {
 
     try {
       const totalBottles = calculateTotalBottles();
+      const requestData = {
+        masterBrandId: currentProduct.id,
+        quantity: totalBottles,
+        shopMarkup: markup
+      };
+      
+      console.log('📤 Sending product data:', requestData);
+      console.log('💰 MRP:', currentProduct.mrp, 'Markup:', markup, 'Expected Final:', (parseFloat(currentProduct.mrp) + parseFloat(markup)));
     
       const response = await fetch(`${API_BASE_URL}/api/shop/add-product`, {
         method: 'POST',
@@ -89,11 +102,7 @@ function StockOnboarding({ onNavigate }) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          masterBrandId: currentProduct.id,
-          quantity: totalBottles,
-          shopMarkup: markup
-        })
+        body: JSON.stringify(requestData)
       });
 
       if (response.ok) {
@@ -186,7 +195,7 @@ function StockOnboarding({ onNavigate }) {
                     <div className="product-info">
                       <h4 className="product-name">{brand.name}</h4>
                       <p className="product-detail">Brand #{brand.brandNumber}</p>
-                      <p className="product-detail">{brand.packQuantity} × {brand.size}</p>
+                      <p className="product-detail">{brand.packQuantity} × {brand.size}ml</p>
                       <p className="product-price">MRP: ₹{brand.mrp}</p>
                     </div>
                   </div>
@@ -202,8 +211,7 @@ function StockOnboarding({ onNavigate }) {
                 <div className="product-header">
                   <h4 className="selected-name">{currentProduct.name}</h4>
                   <p className="selected-info">
-                    Brand #{currentProduct.brandNumber} | {getSizeCode(currentProduct.packQuantity)} | 
-                    {currentProduct.packQuantity} × {currentProduct.size} | MRP: ₹{currentProduct.mrp}
+                    Brand #{currentProduct.brandNumber} | {getSizeCode(currentProduct.packQuantity)} | {currentProduct.packQuantity} × {currentProduct.size}ml | MRP: ₹{currentProduct.mrp}
                   </p>
                 </div>
                 
@@ -212,8 +220,9 @@ function StockOnboarding({ onNavigate }) {
                     <label>Cases:</label>
                     <input
                       type="number"
-                      value={cases}
+                      value={cases === 0 ? '' : cases}
                       onChange={(e) => setCases(parseInt(e.target.value) || 0)}
+                      onFocus={(e) => e.target.select()}
                       min="0"
                       className="field-input"
                     />
@@ -223,8 +232,9 @@ function StockOnboarding({ onNavigate }) {
                     <label>Bottles:</label>
                     <input
                       type="number"
-                      value={bottles}
+                      value={bottles === 0 ? '' : bottles}
                       onChange={(e) => handleBottlesChange(e.target.value)}
+                      onFocus={(e) => e.target.select()}
                       min="0"
                       className="field-input"
                     />
@@ -234,8 +244,13 @@ function StockOnboarding({ onNavigate }) {
                     <label>Markup (₹):</label>
                     <input
                       type="number"
-                      value={markup}
-                      onChange={(e) => setMarkup(parseFloat(e.target.value) || 0)}
+                      value={markup === 0 ? '' : markup}
+                      onChange={(e) => {
+                        const newMarkup = parseFloat(e.target.value) || 0;
+                        console.log('🏷️ Markup changed:', e.target.value, '→', newMarkup);
+                        setMarkup(newMarkup);
+                      }}
+                      onFocus={(e) => e.target.select()}
                       min="0"
                       step="0.01"
                       className="field-input"

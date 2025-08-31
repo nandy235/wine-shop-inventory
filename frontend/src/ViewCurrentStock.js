@@ -78,6 +78,12 @@ function ViewCurrentStock({ onNavigate }) {
 
          if (response.ok) {
       const data = await response.json();
+      console.log('📊 Inventory data received:', data.products);
+      // Debug: Check if finalPrice is being received correctly
+      if (data.products && data.products.length > 0) {
+        console.log('🔍 First product finalPrice:', data.products[0].finalPrice);
+        console.log('🔍 First product MRP:', data.products[0].mrp);
+      }
       setInventory(data.products || []);
     }
      } catch (error) {

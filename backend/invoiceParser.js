@@ -266,13 +266,17 @@ class HybridInvoiceParser {
               bottles = parseInt(casesBottles.substring(1));
             } else if (casesBottles.length === 3) {
               // "500" = 50 cases, 0 bottles OR "423" = 4 cases, 23 bottles OR "423" = 42 cases, 3 bottles
-              const lastTwoDigits = casesBottles.substring(1);
-              if (lastTwoDigits === '00') {
-                // "500" = 50 cases, 0 bottles
+              const lastDigit = casesBottles.substring(2);
+              
+              if (lastDigit === '0') {
+                // Numbers ending in 0: "740" = 74 cases, 0 bottles, "500" = 50 cases, 0 bottles
                 cases = parseInt(casesBottles.substring(0, 2));
                 bottles = 0;
+                console.log(`🎯 3-digit validation (ending in 0): "${casesBottles}" → ${cases}c, ${bottles}b`);
               } else {
+                // Numbers NOT ending in 0: Apply complex validation logic
                 // Need to determine: "423" = 4 cases, 23 bottles OR 42 cases, 3 bottles?
+                const lastTwoDigits = casesBottles.substring(1);
                 const option1_cases = parseInt(casesBottles.substring(0, 1)); // 4
                 const option1_bottles = parseInt(lastTwoDigits); // 23
                 const option2_cases = parseInt(casesBottles.substring(0, 2)); // 42
@@ -566,13 +570,17 @@ class HybridInvoiceParser {
                 parsedBottles = parseInt(casesBottles.substring(1));
               } else if (casesBottles.length === 3) {
                 // "500" = 50 cases, 0 bottles OR "423" = 4 cases, 23 bottles
-                const lastTwoDigits = casesBottles.substring(1);
-                if (lastTwoDigits === '00') {
-                  // "500" = 50 cases, 0 bottles
+                const lastDigit = casesBottles.substring(2);
+                
+                if (lastDigit === '0') {
+                  // Numbers ending in 0: "740" = 74 cases, 0 bottles, "500" = 50 cases, 0 bottles
                   parsedCases = parseInt(casesBottles.substring(0, 2));
                   parsedBottles = 0;
+                  console.log(`🎯 3-digit standalone validation (ending in 0): "${casesBottles}" → ${parsedCases}c, ${parsedBottles}b`);
                 } else {
+                  // Numbers NOT ending in 0: Apply complex validation logic
                   // Need to determine: "423" = 4 cases, 23 bottles OR 42 cases, 3 bottles?
+                  const lastTwoDigits = casesBottles.substring(1);
                   const option1_cases = parseInt(casesBottles.substring(0, 1)); // 4
                   const option1_bottles = parseInt(lastTwoDigits); // 23
                   const option2_cases = parseInt(casesBottles.substring(0, 2)); // 42

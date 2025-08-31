@@ -198,7 +198,8 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+    files: 1 // Only allow single file upload
   }
 });
 
@@ -331,7 +332,41 @@ app.post('/api/closing-stock/update', authenticateToken, async (req, res) => {
 // ===== INVOICE UPLOAD & PARSING ENDPOINTS =====
 
 // Parse uploaded invoice PDF
-app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), async (req, res) => {
+app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
+  upload.single('invoice')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          success: false,
+          message: 'File size exceeds limit'
+        });
+      }
+      if (err.message === 'Only PDF files are allowed') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid file type'
+        });
+      }
+      if (err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({
+          success: false,
+          message: 'Multiple file upload not supported'
+        });
+      }
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({
+          success: false,
+          message: 'Multiple file upload not supported'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'File upload error'
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     console.log('\n🚀 Invoice upload started...');
     
@@ -344,11 +379,44 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
     }
     
     if (!req.file) {
-      return res.status(400).json({ message: 'No PDF file uploaded' });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No file provided' 
+      });
     }
 
-    if (req.file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ message: 'Only PDF files are allowed' });
+    // Check if file is empty (0 bytes)
+    if (req.file.size === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'File is empty' 
+      });
+    }
+
+    // Check file type more comprehensively
+    const isValidPDF = req.file.mimetype === 'application/pdf' || 
+                       req.file.originalname.toLowerCase().endsWith('.pdf');
+    
+    // Check for malicious file extensions
+    const dangerousExtensions = ['.exe', '.php', '.js', '.bat', '.cmd', '.scr', '.vbs'];
+    const hasUnsafeExtension = dangerousExtensions.some(ext => 
+      req.file.originalname.toLowerCase().endsWith(ext)
+    );
+    
+    if (!isValidPDF || hasUnsafeExtension) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid file type'
+      });
+    }
+
+    // Check file size (set limit to 5MB)
+    const maxFileSize = 5 * 1024 * 1024; // 5MB in bytes
+    if (req.file.size > maxFileSize) {
+      return res.status(413).json({ 
+        success: false,
+        message: 'File size exceeds limit'
+      });
     }
     
     console.log(`👤 User: ${userId}, Shop: ${shopId}`);
@@ -367,7 +435,7 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
     if (!parseResult.success) {
       console.error('❌ Parsing failed:', parseResult.error);
       return res.status(400).json({ 
-        message: 'Failed to parse invoice', 
+        message: 'Failed to read invoice', 
         error: parseResult.error,
         confidence: parseResult.confidence 
       });
@@ -386,8 +454,9 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
 
     // Return the parsed and validated data WITH tempId for frontend display
     res.json({
+      success: true,
+      message: 'File uploaded successfully',
       tempId: tempId,
-      message: 'Invoice parsed successfully',
       confidence: parseResult.confidence,
       method: parseResult.method,
       invoiceNumber: parseResult.data.invoiceNumber,
@@ -406,9 +475,26 @@ app.post('/api/invoice/upload', authenticateToken, upload.single('invoice'), asy
 
   } catch (error) {
     console.error('❌ Invoice upload error:', error);
+    
+    // Provide more specific error messages based on error type
+    if (error.message && error.message.includes('PDF')) {
+      return res.status(400).json({ 
+        message: 'Invalid PDF file. Please ensure the file is a valid PDF document.',
+        error: 'PDF_PARSE_ERROR'
+      });
+    }
+    
+    if (error.message && error.message.includes('ENOENT')) {
+      return res.status(400).json({ 
+        message: 'File not found or corrupted. Please try uploading again.',
+        error: 'FILE_NOT_FOUND'
+      });
+    }
+    
+    // Generic server error for unexpected issues
     res.status(500).json({ 
-      message: 'Server error during invoice processing', 
-      error: error.message 
+      message: 'Server error during invoice processing. Please try again later.',
+      error: 'INTERNAL_SERVER_ERROR'
     });
   }
 });
@@ -861,8 +947,17 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
    
    const masterBrand = masterBrandResult.rows[0];
    const markupPrice = parseFloat(shopMarkup);
-   const finalPrice = masterBrand.standard_mrp + markupPrice;
+   const mrpPrice = parseFloat(masterBrand.standard_mrp);
+   const finalPrice = mrpPrice + markupPrice;
    const receivedQuantity = parseInt(quantity);
+   
+   console.log('💰 Price calculation:', {
+     mrpOriginal: masterBrand.standard_mrp,
+     mrpParsed: mrpPrice,
+     markup: markupPrice,
+     finalPrice: finalPrice,
+     shopMarkup: shopMarkup
+   });
    
    // Add or update product using UPSERT (handles both new and existing products)
    const productResult = await dbService.addShopProduct({
@@ -872,6 +967,8 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
      finalPrice: finalPrice,
      currentQuantity: receivedQuantity
    });
+   
+   console.log('📦 Product result:', productResult);
    
    const shopInventoryId = productResult.id;
    const wasUpdated = productResult.action === 'updated';
