@@ -69,6 +69,7 @@ function Dashboard({ onNavigate }) {
   const fetchDashboardData = useCallback(async () => {
     try { 
       const initResponse = await fetch(`${API_BASE_URL}/api/stock/initialize-today`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
