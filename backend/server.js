@@ -785,8 +785,13 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
     const shopId = req.user.shopId;
     const today = getBusinessDate();
     
-    const result = await dbService.initializeTodayStock(shopId, today);
-    res.json(result);
+    const recordCount = await dbService.initializeTodayStock(shopId, today);
+    res.json({ 
+      success: true,
+      message: `Successfully initialized stock for ${recordCount} products`,
+      recordCount: recordCount,
+      date: today
+    });
     
   } catch (error) {
     console.error('Error initializing today stock:', error);
