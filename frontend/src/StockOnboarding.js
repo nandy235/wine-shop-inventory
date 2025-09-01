@@ -196,6 +196,7 @@ function StockOnboarding({ onNavigate }) {
                       <h4 className="product-name">{brand.name}</h4>
                       <p className="product-detail">Brand #{brand.brandNumber}</p>
                       <p className="product-detail">{brand.packQuantity} × {brand.size}ml</p>
+
                       <p className="product-price">MRP: ₹{brand.mrp}</p>
                     </div>
                   </div>

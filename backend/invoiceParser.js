@@ -76,6 +76,7 @@ class HybridInvoiceParser {
             mrp: matchingBrand.mrp,
             category: matchingBrand.category,
             masterBrandId: matchingBrand.id,
+            packType: matchingBrand.packType, // Add pack type for matching
             formattedSize: this.formatSize(matchingBrand.sizeCode, matchingBrand.size),
             matched: true,
             confidence: 'high'

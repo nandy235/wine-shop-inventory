@@ -293,6 +293,7 @@ class DatabaseService {
         mb.size_code as "sizeCode",
         mb.brand_kind,
         mb.product_type,
+        mb.pack_type as "packType",
         CASE 
           WHEN mb.product_type = 'IML' THEN 'IML'
           WHEN mb.product_type = 'DUTY_PAID' THEN 'Duty Paid'
@@ -543,12 +544,14 @@ class DatabaseService {
           $2,
           CASE 
             WHEN prev.closing_stock IS NOT NULL THEN prev.closing_stock
-            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL THEN prev.opening_stock
+            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL AND prev.total_stock > 0 THEN prev.opening_stock
+            WHEN record_count.total_records IS NULL OR record_count.first_record_date = $2 THEN 0
+            WHEN prev.shop_inventory_id IS NULL OR (prev.total_stock IS NULL OR prev.total_stock = 0) THEN si.current_quantity
             ELSE 0
           END as opening_stock,
           CASE 
             WHEN prev.closing_stock IS NOT NULL THEN 0
-            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL THEN prev.received_stock
+            WHEN prev.closing_stock IS NULL AND prev.total_stock IS NOT NULL AND prev.total_stock > 0 THEN prev.received_stock
             ELSE 0
           END as received_stock,
           NULL as closing_stock
@@ -559,14 +562,16 @@ class DatabaseService {
             FROM daily_stock_records 
             WHERE shop_inventory_id = si.id AND stock_date < $2
           )
+        LEFT JOIN (
+          SELECT shop_inventory_id, COUNT(*) as total_records, MIN(stock_date) as first_record_date
+          FROM daily_stock_records 
+          GROUP BY shop_inventory_id
+        ) record_count ON record_count.shop_inventory_id = si.id
         WHERE si.shop_id = $1 
           AND si.is_active = true
         ON CONFLICT (shop_inventory_id, stock_date) 
         DO UPDATE SET 
-          opening_stock = CASE 
-            WHEN EXCLUDED.opening_stock > 0 THEN EXCLUDED.opening_stock 
-            ELSE daily_stock_records.opening_stock 
-          END,
+          opening_stock = EXCLUDED.opening_stock,
           -- Only reset received_stock to 0 if it's currently NULL
           received_stock = CASE 
             WHEN daily_stock_records.received_stock IS NULL THEN 0

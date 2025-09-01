@@ -163,6 +163,41 @@ const formatSize = (sizeCode, size) => {
   return size || '';
 };
 
+// Helper function to aggregate products by brandNumber + sizeCode (combine pack types)
+const aggregateProductsByBrandAndSize = (products) => {
+  const aggregatedMap = new Map();
+  
+  products.forEach(product => {
+    const key = `${product.brandNumber}_${product.sizeCode}`;
+    
+    if (aggregatedMap.has(key)) {
+      // Product already exists, aggregate quantities
+      const existing = aggregatedMap.get(key);
+      existing.quantity += product.quantity || 0;
+      existing.openingStock += product.openingStock || 0;
+      existing.receivedStock += product.receivedStock || 0;
+      existing.totalStock += product.totalStock || 0;
+      existing.closingStock = (existing.closingStock || 0) + (product.closingStock || 0);
+      
+      // Keep track of pack types for debugging
+      existing.packTypes = existing.packTypes || [];
+      if (!existing.packTypes.includes(product.packType)) {
+        existing.packTypes.push(product.packType);
+      }
+    } else {
+      // First occurrence of this brand+size combination
+      aggregatedMap.set(key, {
+        ...product,
+        packTypes: [product.packType], // Track pack types for debugging
+        // Note: We keep all other fields from the first occurrence
+        // (id, master_brand_id, etc. will be from the first pack type found)
+      });
+    }
+  });
+  
+  return Array.from(aggregatedMap.values());
+};
+
 const app = express();
 // --- Healthcheck (no auth) ---
 app.get(['/health', '/_health'], (req, res) => {
@@ -557,14 +592,16 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
 
         // Check if product exists in shop inventory
         let shopProducts = await dbService.getShopProducts(shopId);
-        console.log(`🔍 Looking for: ${item.brandNumber} ${item.formattedSize}`);
+        console.log(`🔍 Looking for: ${item.brandNumber} ${item.formattedSize} ${item.packType}`);
         console.log(`📦 Available products: ${shopProducts.length}`);
         
         let shopProduct = shopProducts.find(product => {
           const productFormattedSize = formatSize(product.sizeCode, product.size);
-          const matches = product.brandNumber === item.brandNumber && productFormattedSize === item.formattedSize;
+          const matches = product.brandNumber === item.brandNumber && 
+                         productFormattedSize === item.formattedSize &&
+                         product.packType === item.packType;
           if (matches) {
-            console.log(`✅ Match found: ${product.brandNumber} ${productFormattedSize}`);
+            console.log(`✅ Match found: ${product.brandNumber} ${productFormattedSize} ${product.packType}`);
           }
           return matches;
         });
@@ -951,6 +988,7 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
    const finalPrice = mrpPrice + markupPrice;
    const receivedQuantity = parseInt(quantity);
    
+
    console.log('💰 Price calculation:', {
      mrpOriginal: masterBrand.standard_mrp,
      mrpParsed: mrpPrice,
@@ -1031,14 +1069,18 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
     const initializedCount = await dbService.initializeTodayStock(shopId, targetDate);
     console.log(`📦 Initialized ${initializedCount} stock records for today`);
     
-    const products = await dbService.getShopProducts(shopId, targetDate);
-    console.log(`📋 Found ${products.length} products in shop inventory`);
+    const rawProducts = await dbService.getShopProducts(shopId, targetDate);
+    console.log(`📋 Found ${rawProducts.length} raw products in shop inventory`);
+    
+    // Aggregate products by brandNumber + sizeCode (combine pack types)
+    const aggregatedProducts = aggregateProductsByBrandAndSize(rawProducts);
+    console.log(`📊 Aggregated to ${aggregatedProducts.length} display products`);
     
     // Check if closing stock is already saved
     const closingStockStatus = await dbService.isClosingStockSaved(shopId, targetDate);
     
     res.json({
-      products: products,
+      products: aggregatedProducts,
       closingStockStatus: closingStockStatus,
       businessDate: targetDate
     });
