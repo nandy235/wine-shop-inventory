@@ -889,17 +889,17 @@ class DatabaseService {
       const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
       
-      // 2. Cumulative MRP Value (same products but at MRP prices)
+      // 2. Cumulative MRP Value (from received_stock_records with invoice quantities)
       const mrpValueQuery = `
         SELECT COALESCE(SUM(
-          ib.total_quantity * COALESCE(mb.standard_mrp, 0)
+          rsr.invoice_quantity * COALESCE(mb.standard_mrp, 0)
         ), 0) as cumulative_mrp_value
-        FROM invoices i
-        JOIN invoice_brands ib ON i.id = ib.invoice_id
-        LEFT JOIN master_brands mb ON ib.master_brand_id = mb.id
-        WHERE i.shop_id = $1 
-        AND EXTRACT(MONTH FROM i.created_at) = $2 
-        AND EXTRACT(YEAR FROM i.created_at) = $3
+        FROM received_stock_records rsr
+        JOIN master_brands mb ON rsr.master_brand_id = mb.id
+        WHERE rsr.shop_id = $1 
+        AND rsr.invoice_quantity > 0
+        AND EXTRACT(MONTH FROM rsr.record_date) = $2 
+        AND EXTRACT(YEAR FROM rsr.record_date) = $3
       `;
       const mrpValueResult = await pool.query(mrpValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
@@ -1175,6 +1175,385 @@ class DatabaseService {
     } catch (error) {
       console.error('❌ Error calculating closing counter balance:', error);
       return 0; // Default to 0 if calculation fails
+    }
+  }
+
+  // ===============================================
+  // NEW STOCK TABLES METHODS
+  // ===============================================
+
+  // Received Stock Records Management
+  async addReceivedStock(stockData) {
+    const {
+      shopId, masterBrandId, recordDate, invoiceQuantity = 0, 
+      manualQuantity = 0, transferQuantity = 0, invoiceId = null,
+      transferReference = null, notes = null, createdBy = null
+    } = stockData;
+    
+    const query = `
+      INSERT INTO received_stock_records (
+        shop_id, master_brand_id, record_date, invoice_quantity, 
+        manual_quantity, transfer_quantity, invoice_id, 
+        transfer_reference, notes, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `;
+    
+    const values = [
+      shopId, masterBrandId, recordDate, invoiceQuantity,
+      manualQuantity, transferQuantity, invoiceId,
+      transferReference, notes, createdBy
+    ];
+    
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error adding received stock: ${error.message}`);
+    }
+  }
+
+  async getReceivedStock(shopId, date = null, masterBrandId = null) {
+    let query = `
+      SELECT 
+        rs.*,
+        mb.brand_number,
+        mb.brand_name,
+        mb.size_ml,
+        mb.size_code,
+        u.name as created_by_name,
+        i.icdc_number as invoice_number
+      FROM received_stock_records rs
+      JOIN master_brands mb ON rs.master_brand_id = mb.id
+      LEFT JOIN users u ON rs.created_by = u.id
+      LEFT JOIN invoices i ON rs.invoice_id = i.id
+      WHERE rs.shop_id = $1
+    `;
+    
+    const params = [shopId];
+    let paramCount = 1;
+    
+    if (date) {
+      paramCount++;
+      query += ` AND rs.record_date = $${paramCount}`;
+      params.push(date);
+    }
+    
+    if (masterBrandId) {
+      paramCount++;
+      query += ` AND rs.master_brand_id = $${paramCount}`;
+      params.push(masterBrandId);
+    }
+    
+    query += ` ORDER BY rs.record_date DESC, rs.created_at DESC`;
+    
+    try {
+      const result = await pool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting received stock: ${error.message}`);
+    }
+  }
+
+  async updateReceivedStock(id, updates) {
+    const {
+      invoiceQuantity, manualQuantity, transferQuantity,
+      transferReference, notes
+    } = updates;
+    
+    const query = `
+      UPDATE received_stock_records 
+      SET 
+        invoice_quantity = COALESCE($2, invoice_quantity),
+        manual_quantity = COALESCE($3, manual_quantity),
+        transfer_quantity = COALESCE($4, transfer_quantity),
+        transfer_reference = COALESCE($5, transfer_reference),
+        notes = COALESCE($6, notes),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `;
+    
+    const values = [id, invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes];
+    
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error updating received stock: ${error.message}`);
+    }
+  }
+
+  async deleteReceivedStock(id, shopId) {
+    const query = `
+      DELETE FROM received_stock_records 
+      WHERE id = $1 AND shop_id = $2
+      RETURNING *
+    `;
+    
+    try {
+      const result = await pool.query(query, [id, shopId]);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error deleting received stock: ${error.message}`);
+    }
+  }
+
+  // Stock Transfer Methods
+  async createStockTransfer(transferData) {
+    const {
+      fromShopId, toShopId, masterBrandId, quantity, 
+      transferReference, notes, createdBy, recordDate
+    } = transferData;
+    
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      const transferDate = recordDate || new Date().toISOString().split('T')[0];
+      
+      // Create outgoing transfer record (negative quantity)
+      const outgoingQuery = `
+        INSERT INTO received_stock_records (
+          shop_id, master_brand_id, record_date, transfer_quantity,
+          transfer_reference, notes, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `;
+      
+      const outgoingResult = await client.query(outgoingQuery, [
+        fromShopId, masterBrandId, transferDate, -quantity,
+        `Transfer to Shop ${toShopId}: ${transferReference}`, notes, createdBy
+      ]);
+      
+      // Create incoming transfer record (positive quantity)
+      const incomingQuery = `
+        INSERT INTO received_stock_records (
+          shop_id, master_brand_id, record_date, transfer_quantity,
+          transfer_reference, notes, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `;
+      
+      const incomingResult = await client.query(incomingQuery, [
+        toShopId, masterBrandId, transferDate, quantity,
+        `Transfer from Shop ${fromShopId}: ${transferReference}`, notes, createdBy
+      ]);
+      
+      await client.query('COMMIT');
+      
+      return {
+        outgoingId: outgoingResult.rows[0].id,
+        incomingId: incomingResult.rows[0].id,
+        quantity: quantity,
+        transferDate: transferDate
+      };
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Error creating stock transfer: ${error.message}`);
+    } finally {
+      client.release();
+    }
+  }
+
+  async getStockTransfers(shopId, date = null) {
+    const query = `
+      SELECT 
+        rs.*,
+        mb.brand_number,
+        mb.brand_name,
+        mb.size_ml,
+        mb.size_code,
+        u.name as created_by_name,
+        CASE 
+          WHEN rs.transfer_quantity > 0 THEN 'RECEIVED'
+          WHEN rs.transfer_quantity < 0 THEN 'TRANSFERRED_OUT'
+          ELSE 'NO_TRANSFER'
+        END as transfer_type
+      FROM received_stock_records rs
+      JOIN master_brands mb ON rs.master_brand_id = mb.id
+      LEFT JOIN users u ON rs.created_by = u.id
+      WHERE rs.shop_id = $1 AND rs.transfer_quantity != 0
+      ${date ? 'AND rs.record_date = $2' : ''}
+      ORDER BY rs.record_date DESC, rs.created_at DESC
+    `;
+    
+    const params = date ? [shopId, date] : [shopId];
+    
+    try {
+      const result = await pool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting stock transfers: ${error.message}`);
+    }
+  }
+
+  // Closing Stock Records Management
+  async createOrUpdateClosingStock(stockData) {
+    const {
+      shopId, masterBrandId, recordDate, openingStock = 0,
+      closingStock = null, unitPrice = null, isFinalized = false,
+      varianceNotes = null, createdBy = null, finalizedBy = null
+    } = stockData;
+    
+    const query = `
+      INSERT INTO closing_stock_records (
+        shop_id, master_brand_id, record_date, opening_stock,
+        closing_stock, unit_price, is_finalized, variance_notes,
+        created_by, finalized_by, finalized_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (shop_id, master_brand_id, record_date)
+      DO UPDATE SET
+        closing_stock = COALESCE(EXCLUDED.closing_stock, closing_stock_records.closing_stock),
+        unit_price = COALESCE(EXCLUDED.unit_price, closing_stock_records.unit_price),
+        is_finalized = EXCLUDED.is_finalized,
+        variance_notes = COALESCE(EXCLUDED.variance_notes, closing_stock_records.variance_notes),
+        finalized_by = CASE WHEN EXCLUDED.is_finalized THEN EXCLUDED.finalized_by ELSE closing_stock_records.finalized_by END,
+        finalized_at = CASE WHEN EXCLUDED.is_finalized THEN CURRENT_TIMESTAMP ELSE closing_stock_records.finalized_at END,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+    
+    const values = [
+      shopId, masterBrandId, recordDate, openingStock,
+      closingStock, unitPrice, isFinalized, varianceNotes,
+      createdBy, finalizedBy, isFinalized ? new Date() : null
+    ];
+    
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error creating/updating closing stock: ${error.message}`);
+    }
+  }
+
+  async getClosingStock(shopId, date = null, masterBrandId = null) {
+    let query = `
+      SELECT 
+        cs.*,
+        mb.brand_number,
+        mb.brand_name,
+        mb.size_ml,
+        mb.size_code,
+        u1.name as created_by_name,
+        u2.name as finalized_by_name
+      FROM closing_stock_records cs
+      JOIN master_brands mb ON cs.master_brand_id = mb.id
+      LEFT JOIN users u1 ON cs.created_by = u1.id
+      LEFT JOIN users u2 ON cs.finalized_by = u2.id
+      WHERE cs.shop_id = $1
+    `;
+    
+    const params = [shopId];
+    let paramCount = 1;
+    
+    if (date) {
+      paramCount++;
+      query += ` AND cs.record_date = $${paramCount}`;
+      params.push(date);
+    }
+    
+    if (masterBrandId) {
+      paramCount++;
+      query += ` AND cs.master_brand_id = $${paramCount}`;
+      params.push(masterBrandId);
+    }
+    
+    query += ` ORDER BY cs.record_date DESC, mb.brand_number`;
+    
+    try {
+      const result = await pool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting closing stock: ${error.message}`);
+    }
+  }
+
+  async finalizeClosingStock(shopId, date, closingStockUpdates, finalizedBy) {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      let updatedCount = 0;
+      
+      for (const update of closingStockUpdates) {
+        const { masterBrandId, closingStock, varianceNotes } = update;
+        
+        await client.query(`
+          UPDATE closing_stock_records 
+          SET 
+            closing_stock = $1,
+            variance_notes = $2,
+            is_finalized = TRUE,
+            finalized_by = $3,
+            finalized_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE shop_id = $4 AND master_brand_id = $5 AND record_date = $6
+        `, [closingStock, varianceNotes, finalizedBy, shopId, masterBrandId, date]);
+        
+        updatedCount++;
+      }
+      
+      await client.query('COMMIT');
+      
+      return {
+        message: 'Closing stock finalized successfully',
+        updatedCount: updatedCount,
+        date: date
+      };
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Error finalizing closing stock: ${error.message}`);
+    } finally {
+      client.release();
+    }
+  }
+
+  // Enhanced Daily Stock Summary with new tables
+  async getEnhancedDailyStockSummary(shopId, date) {
+    const query = `
+      SELECT * FROM v_daily_stock_summary_enhanced
+      WHERE shop_id = $1 AND record_date = $2
+      ORDER BY brand_number, size_ml
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, date]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting enhanced daily stock summary: ${error.message}`);
+    }
+  }
+
+  // Initialize closing stock records for a date
+  async initializeClosingStockRecords(shopId, date) {
+    const query = `
+      INSERT INTO closing_stock_records (shop_id, master_brand_id, record_date, opening_stock, unit_price)
+      SELECT 
+        si.shop_id,
+        si.master_brand_id,
+        $2,
+        COALESCE(prev_cs.closing_stock, 0) as opening_stock,
+        si.final_price as unit_price
+      FROM shop_inventory si
+      LEFT JOIN closing_stock_records prev_cs ON prev_cs.shop_id = si.shop_id 
+        AND prev_cs.master_brand_id = si.master_brand_id 
+        AND prev_cs.record_date = $2::date - 1
+        AND prev_cs.is_finalized = TRUE
+      WHERE si.shop_id = $1 AND si.is_active = TRUE
+      ON CONFLICT (shop_id, master_brand_id, record_date) DO NOTHING
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, date]);
+      return result.rowCount;
+    } catch (error) {
+      throw new Error(`Error initializing closing stock records: ${error.message}`);
     }
   }
 

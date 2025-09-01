@@ -6,7 +6,6 @@
 -- ===============================================
 -- DROP EXISTING VIEWS
 -- ===============================================
-DROP VIEW IF EXISTS v_invoice_brands_status CASCADE;
 DROP VIEW IF EXISTS v_daily_stock CASCADE;
 
 -- ===============================================
@@ -59,71 +58,7 @@ JOIN master_brands mb ON mb.id = si.master_brand_id
 WHERE si.is_active = true AND mb.is_active = true;
 
 -- ===============================================
--- VIEW 2: Invoice Brands Matching Status View
--- ===============================================
-CREATE OR REPLACE VIEW v_invoice_brands_status AS
-SELECT
-  ib.id,
-  ib.invoice_id,
-  i.shop_id,
-  s.shop_name,
-  i.invoice_date,
-  i.icdc_number,
-  i.status as invoice_status,
-  ib.brand_number,
-  ib.brand_name,
-  ib.size_ml,
-  ib.size_code,
-  ib.cases,
-  ib.bottles,
-  ib.pack_quantity,
-  ib.total_quantity,
-  ib.unit_price,
-  ib.total_price,
-  ib.master_brand_id,
-  mb.brand_name as matched_brand_name,
-  mb.brand_number as matched_brand_number,
-  mb.standard_mrp as matched_mrp,
-  ib.match_confidence,
-  ib.match_method,
-  ib.matched_at,
-  -- Match status classification
-  CASE 
-    WHEN ib.master_brand_id IS NOT NULL THEN 'MATCHED'
-    ELSE 'UNMATCHED'
-  END as match_status,
-  -- Match quality assessment
-  CASE 
-    WHEN ib.match_confidence >= 95 THEN 'EXCELLENT'
-    WHEN ib.match_confidence >= 85 THEN 'GOOD'
-    WHEN ib.match_confidence >= 70 THEN 'FAIR'
-    WHEN ib.match_confidence >= 50 THEN 'POOR'
-    WHEN ib.master_brand_id IS NOT NULL THEN 'MANUAL'
-    ELSE 'NONE'
-  END as match_quality,
-  -- Price comparison (if matched)
-  CASE 
-    WHEN ib.master_brand_id IS NOT NULL AND mb.standard_mrp IS NOT NULL AND ib.unit_price IS NOT NULL
-    THEN ROUND(((ib.unit_price - mb.standard_mrp) / mb.standard_mrp) * 100, 2)
-    ELSE NULL
-  END as price_variance_percent,
-  -- Matching insights
-  CASE 
-    WHEN ib.master_brand_id IS NULL THEN 'Requires manual review'
-    WHEN ib.match_method = 'exact' THEN 'Perfect match found'
-    WHEN ib.match_method = 'fuzzy' AND ib.match_confidence >= 85 THEN 'High confidence fuzzy match'
-    WHEN ib.match_method = 'fuzzy' AND ib.match_confidence < 85 THEN 'Low confidence match - verify'
-    WHEN ib.match_method = 'manual' THEN 'Manually linked'
-    ELSE 'Unknown match type'
-  END as match_notes
-FROM invoice_brands ib
-JOIN invoices i ON i.id = ib.invoice_id
-JOIN shops s ON s.id = i.shop_id
-LEFT JOIN master_brands mb ON mb.id = ib.master_brand_id
-ORDER BY i.invoice_date DESC, ib.match_confidence DESC NULLS LAST;
-
--- ===============================================
--- VIEW 3: Shop Inventory Summary View
+-- VIEW 2: Shop Inventory Summary View
 -- ===============================================
 CREATE OR REPLACE VIEW v_shop_inventory_summary AS
 SELECT
@@ -177,7 +112,7 @@ GROUP BY d.stock_date, si.shop_id, s.shop_name
 ORDER BY d.stock_date DESC, s.shop_name;
 
 -- ===============================================
--- VIEW 5: Invoice Processing Queue View
+-- VIEW 5: Invoice Processing Queue View (Updated for received_stock_records)
 -- ===============================================
 CREATE OR REPLACE VIEW v_invoice_processing_queue AS
 SELECT
@@ -188,26 +123,24 @@ SELECT
   i.icdc_number,
   i.status,
   i.created_at,
-  COUNT(ib.id) as total_brands,
-  COUNT(CASE WHEN ib.master_brand_id IS NOT NULL THEN 1 END) as matched_brands,
-  COUNT(CASE WHEN ib.master_brand_id IS NULL THEN 1 END) as unmatched_brands,
-  ROUND((COUNT(CASE WHEN ib.master_brand_id IS NOT NULL THEN 1 END)::DECIMAL / COUNT(ib.id)) * 100, 2) as match_rate_percent,
-  SUM(ib.total_quantity) as total_quantity,
-  SUM(ib.total_price) as total_value,
-  -- Priority scoring (higher = needs attention)
-  (COUNT(CASE WHEN ib.master_brand_id IS NULL THEN 1 END) * 10) +
+  COUNT(rsr.id) as total_brands,
+  COUNT(rsr.id) as matched_brands, -- All received stock records are matched
+  0 as unmatched_brands, -- No unmatched with new system
+  100.0 as match_rate_percent, -- Always 100% with new system
+  SUM(rsr.invoice_quantity) as total_quantity,
+  SUM(rsr.invoice_quantity * mb.standard_mrp) as total_value,
+  -- Priority scoring (simplified for new system)
   (CASE WHEN i.status = 'pending' THEN 20 ELSE 0 END) +
   (CASE WHEN i.created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours' THEN 15 ELSE 0 END) as priority_score,
-  -- Status summary
+  -- Status summary (simplified)
   CASE 
-    WHEN COUNT(CASE WHEN ib.master_brand_id IS NULL THEN 1 END) = 0 THEN 'FULLY_MATCHED'
-    WHEN COUNT(CASE WHEN ib.master_brand_id IS NULL THEN 1 END) <= 2 THEN 'MOSTLY_MATCHED'
-    WHEN COUNT(CASE WHEN ib.master_brand_id IS NULL THEN 1 END) > COUNT(ib.id) / 2 THEN 'NEEDS_ATTENTION'
-    ELSE 'PARTIAL_MATCH'
+    WHEN COUNT(rsr.id) > 0 THEN 'FULLY_MATCHED'
+    ELSE 'NO_ITEMS'
   END as processing_status
 FROM invoices i
 JOIN shops s ON s.id = i.shop_id
-LEFT JOIN invoice_brands ib ON ib.invoice_id = i.id
+LEFT JOIN received_stock_records rsr ON rsr.invoice_id = i.id
+LEFT JOIN master_brands mb ON mb.id = rsr.master_brand_id
 GROUP BY i.id, i.shop_id, s.shop_name, i.invoice_date, i.icdc_number, i.status, i.created_at
 ORDER BY priority_score DESC, i.created_at DESC;
 
@@ -216,7 +149,7 @@ ORDER BY priority_score DESC, i.created_at DESC;
 -- ===============================================
 
 COMMENT ON VIEW v_daily_stock IS 'Comprehensive daily stock view with all related brand and shop information';
-COMMENT ON VIEW v_invoice_brands_status IS 'Invoice brand matching status with quality metrics and insights';
+-- COMMENT ON VIEW v_invoice_brands_status IS 'Removed - using received_stock_records system';
 COMMENT ON VIEW v_shop_inventory_summary IS 'Shop-level inventory summary with stock values and metrics';
 COMMENT ON VIEW v_daily_sales_summary IS 'Daily sales performance summary by shop';
 COMMENT ON VIEW v_invoice_processing_queue IS 'Invoice processing queue with priority scoring for manual review';

@@ -19,10 +19,7 @@ DROP INDEX IF EXISTS idx_daily_stock_date_range CASCADE;
 DROP INDEX IF EXISTS idx_daily_stock_pending_closure CASCADE;
 DROP INDEX IF EXISTS idx_invoices_shop_date CASCADE;
 DROP INDEX IF EXISTS idx_invoices_status CASCADE;
-DROP INDEX IF EXISTS idx_invoice_brands_invoice CASCADE;
-DROP INDEX IF EXISTS idx_invoice_brands_match CASCADE;
-DROP INDEX IF EXISTS idx_invoice_brands_unmatched CASCADE;
-DROP INDEX IF EXISTS idx_invoice_brands_confidence CASCADE;
+-- invoice_brands indexes removed - using received_stock_records system
 DROP INDEX IF EXISTS idx_invoice_unmatched_queue CASCADE;
 DROP INDEX IF EXISTS idx_expenses_shop_date CASCADE;
 DROP INDEX IF EXISTS idx_income_shop_date CASCADE;
@@ -61,12 +58,7 @@ CREATE INDEX idx_invoices_shop_date ON invoices(shop_id, invoice_date);
 CREATE INDEX idx_invoices_status ON invoices(status, created_at) WHERE status = 'pending';
 CREATE INDEX idx_invoices_icdc ON invoices(shop_id, icdc_number);
 
--- Invoice brands (auto-linking performance)
-CREATE INDEX idx_invoice_brands_invoice ON invoice_brands(invoice_id);
-CREATE INDEX idx_invoice_brands_match ON invoice_brands(brand_number, size_ml); -- For matching to master_brands
-CREATE INDEX idx_invoice_brands_unmatched ON invoice_brands(invoice_id, master_brand_id) WHERE master_brand_id IS NULL; -- For unmatched brands
-CREATE INDEX idx_invoice_brands_confidence ON invoice_brands(match_confidence DESC) WHERE master_brand_id IS NOT NULL;
-CREATE INDEX idx_invoice_brands_method ON invoice_brands(match_method, matched_at) WHERE master_brand_id IS NOT NULL;
+-- Invoice brands (removed - using received_stock_records system)
 
 -- Financial tracking
 CREATE INDEX idx_expenses_shop_date ON expenses(shop_id, expense_date);
@@ -81,10 +73,7 @@ CREATE INDEX idx_payments_shop_date ON daily_payments(shop_id, payment_date);
 CREATE INDEX idx_master_brands_similarity ON master_brands USING gin(brand_number gin_trgm_ops);
 CREATE INDEX idx_master_brands_name_similarity ON master_brands USING gin(brand_name gin_trgm_ops);
 
--- Additional performance index for invoice review queues
-CREATE INDEX idx_invoice_unmatched_queue
-  ON invoice_brands (invoice_id, master_brand_id, match_confidence)
-  WHERE master_brand_id IS NULL;
+-- Additional performance index for invoice review queues (removed)
 
 -- ===============================================
 -- COMPOSITE INDEXES FOR COMPLEX QUERIES
@@ -103,9 +92,7 @@ CREATE INDEX idx_shop_inventory_reporting ON shop_inventory(shop_id, is_active)
 CREATE INDEX idx_invoice_processing ON invoices(status, created_at, shop_id)
   INCLUDE (invoice_date, icdc_number, invoice_value);
 
--- Brand matching workflow
-CREATE INDEX idx_brand_matching ON invoice_brands(master_brand_id, match_method, match_confidence)
-  INCLUDE (brand_number, size_ml, matched_at);
+-- Brand matching workflow (removed)
 
 -- ===============================================
 -- PARTIAL INDEXES FOR SPECIFIC CONDITIONS
@@ -124,8 +111,7 @@ CREATE INDEX idx_high_value_invoices ON invoices(shop_id, invoice_date)
   WHERE invoice_value > 10000;
 
 -- Pending manual review
-CREATE INDEX idx_pending_manual_review ON invoice_brands(invoice_id, brand_number, size_ml) 
-  WHERE master_brand_id IS NULL;
+-- CREATE INDEX idx_pending_manual_review (removed - using received_stock_records system)
 
 -- ===============================================
 -- UNIQUE INDEXES FOR DATA INTEGRITY
@@ -160,7 +146,7 @@ ANALYZE master_brands;
 ANALYZE shop_inventory;
 ANALYZE daily_stock_records;
 ANALYZE invoices;
-ANALYZE invoice_brands;
+-- ANALYZE invoice_brands; (removed)
 ANALYZE expenses;
 ANALYZE other_income;
 ANALYZE daily_payments;
@@ -194,7 +180,7 @@ ORDER BY idx_scan DESC;
 
 COMMENT ON INDEX idx_master_brands_lookup IS 'Critical: Most frequent lookup for brand matching';
 COMMENT ON INDEX idx_daily_stock_inventory_date IS 'Critical: Primary access pattern for stock records';
-COMMENT ON INDEX idx_invoice_brands_match IS 'Critical: Essential for auto-linking performance';
+-- COMMENT ON INDEX idx_invoice_brands_match (removed);
 COMMENT ON INDEX idx_shop_inventory_reporting IS 'Performance: Optimizes inventory summary queries';
 COMMENT ON INDEX idx_master_brands_similarity IS 'Fuzzy matching: Enables fast similarity searches';
 

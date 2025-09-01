@@ -179,6 +179,12 @@ const aggregateProductsByBrandAndSize = (products) => {
       existing.totalStock += product.totalStock || 0;
       existing.closingStock = (existing.closingStock || 0) + (product.closingStock || 0);
       
+      // Aggregate received quantities from new tables
+      existing.totalReceivedToday = (existing.totalReceivedToday || 0) + (product.totalReceivedToday || 0);
+      existing.invoiceReceivedToday = (existing.invoiceReceivedToday || 0) + (product.invoiceReceivedToday || 0);
+      existing.manualReceivedToday = (existing.manualReceivedToday || 0) + (product.manualReceivedToday || 0);
+      existing.transferReceivedToday = (existing.transferReceivedToday || 0) + (product.transferReceivedToday || 0);
+      
       // Keep track of pack types for debugging
       existing.packTypes = existing.packTypes || [];
       if (!existing.packTypes.includes(product.packType)) {
@@ -626,12 +632,26 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
           await dbService.updateShopProductQuantity(shopId, item.masterBrandId, item.totalQuantity, null, null);
         }
 
-        // Create or update daily stock record for received quantity
+        // ADD TO RECEIVED STOCK RECORDS - Invoice quantity (this will auto-update daily_stock_records via trigger)
+        await dbService.addReceivedStock({
+          shopId: shopId,
+          masterBrandId: item.masterBrandId,
+          recordDate: today,
+          invoiceQuantity: item.totalQuantity, // Add to invoice column
+          manualQuantity: 0,
+          transferQuantity: 0,
+          invoiceId: null, // Will be set after invoice is saved
+          transferReference: null,
+          notes: `From invoice: ${invoiceData.invoiceNumber}`,
+          createdBy: userId
+        });
+
+        // Initialize daily stock record if it doesn't exist (opening stock and price only)
         const stockRecord = await dbService.createOrUpdateDailyStockRecord({
           shopInventoryId: shopProduct.id,
           stockDate: today,
           openingStock: 0, // Will be handled by the UPSERT logic
-          receivedStock: item.totalQuantity,
+          receivedStock: 0, // Will be auto-calculated from received_stock_records by trigger
           closingStock: null, // Will auto-calculate
           pricePerUnit: shopProduct.final_price
         });
@@ -702,6 +722,17 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ Invoice confirmation error:', error);
     console.error('❌ Stack trace:', error.stack);
+    
+    // Check if it's a duplicate invoice error
+    if (error.message && error.message.includes('has already been processed')) {
+      return res.status(409).json({ 
+        message: 'Error: This invoice is already processed.',
+        code: 'INVOICE_ALREADY_PROCESSED',
+        error: error.message
+      });
+    }
+    
+    // Generic server error for other issues
     res.status(500).json({ 
       message: 'Server error during invoice confirmation', 
       error: error.message,
@@ -1018,26 +1049,40 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
      console.log(`✅ Added new product: ${masterBrand.brand_name} (${masterBrand.size_ml}ml) - Quantity: ${receivedQuantity}`);
    }
   
-  // Add to daily stock records (received column)
+  // ADD TO RECEIVED STOCK RECORDS - Manual quantity (this will auto-update daily_stock_records via trigger)
+  await dbService.addReceivedStock({
+    shopId: shopId,
+    masterBrandId: parseInt(masterBrandId),
+    recordDate: today,
+    invoiceQuantity: 0,
+    manualQuantity: receivedQuantity, // Add to manual column
+    transferQuantity: 0,
+    invoiceId: null,
+    transferReference: null,
+    notes: `Manual stock addition - ${wasUpdated ? 'Updated existing' : 'New product'}`,
+    createdBy: req.user.userId
+  });
+
+  // Initialize daily stock record if it doesn't exist (opening stock and price only)
   await dbService.createOrUpdateDailyStockRecord({
     shopInventoryId: shopInventoryId,
-     stockDate: today,
-     openingStock: 0,
-     receivedStock: receivedQuantity,
-     closingStock: null,
-     pricePerUnit: finalPrice
-   });
-   
-   res.status(201).json({ 
-     message: wasUpdated ? 'Product quantity updated' : 'New product added',
-     brandNumber: masterBrand.brand_number,
-     brandName: masterBrand.brand_name,
-     size: `${masterBrand.size_code}(${masterBrand.size_ml}ml)`,
-     receivedQuantity: receivedQuantity,
-     finalPrice: finalPrice,
-     isNewProduct: !wasUpdated,
-     totalQuantity: productResult.current_quantity
-   });
+    stockDate: today,
+    openingStock: 0,
+    receivedStock: 0, // Will be auto-calculated from received_stock_records by trigger
+    closingStock: null,
+    pricePerUnit: finalPrice
+  });
+  
+  res.status(201).json({ 
+    message: wasUpdated ? 'Product quantity updated' : 'New product added',
+    brandNumber: masterBrand.brand_number,
+    brandName: masterBrand.brand_name,
+    size: `${masterBrand.size_code}(${masterBrand.size_ml}ml)`,
+    receivedQuantity: receivedQuantity,
+    finalPrice: finalPrice,
+    isNewProduct: !wasUpdated,
+    totalQuantity: productResult.current_quantity
+  });
  } catch (error) {
    console.error('Error adding shop product:', error);
    res.status(500).json({ message: 'Server error', error: error.message });
@@ -1072,9 +1117,42 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
     const rawProducts = await dbService.getShopProducts(shopId, targetDate);
     console.log(`📋 Found ${rawProducts.length} raw products in shop inventory`);
     
+    // Get received stock data for the date
+    const receivedStockData = await dbService.getReceivedStock(shopId, targetDate);
+    console.log(`📦 Found ${receivedStockData.length} received stock records`);
+    
+    // Create a map of received quantities by master_brand_id
+    const receivedQuantitiesMap = new Map();
+    receivedStockData.forEach(record => {
+      const key = record.master_brand_id;
+      if (!receivedQuantitiesMap.has(key)) {
+        receivedQuantitiesMap.set(key, {
+          totalReceived: 0,
+          invoiceQuantity: 0,
+          manualQuantity: 0,
+          transferQuantity: 0
+        });
+      }
+      const existing = receivedQuantitiesMap.get(key);
+      existing.totalReceived += record.total_received || 0;
+      existing.invoiceQuantity += record.invoice_quantity || 0;
+      existing.manualQuantity += record.manual_quantity || 0;
+      existing.transferQuantity += record.transfer_quantity || 0;
+    });
+    
+    // Add received quantities to products
+    const productsWithReceived = rawProducts.map(product => ({
+      ...product,
+      // Add received quantities (rec column for ViewCurrentStock)
+      totalReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.totalReceived || 0,
+      invoiceReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.invoiceQuantity || 0,
+      manualReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.manualQuantity || 0,
+      transferReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.transferQuantity || 0
+    }));
+    
     // Aggregate products by brandNumber + sizeCode (combine pack types)
-    const aggregatedProducts = aggregateProductsByBrandAndSize(rawProducts);
-    console.log(`📊 Aggregated to ${aggregatedProducts.length} display products`);
+    const aggregatedProducts = aggregateProductsByBrandAndSize(productsWithReceived);
+    console.log(`📊 Aggregated to ${aggregatedProducts.length} display products with received quantities`);
     
     // Check if closing stock is already saved
     const closingStockStatus = await dbService.isClosingStockSaved(shopId, targetDate);
@@ -1082,7 +1160,11 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
     res.json({
       products: aggregatedProducts,
       closingStockStatus: closingStockStatus,
-      businessDate: targetDate
+      businessDate: targetDate,
+      receivedStockSummary: {
+        totalRecords: receivedStockData.length,
+        totalQuantityReceived: Array.from(receivedQuantitiesMap.values()).reduce((sum, item) => sum + item.totalReceived, 0)
+      }
     });
   } catch (error) {
     console.error('Error getting shop products:', error);
@@ -1485,6 +1567,328 @@ app.post('/api/analytics/web-vitals', (req, res) => {
   } catch (error) {
     // Silent fail - don't break the frontend
     res.status(200).json({ received: false });
+  }
+});
+
+// ===============================================
+// NEW STOCK TABLES API ENDPOINTS
+// ===============================================
+
+// Received Stock Management Endpoints
+app.post('/api/received-stock', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const userId = req.user.userId;
+    const {
+      masterBrandId, recordDate, invoiceQuantity, manualQuantity, 
+      transferQuantity, invoiceId, transferReference, notes
+    } = req.body;
+    
+    if (!masterBrandId) {
+      return res.status(400).json({ message: 'Master brand ID is required' });
+    }
+    
+    const targetDate = recordDate || getBusinessDate();
+    
+    console.log(`📦 Adding received stock for shop ${shopId} on ${targetDate}`);
+    
+    const result = await dbService.addReceivedStock({
+      shopId,
+      masterBrandId,
+      recordDate: targetDate,
+      invoiceQuantity: invoiceQuantity || 0,
+      manualQuantity: manualQuantity || 0,
+      transferQuantity: transferQuantity || 0,
+      invoiceId,
+      transferReference,
+      notes,
+      createdBy: userId
+    });
+    
+    res.status(201).json({
+      message: 'Received stock added successfully',
+      receivedStock: result
+    });
+    
+  } catch (error) {
+    console.error('Error adding received stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.get('/api/received-stock', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date, masterBrandId } = req.query;
+    
+    console.log(`📋 Getting received stock for shop ${shopId}`);
+    
+    const result = await dbService.getReceivedStock(shopId, date, masterBrandId);
+    
+    res.json({
+      receivedStock: result,
+      totalRecords: result.length
+    });
+    
+  } catch (error) {
+    console.error('Error getting received stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.put('/api/received-stock/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes } = req.body;
+    
+    console.log(`📝 Updating received stock record ${id}`);
+    
+    const result = await dbService.updateReceivedStock(id, {
+      invoiceQuantity,
+      manualQuantity,
+      transferQuantity,
+      transferReference,
+      notes
+    });
+    
+    if (!result) {
+      return res.status(404).json({ message: 'Received stock record not found' });
+    }
+    
+    res.json({
+      message: 'Received stock updated successfully',
+      receivedStock: result
+    });
+    
+  } catch (error) {
+    console.error('Error updating received stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.delete('/api/received-stock/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const shopId = req.user.shopId;
+    
+    console.log(`🗑️ Deleting received stock record ${id}`);
+    
+    const result = await dbService.deleteReceivedStock(id, shopId);
+    
+    if (!result) {
+      return res.status(404).json({ message: 'Received stock record not found or not authorized' });
+    }
+    
+    res.json({
+      message: 'Received stock deleted successfully',
+      deletedRecord: result
+    });
+    
+  } catch (error) {
+    console.error('Error deleting received stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Stock Transfer Endpoints
+app.post('/api/stock-transfers', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const {
+      fromShopId, toShopId, masterBrandId, quantity,
+      transferReference, notes, recordDate
+    } = req.body;
+    
+    if (!fromShopId || !toShopId || !masterBrandId || !quantity) {
+      return res.status(400).json({ 
+        message: 'From shop, to shop, master brand ID, and quantity are required' 
+      });
+    }
+    
+    if (quantity <= 0) {
+      return res.status(400).json({ message: 'Quantity must be positive' });
+    }
+    
+    const targetDate = recordDate || getBusinessDate();
+    
+    console.log(`🔄 Creating stock transfer: ${quantity} units from shop ${fromShopId} to shop ${toShopId}`);
+    
+    const result = await dbService.createStockTransfer({
+      fromShopId,
+      toShopId,
+      masterBrandId,
+      quantity,
+      transferReference,
+      notes,
+      createdBy: userId,
+      recordDate: targetDate
+    });
+    
+    res.status(201).json({
+      message: 'Stock transfer created successfully',
+      transfer: result
+    });
+    
+  } catch (error) {
+    console.error('Error creating stock transfer:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.get('/api/stock-transfers', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.query;
+    
+    console.log(`📋 Getting stock transfers for shop ${shopId}`);
+    
+    const result = await dbService.getStockTransfers(shopId, date);
+    
+    res.json({
+      transfers: result,
+      totalRecords: result.length
+    });
+    
+  } catch (error) {
+    console.error('Error getting stock transfers:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Closing Stock Management Endpoints
+app.post('/api/closing-stock', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const userId = req.user.userId;
+    const {
+      masterBrandId, recordDate, openingStock, closingStock,
+      unitPrice, isFinalized, varianceNotes
+    } = req.body;
+    
+    if (!masterBrandId) {
+      return res.status(400).json({ message: 'Master brand ID is required' });
+    }
+    
+    const targetDate = recordDate || getBusinessDate();
+    
+    console.log(`📊 Creating/updating closing stock for shop ${shopId} on ${targetDate}`);
+    
+    const result = await dbService.createOrUpdateClosingStock({
+      shopId,
+      masterBrandId,
+      recordDate: targetDate,
+      openingStock,
+      closingStock,
+      unitPrice,
+      isFinalized: isFinalized || false,
+      varianceNotes,
+      createdBy: userId,
+      finalizedBy: isFinalized ? userId : null
+    });
+    
+    res.json({
+      message: 'Closing stock record created/updated successfully',
+      closingStock: result
+    });
+    
+  } catch (error) {
+    console.error('Error creating/updating closing stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.get('/api/closing-stock', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date, masterBrandId } = req.query;
+    
+    console.log(`📋 Getting closing stock for shop ${shopId}`);
+    
+    const result = await dbService.getClosingStock(shopId, date, masterBrandId);
+    
+    res.json({
+      closingStock: result,
+      totalRecords: result.length
+    });
+    
+  } catch (error) {
+    console.error('Error getting closing stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.post('/api/closing-stock/finalize', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const userId = req.user.userId;
+    const { date, closingStockUpdates } = req.body;
+    
+    if (!date || !closingStockUpdates || !Array.isArray(closingStockUpdates)) {
+      return res.status(400).json({ 
+        message: 'Date and closing stock updates array are required' 
+      });
+    }
+    
+    console.log(`🔒 Finalizing closing stock for shop ${shopId} on ${date}`);
+    
+    const result = await dbService.finalizeClosingStock(shopId, date, closingStockUpdates, userId);
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error('Error finalizing closing stock:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Enhanced Daily Stock Summary Endpoint
+app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.query;
+    const targetDate = date || getBusinessDate();
+    
+    console.log(`📊 Getting enhanced daily summary for shop ${shopId} on ${targetDate}`);
+    
+    // Initialize closing stock records if they don't exist
+    const initializedCount = await dbService.initializeClosingStockRecords(shopId, targetDate);
+    console.log(`📦 Initialized ${initializedCount} closing stock records`);
+    
+    const result = await dbService.getEnhancedDailyStockSummary(shopId, targetDate);
+    
+    res.json({
+      summary: result,
+      date: targetDate,
+      totalProducts: result.length,
+      initializedRecords: initializedCount
+    });
+    
+  } catch (error) {
+    console.error('Error getting enhanced daily summary:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Initialize closing stock records for a date
+app.post('/api/closing-stock/initialize', authenticateToken, async (req, res) => {
+  try {
+    const shopId = req.user.shopId;
+    const { date } = req.body;
+    const targetDate = date || getBusinessDate();
+    
+    console.log(`🔄 Initializing closing stock records for shop ${shopId} on ${targetDate}`);
+    
+    const recordCount = await dbService.initializeClosingStockRecords(shopId, targetDate);
+    
+    res.json({
+      message: 'Closing stock records initialized successfully',
+      recordCount: recordCount,
+      date: targetDate
+    });
+    
+  } catch (error) {
+    console.error('Error initializing closing stock records:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
