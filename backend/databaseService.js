@@ -1,4 +1,4 @@
-const { pool } = require('./database');
+const { pool, retryOperation } = require('./database');
 
 class DatabaseService {
   // User Management - Updated for new normalized schema
@@ -509,22 +509,18 @@ class DatabaseService {
 
   // Initialize today's stock records for all shop products
   async initializeTodayStock(shopId, date) {
-    try {
-      console.log(`🔄 Initializing stock for shop ${shopId} on date ${date}`);
-      
+    return await retryOperation(async () => {
       // First, let's check how many products exist in shop_inventory
       const inventoryCheck = await pool.query(
         'SELECT COUNT(*) as count FROM shop_inventory WHERE shop_id = $1 AND is_active = true',
         [shopId]
       );
-      console.log(`📦 Found ${inventoryCheck.rows[0].count} active products in shop inventory`);
       
       // Check if any daily stock records already exist for this date
       const existingCheck = await pool.query(
         'SELECT COUNT(*) as count FROM daily_stock_records dsr JOIN shop_inventory si ON dsr.shop_inventory_id = si.id WHERE si.shop_id = $1 AND dsr.stock_date = $2',
         [shopId, date]
       );
-      console.log(`📅 Found ${existingCheck.rows[0].count} existing daily stock records for ${date}`);
       
       // Debug: Check previous day's data
       const prevDayCheck = await pool.query(`
@@ -580,12 +576,11 @@ class DatabaseService {
       `;
       
       const result = await pool.query(query, [shopId, date]);
-      console.log(`✅ Initialized/Updated ${result.rowCount} daily stock records`);
       return result.rowCount;
-    } catch (error) {
+    }).catch(error => {
       console.error(`❌ Error initializing stock for shop ${shopId}:`, error);
       throw new Error(`Error initializing today's stock: ${error.message}`);
-    }
+    });
   }
 
   async getPreviousDayClosingStock(shopId, currentDate, brandNumber, size) {
@@ -694,8 +689,9 @@ class DatabaseService {
       
       // 1. Save invoice record
       const {
-        userId, invoiceNumber, date, totalValue,
-        netInvoiceValue, mrpRoundingOff, retailExciseTax, specialExciseCess, tcs
+
+        userId, invoiceNumber, date, originalInvoiceDate, totalValue,
+        netInvoiceValue, mrpRoundingOff, retailShopExciseTax, retailExciseTurnoverTax, specialExciseCess, tcs
       } = invoiceData;
       
       // Get shop_id from user_id
@@ -719,14 +715,14 @@ class DatabaseService {
       const invoiceQuery = `
         INSERT INTO invoices 
         (shop_id, icdc_number, invoice_date, invoice_value, mrp_rounding_off,
-         retail_shop_excise_tax, special_excise_cess, tcs)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         retail_shop_excise_tax, retail_shop_excise_turnover_tax, special_excise_cess, tcs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
       `;
       
       const invoiceValues = [
-        shopId, invoiceNumber, date, totalValue, mrpRoundingOff,
-        retailExciseTax, specialExciseCess, tcs
+        shopId, invoiceNumber, originalInvoiceDate || date, totalValue, mrpRoundingOff,
+        retailShopExciseTax, retailExciseTurnoverTax, specialExciseCess, tcs
       ];
       
       const invoiceResult = await client.query(invoiceQuery, invoiceValues);
@@ -734,47 +730,118 @@ class DatabaseService {
       
       console.log(`💾 Invoice saved with ID: ${invoiceId}`);
       
-      // 2. Save invoice items (invoice_brands)
+      // 2. Process shop_inventory records for all matched items
       if (items && items.length > 0) {
-        const itemQuery = `
-          INSERT INTO invoice_brands 
-          (invoice_id, brand_number, brand_name, product_type, size_ml, size_code, 
-           cases, bottles, pack_quantity, pack_type, unit_price, master_brand_id, 
-           match_confidence, match_method, matched_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        `;
+        for (const item of items) {
+          if (item.masterBrandId) {
+            // Check if shop_inventory record exists for this product
+            const inventoryCheck = await client.query(`
+              SELECT id, current_quantity FROM shop_inventory 
+              WHERE shop_id = $1 AND master_brand_id = $2
+            `, [shopId, item.masterBrandId]);
+            
+            if (inventoryCheck.rows.length === 0) {
+              // Create shop_inventory record for new product
+              await client.query(`
+                INSERT INTO shop_inventory 
+                (shop_id, master_brand_id, current_quantity, markup_price, final_price, is_active, last_updated)
+                VALUES ($1, $2, $3, 0, $4, true, CURRENT_TIMESTAMP)
+              `, [shopId, item.masterBrandId, item.totalQuantity, item.mrp || 0]);
+              
+              console.log(`📦 Created shop_inventory record for ${item.brandNumber} ${item.size} with quantity: ${item.totalQuantity}`);
+            } else {
+              // Update existing shop_inventory record - add the new stock
+              const currentQty = inventoryCheck.rows[0].current_quantity || 0;
+              const newQty = currentQty + item.totalQuantity;
+              
+              await client.query(`
+                UPDATE shop_inventory 
+                SET current_quantity = $1, 
+                    final_price = COALESCE($2, final_price),
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE shop_id = $3 AND master_brand_id = $4
+              `, [newQty, item.mrp || null, shopId, item.masterBrandId]);
+              
+              console.log(`📦 Updated shop_inventory for ${item.brandNumber} ${item.size}: ${currentQty} + ${item.totalQuantity} = ${newQty}`);
+            }
+          }
+        }
+      }
+
+      // 3. Save invoice items to received_stock_records (invoice_quantity column)
+      if (items && items.length > 0) {
+        const recordDate = new Date(date).toISOString().split('T')[0]; // Use business date for record_date
         
         for (const item of items) {
-          const itemValues = [
-            invoiceId,
-            item.brandNumber,
-            item.description || item.brandName,
-            item.productType || 'IML',
-            parseInt(item.size.replace('ml', '')), // Convert "750ml" to 750
-            item.sizeCode,
-            item.cases || 0,
-            item.bottles || 0,
-            item.packQty || 12,
-            item.packType || 'G', // Pack type (G, B, C, P)
-            item.unitPrice || null, // Can be null if not provided
-            item.masterBrandId || null, // Will be null for unmatched items
-            item.matched ? 95.0 : null, // High confidence for matched items
-            item.matched ? 'exact' : null, // Match method
-            item.matched ? new Date() : null // Matched timestamp
-          ];
-          
-          await client.query(itemQuery, itemValues);
-          console.log(`📦 Item saved: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
+          // Only save items that have a master_brand_id (matched items)
+          if (item.masterBrandId) {
+            // Check if record already exists first
+            const existingRecordQuery = `
+              SELECT id, invoice_quantity FROM received_stock_records 
+              WHERE shop_id = $1 AND master_brand_id = $2 AND record_date = $3 AND invoice_id = $4
+            `;
+            
+            const existingRecord = await client.query(existingRecordQuery, [
+              shopId, item.masterBrandId, recordDate, invoiceId
+            ]);
+            
+            if (existingRecord.rows.length > 0) {
+              // Update existing record
+              const receivedStockQuery = `
+                UPDATE received_stock_records 
+                SET invoice_quantity = invoice_quantity + $1,
+                    mrp_price = COALESCE($2, mrp_price),
+                    notes = COALESCE($3, notes),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $4
+              `;
+              
+              await client.query(receivedStockQuery, [
+                item.totalQuantity,
+                item.mrp || null,
+                `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
+                existingRecord.rows[0].id
+              ]);
+            } else {
+              // Insert new record
+              const receivedStockQuery = `
+                INSERT INTO received_stock_records 
+                (shop_id, master_brand_id, record_date, invoice_quantity, 
+                 mrp_price, invoice_id, notes, created_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              `;
+              
+              await client.query(receivedStockQuery, [
+                shopId,
+                item.masterBrandId,
+                recordDate,
+                item.totalQuantity,
+                item.mrp || 0,
+                invoiceId,
+                `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
+                userId
+              ]);
+            }
+            
+            console.log(`📦 Added to received stock: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
+          } else {
+            console.log(`⚠️ Skipped unmatched item: ${item.brandNumber} ${item.size} (no master_brand_id)`);
+          }
         }
         
-        console.log(`💾 Saved ${items.length} invoice items`);
+        console.log(`💾 Saved ${items.filter(item => item.masterBrandId).length} matched invoice items to received_stock_records`);
+        console.log(`🔄 Database trigger should automatically update daily_stock_records.received_stock`);
       }
       
       await client.query('COMMIT');
       
       return {
-        invoiceId: invoiceId,
+        id: invoiceId,
+        invoice_number: invoiceNumber,
+        total_value: totalValue,
+        date: date,
         itemsCount: items ? items.length : 0,
+        matchedItemsCount: items ? items.filter(item => item.masterBrandId).length : 0,
         success: true
       };
       
@@ -810,20 +877,22 @@ class DatabaseService {
 
   // Summary and Analytics
   async getSummary(shopId, date) {
-    try {
+    return await retryOperation(async () => {
       // Validate shopId parameter
       if (!shopId) {
         throw new Error('Shop ID is required');
       }
       
-      // Get today's stock records with product details
+      // Get today's stock records with product details and current inventory
       const stockRecordsQuery = `
         SELECT 
           dsr.*,
           mb.standard_mrp,
           mb.brand_name,
           mb.brand_number,
-          mb.size_ml
+          mb.size_ml,
+          si.current_quantity,
+          si.final_price
         FROM daily_stock_records dsr
         JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
         JOIN master_brands mb ON si.master_brand_id = mb.id
@@ -840,12 +909,14 @@ class DatabaseService {
       // If we have daily stock records, use them
       if (stockRecords.rows.length > 0) {
         for (const record of stockRecords.rows) {
-          const closingStock = record.closing_stock || record.total_stock || 0;
+          // Correct logic: Use closing_stock if set, otherwise use total_stock (opening + received)
+          const stockForValue = record.closing_stock !== null ? record.closing_stock : (record.total_stock || 0);
           const sales = record.sales || 0;
           
-          // Stock value = closing stock * MRP
-          if (closingStock > 0 && record.standard_mrp) {
-            stockValue += closingStock * parseFloat(record.standard_mrp);
+          // Stock value = stock quantity * MRP
+          if (stockForValue > 0 && record.standard_mrp) {
+            const itemValue = stockForValue * parseFloat(record.standard_mrp);
+            stockValue += itemValue;
           }
           
           // Sales value = sales * price_per_unit
@@ -859,7 +930,10 @@ class DatabaseService {
           SELECT 
             si.current_quantity,
             mb.standard_mrp,
-            si.final_price
+            si.final_price,
+            mb.brand_number,
+            mb.brand_name,
+            mb.size_ml
           FROM shop_inventory si
           JOIN master_brands mb ON si.master_brand_id = mb.id
           WHERE si.shop_id = $1 AND si.is_active = true AND si.current_quantity > 0
@@ -869,7 +943,8 @@ class DatabaseService {
         
         for (const item of inventoryResult.rows) {
           if (item.current_quantity > 0 && item.standard_mrp) {
-            stockValue += item.current_quantity * parseFloat(item.standard_mrp);
+            const itemValue = item.current_quantity * parseFloat(item.standard_mrp);
+            stockValue += itemValue;
           }
         }
       }
@@ -878,7 +953,7 @@ class DatabaseService {
       const currentMonth = new Date(date).getMonth() + 1; // 1-12
       const currentYear = new Date(date).getFullYear();
       
-      // 1. Cumulative Invoice Value (at actual invoice prices)
+      // 1. Cumulative Invoice Value (at actual invoice prices) - based on upload date
       const invoiceValueQuery = `
         SELECT COALESCE(SUM(invoice_value), 0) as cumulative_invoice_value
         FROM invoices 
@@ -889,17 +964,16 @@ class DatabaseService {
       const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
       
-      // 2. Cumulative MRP Value (from received_stock_records with invoice quantities)
+      // 2. Monthly MRP Value (from received_stock_records with stored MRP prices)
       const mrpValueQuery = `
         SELECT COALESCE(SUM(
-          rsr.invoice_quantity * COALESCE(mb.standard_mrp, 0)
+          rsr.invoice_quantity * COALESCE(rsr.mrp_price, 0)
         ), 0) as cumulative_mrp_value
         FROM received_stock_records rsr
-        JOIN master_brands mb ON rsr.master_brand_id = mb.id
         WHERE rsr.shop_id = $1 
         AND rsr.invoice_quantity > 0
-        AND EXTRACT(MONTH FROM rsr.record_date) = $2 
-        AND EXTRACT(YEAR FROM rsr.record_date) = $3
+        AND EXTRACT(MONTH FROM rsr.created_at) = $2 
+        AND EXTRACT(YEAR FROM rsr.created_at) = $3
       `;
       const mrpValueResult = await pool.query(mrpValueQuery, [shopId, currentMonth, currentYear]);
       const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
@@ -965,9 +1039,9 @@ class DatabaseService {
         balanceStatus: counterBalance > 0 ? 'SHORT' : counterBalance < 0 ? 'SURPLUS' : 'BALANCED',
         currentMonth: `${currentYear}-${currentMonth.toString().padStart(2, '0')}`
       };
-    } catch (error) {
+    }).catch(error => {
       throw new Error(`Error getting summary: ${error.message}`);
-    }
+    });
   }
 
   // Income and Expenses methods
@@ -979,13 +1053,13 @@ class DatabaseService {
       ORDER BY source
     `;
     
-    try {
+    return await retryOperation(async () => {
       const result = await pool.query(query, [shopId, date]);
       return result.rows;
-    } catch (error) {
+    }).catch(error => {
       console.error('Error fetching income:', error);
       throw error;
-    }
+    });
   }
 
   async getExpenses(shopId, date) {
@@ -996,13 +1070,13 @@ class DatabaseService {
       ORDER BY category
     `;
     
-    try {
+    return await retryOperation(async () => {
       const result = await pool.query(query, [shopId, date]);
       return result.rows;
-    } catch (error) {
+    }).catch(error => {
       console.error('Error fetching expenses:', error);
       throw error;
-    }
+    });
   }
 
   async saveIncome(shopId, date, incomeEntries) {
@@ -1079,13 +1153,13 @@ class DatabaseService {
       WHERE shop_id = $1 AND payment_date = $2
     `;
     
-    try {
+    return await retryOperation(async () => {
       const result = await pool.query(query, [shopId, date]);
       return result.rows[0] || null;
-    } catch (error) {
+    }).catch(error => {
       console.error('Error fetching payment record:', error);
       throw error;
-    }
+    });
   }
 
   async getRecentPayments(shopId, days = 7) {

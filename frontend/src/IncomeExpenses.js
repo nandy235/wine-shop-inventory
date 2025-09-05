@@ -343,6 +343,7 @@ function IncomeExpenses({ onNavigate }) {
                             className="income-expenses-amount-input"
                             value={item.amount || ''}
                             onChange={(e) => handleIncomeChange(index, 'amount', e.target.value)}
+                            onWheel={(e) => e.target.blur()}
                             min="0"
                             step="0.01"
                             placeholder="0.00"
@@ -396,6 +397,7 @@ function IncomeExpenses({ onNavigate }) {
                             className="income-expenses-amount-input"
                             value={item.amount || ''}
                             onChange={(e) => handleExpenseChange(index, 'amount', e.target.value)}
+                            onWheel={(e) => e.target.blur()}
                             min="0"
                             step="0.01"
                             placeholder="0.00"

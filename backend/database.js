@@ -25,8 +25,13 @@ const pool = new Pool(connectionString ? {
   // Connection pool configuration
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
+  connectionTimeoutMillis: 30000, // Return an error after 30 seconds if connection could not be established
   maxUses: 7500, // Close (and replace) a connection after it has been used 7500 times
+  // Query timeout
+  query_timeout: 60000, // 60 seconds for query timeout
+  // Keep alive settings
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 } : {
   host: process.env.PGHOST,
   port: process.env.PGPORT,
@@ -37,8 +42,13 @@ const pool = new Pool(connectionString ? {
   // Connection pool configuration
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 30000,
   maxUses: 7500,
+  // Query timeout
+  query_timeout: 60000,
+  // Keep alive settings
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 // Add connection pool event listeners
@@ -54,19 +64,43 @@ pool.on('remove', (client) => {
   console.log('🔌 Client removed from pool');
 });
 
-// Test connection
-const connectDB = async () => {
-  try {
-    const client = await pool.connect();
-    await client.query('SELECT NOW()');
-    client.release();
-    console.log('✅ Database connected successfully');
-    console.log(`📊 Pool status: ${pool.totalCount} total, ${pool.idleCount} idle, ${pool.waitingCount} waiting`);
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    return false;
+// Retry mechanism for database operations
+const retryOperation = async (operation, maxRetries = 3, delay = 1000) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      console.log(`❌ Database operation failed (attempt ${attempt}/${maxRetries}):`, error.message);
+      
+      if (attempt === maxRetries) {
+        console.error('🚨 All retry attempts exhausted');
+        throw error;
+      }
+      
+      // Exponential backoff
+      const waitTime = delay * Math.pow(2, attempt - 1);
+      console.log(`⏳ Retrying in ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
   }
+};
+
+// Test connection with retry
+const connectDB = async () => {
+  return await retryOperation(async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT NOW()');
+      console.log('✅ Database connected successfully');
+      console.log(`📊 Pool status: ${pool.totalCount} total, ${pool.idleCount} idle, ${pool.waitingCount} waiting`);
+      return true;
+    } finally {
+      client.release();
+    }
+  }).catch(error => {
+    console.error('❌ Database connection failed after all retries:', error);
+    return false;
+  });
 };
 
 // Check if new schema is deployed
@@ -77,7 +111,7 @@ const checkSchemaVersion = async () => {
       SELECT COUNT(*) as table_count
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
-        AND table_name IN ('users', 'shops', 'master_brands', 'shop_inventory', 'daily_stock_records', 'invoices', 'invoice_brands', 'expenses', 'other_income', 'daily_payments')
+        AND table_name IN ('users', 'shops', 'master_brands', 'shop_inventory', 'daily_stock_records', 'invoices', 'expenses', 'other_income', 'daily_payments', 'received_stock_records')
     `);
     
     const tableCount = parseInt(result.rows[0].table_count);
@@ -193,5 +227,6 @@ module.exports = {
   connectDB, 
   initializeTables,
   checkSchemaVersion,
-  healthCheck
+  healthCheck,
+  retryOperation
 };

@@ -334,6 +334,7 @@ function TrackPayments({ onNavigate }) {
                       name="cash_amount"
                       value={payments.cash_amount}
                       onChange={handleInputChange}
+                      onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
                     />
                   </td>
@@ -347,6 +348,7 @@ function TrackPayments({ onNavigate }) {
                       name="upi_amount"
                       value={payments.upi_amount}
                       onChange={handleInputChange}
+                      onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
                     />
                   </td>
@@ -360,6 +362,7 @@ function TrackPayments({ onNavigate }) {
                       name="card_amount"
                       value={payments.card_amount}
                       onChange={handleInputChange}
+                      onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
                     />
                   </td>
@@ -395,39 +398,8 @@ function TrackPayments({ onNavigate }) {
         </div>
 
         {/* Opening Balance Dialog */}
-d         {/* Manual balance dialog removed - now automatically uses previous day's closing balance */}
+        {/* Manual balance dialog removed - now automatically uses previous day's closing balance */}
 
-        {existingPayments.length > 0 && (
-          <div className="track-payments-history-section">
-            <h3 className="track-payments-history-title">Recent Payment Records</h3>
-            <div className="track-payments-history-grid">
-              {existingPayments.map((payment) => (
-                <div key={payment.id} className="track-payments-history-card">
-                  <div className="track-payments-history-date">
-                    {formatDate(payment.payment_date)}
-                  </div>
-                  <div className="track-payments-history-amounts">
-                    <div className="track-payments-history-amount">
-                      <span className="track-payments-history-icon">💵</span>
-                      <span>Cash: {formatCurrency(payment.cash_amount)}</span>
-                    </div>
-                    <div className="track-payments-history-amount">
-                      <span className="track-payments-history-icon">📱</span>
-                      <span>UPI: {formatCurrency(payment.upi_amount)}</span>
-                    </div>
-                    <div className="track-payments-history-amount">
-                      <span className="track-payments-history-icon">💳</span>
-                      <span>Card: {formatCurrency(payment.card_amount)}</span>
-                    </div>
-                  </div>
-                  <div className="track-payments-history-total">
-                    Total: {formatCurrency(payment.total_amount)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

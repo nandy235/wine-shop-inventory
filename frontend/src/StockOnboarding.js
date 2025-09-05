@@ -224,6 +224,7 @@ function StockOnboarding({ onNavigate }) {
                       value={cases === 0 ? '' : cases}
                       onChange={(e) => setCases(parseInt(e.target.value) || 0)}
                       onFocus={(e) => e.target.select()}
+                      onWheel={(e) => e.target.blur()}
                       min="0"
                       className="field-input"
                     />
@@ -236,6 +237,7 @@ function StockOnboarding({ onNavigate }) {
                       value={bottles === 0 ? '' : bottles}
                       onChange={(e) => handleBottlesChange(e.target.value)}
                       onFocus={(e) => e.target.select()}
+                      onWheel={(e) => e.target.blur()}
                       min="0"
                       className="field-input"
                     />
@@ -252,6 +254,7 @@ function StockOnboarding({ onNavigate }) {
                         setMarkup(newMarkup);
                       }}
                       onFocus={(e) => e.target.select()}
+                      onWheel={(e) => e.target.blur()}
                       min="0"
                       step="0.01"
                       className="field-input"

@@ -149,7 +149,7 @@ ORDER BY priority_score DESC, i.created_at DESC;
 -- ===============================================
 
 COMMENT ON VIEW v_daily_stock IS 'Comprehensive daily stock view with all related brand and shop information';
--- COMMENT ON VIEW v_invoice_brands_status IS 'Removed - using received_stock_records system';
+
 COMMENT ON VIEW v_shop_inventory_summary IS 'Shop-level inventory summary with stock values and metrics';
 COMMENT ON VIEW v_daily_sales_summary IS 'Daily sales performance summary by shop';
 COMMENT ON VIEW v_invoice_processing_queue IS 'Invoice processing queue with priority scoring for manual review';

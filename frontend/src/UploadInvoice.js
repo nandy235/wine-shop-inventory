@@ -1,12 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import './UploadInvoice.css';
 import API_BASE_URL from './config';
+
+// Helper function to get business date (day starts at 11:30 AM IST)
+function getBusinessDate() {
+  const now = new Date();
+  
+  // Check if browser is already in IST timezone
+  const browserTimezoneOffset = now.getTimezoneOffset();
+  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
+  
+  let istTime;
+  if (browserTimezoneOffset === istTimezoneOffset) {
+    // Browser is already in IST (local machine), use current time
+    istTime = now;
+  } else {
+    // Browser is in UTC or other timezone, convert to IST
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+    istTime = new Date(now.getTime() + istOffset);
+  }
+  
+  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
+    // Before 11:30 AM IST - use previous day
+    const yesterday = new Date(istTime);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toLocaleDateString('en-CA');
+  } else {
+    // After 11:30 AM IST - use current day
+    return istTime.toLocaleDateString('en-CA');
+  }
+}
 
 function UploadInvoice({ onNavigate }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const fileInputRef = useRef(null);
 
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -43,10 +73,32 @@ function UploadInvoice({ onNavigate }) {
 
   const handleFileButtonClick = () => {
     console.log('File button clicked'); // Debug log
+    
+    // Try useRef approach first
+    if (fileInputRef.current) {
+      console.log('Using useRef approach'); // Debug log
+      try {
+        fileInputRef.current.click();
+        console.log('useRef click() called successfully'); // Debug log
+        return;
+      } catch (error) {
+        console.error('Error with useRef click():', error);
+      }
+    }
+    
+    // Fallback to getElementById
     const fileInput = document.getElementById('file-input');
     console.log('File input element:', fileInput); // Debug log
+    console.log('File input type:', fileInput?.type); // Debug log
+    console.log('File input accept:', fileInput?.accept); // Debug log
+    
     if (fileInput) {
-      fileInput.click();
+      try {
+        fileInput.click();
+        console.log('getElementById click() called successfully'); // Debug log
+      } catch (error) {
+        console.error('Error calling click():', error);
+      }
     } else {
       console.error('File input element not found');
     }
@@ -93,6 +145,9 @@ function UploadInvoice({ onNavigate }) {
 
     setProcessing(true);
     try {
+      const businessDate = getBusinessDate();
+      console.log('🗓️ Using business date:', businessDate);
+      
       const response = await fetch(`${API_BASE_URL}/api/invoice/confirm`, {
         method: 'POST',
         headers: {
@@ -100,7 +155,8 @@ function UploadInvoice({ onNavigate }) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          tempId: parsedData.tempId
+          tempId: parsedData.tempId,
+          businessDate: businessDate
         })
       });
 
@@ -217,6 +273,7 @@ function UploadInvoice({ onNavigate }) {
               <input
                 type="file"
                 id="file-input"
+                ref={fileInputRef}
                 accept=".pdf,application/pdf"
                 onChange={handleFileSelect}
                 style={{ display: 'none' }}
@@ -229,6 +286,22 @@ function UploadInvoice({ onNavigate }) {
               >
                 Choose PDF File
               </button>
+              
+              {/* Fallback visible file input for debugging */}
+              <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
+                <p>If the button above doesn't work, try this direct file input:</p>
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={handleFileSelect}
+                  style={{ 
+                    padding: '5px', 
+                    border: '1px solid #ddd', 
+                    borderRadius: '4px',
+                    fontSize: '12px'
+                  }}
+                />
+              </div>
               
               {selectedFile && (
                 <div className="selected-file">
@@ -256,9 +329,10 @@ function UploadInvoice({ onNavigate }) {
                 <p><strong>Invoice Number:</strong> {parsedData.invoiceNumber}</p>
                 <p><strong>Date:</strong> {parsedData.date}</p>
                 <div className="financial-breakdown">
-                  <p><strong>Invoice Value:</strong> {formatCurrency(parsedData.netInvoiceValue)}</p>
+                  <p><strong>Invoice Value:</strong> {formatCurrency(parsedData.invoiceValue)}</p>
                   <p><strong>MRP Rounding Off:</strong> {formatCurrency(parsedData.mrpRoundingOff)}</p>
-                  <p><strong>Retail Excise Tax:</strong> {formatCurrency(parsedData.retailExciseTax)}</p>
+                  <p><strong>Retail Shop Excise Tax:</strong> {formatCurrency(parsedData.retailShopExciseTax)}</p>
+                  <p><strong>Retail Shop Excise Turnover Tax:</strong> {formatCurrency(parsedData.retailExciseTurnoverTax)}</p>
                   <p><strong>Special Excise Cess:</strong> {formatCurrency(parsedData.specialExciseCess)}</p>
                   <p><strong>TCS:</strong> {formatCurrency(parsedData.tcs)}</p>
                   <p className="total-amount">

@@ -124,45 +124,52 @@ function UpdateClosingStock({ onNavigate }) {
  };
 
  const handleClosingStockChange = (id, value) => {
-   const numValue = parseInt(value) || 0;
-   
-   setEditingValues(prev => ({
-     ...prev,
-     [id]: numValue
-   }));
+  const numValue = parseInt(value) || 0;
+  
+  // Find the item to get its total (TTL) value
+  const currentItem = stockData.find(item => item.id === id);
+  if (!currentItem) return;
+  
+  // Prevent closing stock from exceeding total available stock
+  const validatedValue = Math.min(numValue, currentItem.total);
+  
+  setEditingValues(prev => ({
+    ...prev,
+    [id]: validatedValue
+  }));
 
-   // Update the displayed data immediately for UX
-   const updatedData = filteredData.map(item => {
-     if (item.id === id) {
-       const newClosingStock = numValue;
-       const newSales = Math.max(0, item.total - newClosingStock);
-       return {
-         ...item,
-         closingStock: newClosingStock,
-         sales: newSales
-       };
-     }
-     return item;
-   });
-   
-   setFilteredData(updatedData);
-   
-   // Also update the main stockData
-   const updatedStockData = stockData.map(item => {
-     if (item.id === id) {
-       const newClosingStock = numValue;
-       const newSales = Math.max(0, item.total - newClosingStock);
-       return {
-         ...item,
-         closingStock: newClosingStock,
-         sales: newSales
-       };
-     }
-     return item;
-   });
-   
-   setStockData(updatedStockData);
- };
+  // Update the displayed data immediately for UX
+  const updatedData = filteredData.map(item => {
+    if (item.id === id) {
+      const newClosingStock = validatedValue;
+      const newSales = Math.max(0, item.total - newClosingStock);
+      return {
+        ...item,
+        closingStock: newClosingStock,
+        sales: newSales
+      };
+    }
+    return item;
+  });
+  
+  setFilteredData(updatedData);
+  
+  // Also update the main stockData
+  const updatedStockData = stockData.map(item => {
+    if (item.id === id) {
+      const newClosingStock = validatedValue;
+      const newSales = Math.max(0, item.total - newClosingStock);
+      return {
+        ...item,
+        closingStock: newClosingStock,
+        sales: newSales
+      };
+    }
+    return item;
+  });
+  
+  setStockData(updatedStockData);
+};
 
  // Helper function to check if there are unsaved changes
  const hasUnsavedChanges = () => {
@@ -323,11 +330,13 @@ function UpdateClosingStock({ onNavigate }) {
                      <input
                        type="number"
                        className={`update-closing-stock-input ${!item.isClosingStockSet ? 'not-set' : ''}`}
-                       value={item.closingStock}
+                       value={item.closingStock === 0 ? '' : item.closingStock}
                        onChange={(e) => handleClosingStockChange(item.id, e.target.value)}
+                       onWheel={(e) => e.target.blur()}
+                       onFocus={(e) => e.target.select()}
                        min="0"
                        max={item.total}
-                       placeholder={!item.isClosingStockSet ? `${item.total} (auto)` : ''}
+                       placeholder={!item.isClosingStockSet ? `${item.total} (auto)` : '0'}
                      />
                    </td>
                    <td className="update-closing-stock-sales">{item.sales}</td>

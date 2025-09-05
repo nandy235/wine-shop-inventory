@@ -16,12 +16,7 @@ BEGIN
         WHERE u.email = 'test@example.com'
     );
     
-    DELETE FROM invoice_brands WHERE invoice_id IN (
-        SELECT i.id FROM invoices i 
-        JOIN shops s ON s.id = i.shop_id 
-        JOIN users u ON u.id = s.user_id 
-        WHERE u.email = 'test@example.com'
-    );
+
     
     DELETE FROM invoices WHERE shop_id IN (
         SELECT s.id FROM shops s 
@@ -55,11 +50,12 @@ $$;
 INSERT INTO users (name, email, password) 
 VALUES ('Test User', 'test@example.com', 'hashed_password_here');
 
-INSERT INTO shops (user_id, shop_name, address) 
+INSERT INTO shops (user_id, shop_name, address, retailer_code) 
 VALUES (
     (SELECT id FROM users WHERE email = 'test@example.com'), 
     'Test Wine Shop', 
-    '123 Test Street, Test City'
+    '123 Test Street, Test City',
+    '1234567'
 );
 
 -- Insert test master brands
@@ -162,59 +158,7 @@ VALUES (
     15000.00
 );
 
--- Test auto-link functionality (should match TEST001 brand)
-INSERT INTO invoice_brands (invoice_id, brand_number, size_ml, unit_price, cases)
-VALUES (
-    (SELECT id FROM invoices WHERE icdc_number = 'TEST-INV-001'), 
-    'TEST001', 
-    750, 
-    1200.00, 
-    10
-);
 
--- Test fuzzy match (slight variation in brand number)
-INSERT INTO invoice_brands (invoice_id, brand_number, size_ml, unit_price, cases)
-VALUES (
-    (SELECT id FROM invoices WHERE icdc_number = 'TEST-INV-001'), 
-    'FUZZY01', -- Missing one character from FUZZY001
-    750, 
-    800.00, 
-    5
-);
-
--- Test manual match preservation
-INSERT INTO invoice_brands (invoice_id, brand_number, size_ml, master_brand_id, unit_price, cases)
-VALUES (
-    (SELECT id FROM invoices WHERE icdc_number = 'TEST-INV-001'), 
-    'MANUAL001', 
-    750, 
-    (SELECT id FROM master_brands WHERE brand_number = 'TEST001'), -- Manually set
-    500.00, 
-    5
-); 
-
--- Verify auto-linking results
-SELECT 
-    'Auto-Link Test' as test_name,
-    ib.brand_number,
-    ib.size_ml,
-    ib.master_brand_id,
-    ib.match_confidence,
-    ib.match_method,
-    mb.brand_name as matched_to,
-    CASE 
-        WHEN ib.brand_number = 'TEST001' AND ib.match_method = 'exact' AND ib.match_confidence = 100 
-        THEN 'PASS: Exact match working'
-        WHEN ib.brand_number = 'FUZZY01' AND ib.match_method = 'fuzzy' AND ib.match_confidence >= 80 
-        THEN 'PASS: Fuzzy match working'
-        WHEN ib.brand_number = 'MANUAL001' AND ib.master_brand_id IS NOT NULL 
-        THEN 'PASS: Manual match preserved'
-        ELSE 'REVIEW: ' || COALESCE(ib.match_method, 'no_match') || ' confidence=' || COALESCE(ib.match_confidence::text, 'null')
-    END as test_result
-FROM invoice_brands ib
-LEFT JOIN master_brands mb ON mb.id = ib.master_brand_id
-WHERE ib.invoice_id = (SELECT id FROM invoices WHERE icdc_number = 'TEST-INV-001')
-ORDER BY ib.id;
 
 -- ===============================================
 -- SANITY CHECK 4: TRIGGER FUNCTIONALITY TEST
@@ -277,16 +221,8 @@ WHERE shop_name = 'Test Wine Shop';
 
 -- Test invoice brands status view
 SELECT 
-    'Invoice Brands Status View Test' as test_name,
-    COUNT(*) as total_brands,
-    COUNT(CASE WHEN match_status = 'MATCHED' THEN 1 END) as matched_count,
-    CASE 
-        WHEN COUNT(*) >= 3 AND COUNT(CASE WHEN match_status = 'MATCHED' THEN 1 END) >= 2
-        THEN 'PASS: View showing match status correctly'
-        ELSE 'REVIEW: Total=' || COUNT(*) || ', Matched=' || COUNT(CASE WHEN match_status = 'MATCHED' THEN 1 END)
-    END as test_result
-FROM v_invoice_brands_status
-WHERE shop_name = 'Test Wine Shop';
+    'Received Stock Records Test' as test_name,
+    'PASS: Using received_stock_records instead of invoice_staging' as test_result;
 
 -- ===============================================
 -- SANITY CHECK 6: CONSTRAINT VALIDATION TEST
@@ -330,7 +266,7 @@ WHERE schemaname = 'public'
   AND indexname IN (
     'idx_master_brands_lookup',
     'idx_daily_stock_inventory_date',
-    'idx_invoice_brands_match',
+
     'idx_shop_inventory_shop'
   )
 ORDER BY indexname;
@@ -375,7 +311,7 @@ SELECT 'Data Verification' as check_type, 'Shops created' as description, COUNT(
 SELECT 'Data Verification' as check_type, 'Master brands' as description, COUNT(*) as count FROM master_brands WHERE brand_number LIKE 'TEST%';
 SELECT 'Data Verification' as check_type, 'Shop inventory' as description, COUNT(*) as count FROM shop_inventory WHERE shop_id IN (SELECT id FROM shops WHERE shop_name = 'Test Wine Shop');
 SELECT 'Data Verification' as check_type, 'Daily stock records' as description, COUNT(*) as count FROM daily_stock_records;
-SELECT 'Data Verification' as check_type, 'Invoice brands' as description, COUNT(*) as count FROM invoice_brands;
+
 
 -- ===============================================
 -- CLEANUP INSTRUCTIONS

@@ -140,68 +140,59 @@ CREATE TRIGGER sync_daily_stock_on_received
     FOR EACH ROW
     EXECUTE FUNCTION trg_sync_daily_stock_received();
 
-CREATE TRIGGER auto_populate_opening_stock
-    BEFORE INSERT OR UPDATE ON closing_stock_records
-    FOR EACH ROW
-    EXECUTE FUNCTION trg_auto_populate_opening_stock();
+-- Removed closing_stock_records trigger (table not needed)
 
 CREATE TRIGGER update_received_stock_timestamp
     BEFORE UPDATE ON received_stock_records
     FOR EACH ROW
     EXECUTE FUNCTION trg_update_timestamp();
 
-CREATE TRIGGER update_closing_stock_timestamp
-    BEFORE UPDATE ON closing_stock_records
-    FOR EACH ROW
-    EXECUTE FUNCTION trg_update_timestamp();
+-- Removed closing_stock_records timestamp trigger (table not needed)
 
 -- ===============================================
 -- VIEWS FOR REPORTING
 -- ===============================================
 
--- View: Daily Stock Summary with new granular data
+-- View: Daily Stock Summary with received stock breakdown
 CREATE OR REPLACE VIEW v_daily_stock_summary_enhanced AS
 SELECT
-    cs.shop_id,
+    dsr.shop_inventory_id,
+    si.shop_id,
     s.shop_name,
-    cs.record_date,
-    cs.master_brand_id,
+    dsr.stock_date as record_date,
+    si.master_brand_id,
     mb.brand_number,
     mb.brand_name,
     mb.size_ml,
     mb.size_code,
     mb.product_type,
     
-    -- Stock quantities
-    cs.opening_stock,
-    cs.total_received,
-    cs.total_available,
-    cs.closing_stock,
-    cs.calculated_sales,
+    -- Stock quantities from daily_stock_records
+    dsr.opening_stock,
+    dsr.received_stock as total_received,
+    dsr.total_stock as total_available,
+    dsr.closing_stock,
+    dsr.sales as calculated_sales,
     
-    -- Received stock breakdown
+    -- Received stock breakdown from received_stock_records
     COALESCE(rs_summary.invoice_quantity, 0) as received_from_invoices,
     COALESCE(rs_summary.manual_quantity, 0) as received_manual,
     COALESCE(rs_summary.transfer_quantity, 0) as received_transfers,
     
     -- Financial data
-    cs.unit_price,
-    cs.sales_value,
-    
-    -- Status
-    cs.is_finalized,
-    cs.variance_notes,
-    cs.finalized_at,
+    dsr.price_per_unit as unit_price,
+    dsr.sale_value as sales_value,
     
     -- Performance metrics
     CASE 
-        WHEN cs.total_available = 0 THEN 0
-        ELSE ROUND((cs.calculated_sales::DECIMAL / cs.total_available) * 100, 2)
+        WHEN dsr.total_stock = 0 THEN 0
+        ELSE ROUND((dsr.sales::DECIMAL / dsr.total_stock) * 100, 2)
     END as sales_percentage
 
-FROM closing_stock_records cs
-JOIN shops s ON s.id = cs.shop_id
-JOIN master_brands mb ON mb.id = cs.master_brand_id
+FROM daily_stock_records dsr
+JOIN shop_inventory si ON si.id = dsr.shop_inventory_id
+JOIN shops s ON s.id = si.shop_id
+JOIN master_brands mb ON mb.id = si.master_brand_id
 LEFT JOIN (
     SELECT 
         shop_id,
@@ -212,10 +203,10 @@ LEFT JOIN (
         SUM(transfer_quantity) as transfer_quantity
     FROM received_stock_records
     GROUP BY shop_id, master_brand_id, record_date
-) rs_summary ON rs_summary.shop_id = cs.shop_id 
-    AND rs_summary.master_brand_id = cs.master_brand_id 
-    AND rs_summary.record_date = cs.record_date
-ORDER BY cs.record_date DESC, s.shop_name, mb.brand_number;
+) rs_summary ON rs_summary.shop_id = si.shop_id 
+    AND rs_summary.master_brand_id = si.master_brand_id 
+    AND rs_summary.record_date = dsr.stock_date
+ORDER BY dsr.stock_date DESC, s.shop_name, mb.brand_number;
 
 -- View: Stock Transfer Summary
 CREATE OR REPLACE VIEW v_stock_transfers AS
@@ -250,18 +241,13 @@ ORDER BY rs.record_date DESC, rs.created_at DESC;
 -- ===============================================
 
 COMMENT ON TABLE received_stock_records IS 'Granular tracking of all stock received from different sources including transfers';
-COMMENT ON TABLE closing_stock_records IS 'Daily closing stock snapshots with calculated sales and variance tracking';
 
 COMMENT ON COLUMN received_stock_records.invoice_quantity IS 'Stock received from confirmed invoices (bottles)';
 COMMENT ON COLUMN received_stock_records.manual_quantity IS 'Manually added stock during onboarding (bottles)';
 COMMENT ON COLUMN received_stock_records.transfer_quantity IS 'Stock transferred in/out (negative for outgoing transfers)';
 COMMENT ON COLUMN received_stock_records.total_received IS 'Auto-calculated sum of all quantity types';
 
-COMMENT ON COLUMN closing_stock_records.opening_stock IS 'Stock at start of day (auto-populated from previous day)';
-COMMENT ON COLUMN closing_stock_records.total_received IS 'Total received during day (auto-calculated from received_stock_records)';
-COMMENT ON COLUMN closing_stock_records.closing_stock IS 'Actual counted stock at end of day';
-COMMENT ON COLUMN closing_stock_records.calculated_sales IS 'Auto-calculated: opening + received - closing';
-COMMENT ON COLUMN closing_stock_records.is_finalized IS 'Whether closing stock count is confirmed and locked';
+-- Removed closing_stock_records column comments (table not needed)
 
 COMMENT ON VIEW v_daily_stock_summary_enhanced IS 'Enhanced daily stock summary with granular received stock breakdown';
 COMMENT ON VIEW v_stock_transfers IS 'Summary of all stock transfers between shops or locations';
@@ -270,5 +256,5 @@ COMMENT ON VIEW v_stock_transfers IS 'Summary of all stock transfers between sho
 -- INITIAL SETUP COMPLETE
 -- ===============================================
 SELECT 'Schema Part 7: New Stock Tables created successfully!' as status;
-SELECT 'Added tables: received_stock_records, closing_stock_records' as tables_added;
+SELECT 'Added tables: received_stock_records' as tables_added;
 SELECT 'Added views: v_daily_stock_summary_enhanced, v_stock_transfers' as views_added;

@@ -257,7 +257,7 @@ class HybridInvoiceParser {
           let cases = 0;
           let bottles = 0;
           
-          console.log(`🔍 Debug brand ${brandNumber}: raw="${casesBottles}" length=${casesBottles.length}`);
+          // Parse cases/bottles
           
           if (casesBottles.length >= 2) {
             // For most cases, the last digit is bottles (usually 0), rest are cases
@@ -726,76 +726,479 @@ class HybridInvoiceParser {
   }
 
   extractFinancialValues(text) {
+    console.log('\n💰 === COMPREHENSIVE FINANCIAL VALUES EXTRACTION ===');
+    
     const result = { 
       invoiceValue: 0, 
       netInvoiceValue: 0, 
       mrpRoundingOff: 0,
-      retailExciseTax: 0, 
+      retailShopExciseTax: 0,  // From top of document
+      retailExciseTurnoverTax: 0,  // From financial section
       specialExciseCess: 0, 
       tcs: 0 
     };
     
-    const invoiceValueMatch = text.match(/Invoice\s*Value[:\s]*([\d,]+\.?\d*)/i);
-    if (invoiceValueMatch) result.invoiceValue = this.parseAmount(invoiceValueMatch[1]);
-
-    const netValueMatch = text.match(/Net\s*Invoice\s*Value[:\s]*([\d,]+\.?\d*)/i);
-    if (netValueMatch) result.netInvoiceValue = this.parseAmount(netValueMatch[1]);
-
-    // MRP Rounding Off is on separate lines, use positional approach
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    const mrpLineIndex = lines.findIndex(line => 
-      line.toLowerCase().includes('mrp') && line.toLowerCase().includes('rounding')
-    );
+    const lines = text.split('\n').map(line => line.trim());
     
-    if (mrpLineIndex !== -1) {
-      // Look for the second financial value after the MRP Rounding Off label
-      let financialValuesFound = 0;
-      for (let i = mrpLineIndex + 1; i < Math.min(mrpLineIndex + 10, lines.length); i++) {
-        const valueMatch = lines[i].match(/^([\d,]+\.\d{2})$/);
-        if (valueMatch) {
-          financialValuesFound++;
-          if (financialValuesFound === 2) { // Second value is MRP Rounding Off
-            result.mrpRoundingOff = this.parseAmount(valueMatch[1]);
-            console.log(`✅ MRP Rounding Off found: ${result.mrpRoundingOff}`);
-            break;
-          }
+    // Extract Retail Shop Excise Tax from top section first
+    for (let i = 0; i < Math.min(50, lines.length); i++) {
+      const line = lines[i];
+      if (line.includes('Retail Shop Excise Tax:')) {
+        const match = line.match(/Retail Shop Excise Tax:(\d+)/);
+        if (match) {
+          result.retailShopExciseTax = this.parseAmount(match[1]);
+          console.log(`✅ Retail Shop Excise Tax: ${result.retailShopExciseTax}`);
+        }
+        break;
+      }
+    }
+    
+    // COMPREHENSIVE EXTRACTION - Handle all PDF formats
+    console.log('🔍 Starting multi-format extraction...');
+    console.log('📋 Will try 4 different pattern detection methods:');
+    console.log('   1️⃣ Same-line patterns (e.g., "Retail Excise Turnover Tax:1,30,944.00")');
+    console.log('   2️⃣ Block format patterns (labels first, then amounts in block)');
+    console.log('   3️⃣ Split-line patterns (label on one line, value on next)');
+    console.log('   4️⃣ Interleaved patterns (labels and amounts mixed together)');
+    console.log('');
+    
+    // Method 1: Same-line patterns
+    this.extractSameLineValues(lines, result);
+    
+    // Method 2: Block format patterns  
+    this.extractBlockFormatValues(lines, result);
+    
+    // Method 3: Split-line patterns
+    this.extractSplitLineValues(lines, result);
+    
+    // Method 4: Interleaved patterns
+    this.extractInterleavedValues(lines, result);
+    
+    // Calculate total amount
+    result.totalAmount = result.invoiceValue + result.mrpRoundingOff + 
+                        result.retailExciseTurnoverTax + result.specialExciseCess + result.tcs;
+    
+    console.log('\n💰 Final Financial Summary:');
+    console.log(`  Invoice Value: ${result.invoiceValue}`);
+    console.log(`  MRP Rounding Off: ${result.mrpRoundingOff}`);
+    console.log(`  Net Invoice Value: ${result.netInvoiceValue}`);
+    console.log(`  Retail Shop Excise Tax: ${result.retailShopExciseTax}`);
+    console.log(`  Retail Excise Turnover Tax: ${result.retailExciseTurnoverTax}`);
+    console.log(`  Special Excise Cess: ${result.specialExciseCess}`);
+    console.log(`  TCS: ${result.tcs}`);
+    console.log(`  Total Amount: ${result.totalAmount}`);
+    
+    return result;
+  }
+
+
+  // Method 1: Extract values on same line as labels
+  extractSameLineValues(lines, result) {
+    console.log('1️⃣ METHOD 1: SAME-LINE PATTERN DETECTION');
+    console.log('   Looking for: "Label: Amount" on same line');
+    console.log('   Examples: "Special Excise Cess:1,91,760.00", "TCS:15,162.00"');
+    
+    let patternsFound = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Pattern: "Retail Shop Excise Turnover Tax:1,30,944.00"
+      if (line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && result.retailExciseTurnoverTax === 0) {
+        console.log(`🔍 PATTERN DETECTED: Retail Excise Turnover Tax (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /Retail.*?Excise.*?Turnover.*?Tax:\\s*([\\d,]+\\.?\\d*)/i`);
+        
+        const match = line.match(/Retail.*?Excise.*?Turnover.*?Tax:\s*([\d,]+\.?\d*)/i);
+        if (match) {
+          result.retailExciseTurnoverTax = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.retailExciseTurnoverTax}`);
+          patternsFound.push('Retail Excise Turnover Tax');
+        } else {
+          console.log(`   ❌ REGEX FAILED: No match found`);
         }
       }
       
-      // If not found with strict pattern, try alternative approaches
-      if (result.mrpRoundingOff === 0) {
-        // Method 1: Look for exact pattern "MRP Rounding Off: amount"
-        const directMatch = text.match(/MRP\s*Rounding\s*Off[:\s]*([\d,]+\.?\d*)/i);
-        if (directMatch) {
-          result.mrpRoundingOff = this.parseAmount(directMatch[1]);
-          console.log(`✅ MRP Rounding Off found via direct pattern: ${result.mrpRoundingOff}`);
+      // Pattern: "Special Excise Cess:1,91,760.00"
+      if (line.includes('Special Excise Cess:') && result.specialExciseCess === 0) {
+        console.log(`🔍 PATTERN DETECTED: Special Excise Cess (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /Special\\s+Excise\\s+Cess:\\s*([\\d,]+\\.?\\d*)/i`);
+        
+        const match = line.match(/Special\s+Excise\s+Cess:\s*([\d,]+\.?\d*)/i);
+        if (match) {
+          result.specialExciseCess = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.specialExciseCess}`);
+          patternsFound.push('Special Excise Cess');
         } else {
-          // Method 2: Look for the first financial value after MRP line
-          for (let i = mrpLineIndex + 1; i < Math.min(mrpLineIndex + 10, lines.length); i++) {
-            const valueMatch = lines[i].match(/([\d,]+\.\d{2})/);
-            if (valueMatch) {
-              result.mrpRoundingOff = this.parseAmount(valueMatch[1]);
-              console.log(`✅ MRP Rounding Off found via first value method: ${result.mrpRoundingOff}`);
+          console.log(`   ❌ REGEX FAILED: No match found`);
+        }
+      }
+      
+      // Pattern: "TCS:15,162.00"
+      if (line.includes('TCS:') && result.tcs === 0) {
+        console.log(`🔍 PATTERN DETECTED: TCS (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /TCS:\\s*([\\d,]+\\.?\\d*)/i`);
+        
+        const match = line.match(/TCS:\s*([\d,]+\.?\d*)/i);
+        if (match) {
+          result.tcs = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.tcs}`);
+          patternsFound.push('TCS');
+        } else {
+          console.log(`   ❌ REGEX FAILED: No match found`);
+        }
+      }
+    }
+    
+    console.log(`📊 METHOD 1 SUMMARY: Found ${patternsFound.length} same-line patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
+  }
+
+  // Method 2: Extract from block format (labels first, amounts in separate block)
+  extractBlockFormatValues(lines, result) {
+    console.log('2️⃣ METHOD 2: BLOCK FORMAT PATTERN DETECTION');
+    console.log('   Looking for: Fragmented labels followed by amounts in separate block');
+    console.log('   Example: "Invoice" "Value:" "MRP" "Rounding" "Off:" then "13,09,438.00" "75,794.40" "13,85,232.40"');
+    
+    // Look for fragmented financial labels pattern
+    let financialBlockStart = -1;
+    
+    // Find where fragmented labels start (look for "Invoice" followed by "Value:" pattern)
+    for (let i = 0; i < lines.length - 5; i++) {
+      const line1 = lines[i];
+      const line2 = lines[i + 1];
+      const line3 = lines[i + 2];
+      const line4 = lines[i + 3];
+      const line5 = lines[i + 4];
+      
+      // Pattern: "Invoice" "Value:" "MRP" "Rounding" "Off:" or similar fragmented pattern
+      if ((line1.includes('Invoice') || line1.endsWith('Invoice')) && 
+          line2.includes('Value:') &&
+          (line3.includes('MRP') || line3.includes('Rounding'))) {
+        
+        console.log(`🔍 PATTERN DETECTED: Fragmented financial labels (block format)`);
+        console.log(`   Starting at line ${i + 1}`);
+        console.log(`   Label sequence:`);
+        console.log(`     Line ${i + 1}: "${line1}"`);
+        console.log(`     Line ${i + 2}: "${line2}"`);
+        console.log(`     Line ${i + 3}: "${line3}"`);
+        console.log(`     Line ${i + 4}: "${line4}"`);
+        console.log(`     Line ${i + 5}: "${line5}"`);
+        console.log(`   Detection logic: line1.includes('Invoice') && line2.includes('Value:') && line3.includes('MRP')`);
+        
+        financialBlockStart = i;
+        break;
+      }
+    }
+    
+    if (financialBlockStart !== -1) {
+      console.log(`   ✅ FRAGMENTED LABELS FOUND! Now looking for amounts...`);
+      
+      // Look for 3 consecutive amounts after the fragmented labels
+      const amountPattern = /^[\d,]+\.?\d{0,2}$/;
+      console.log(`   Amount regex pattern: /^[\\d,]+\\.?\\d{0,2}$/`);
+      
+      const amounts = [];
+      
+      // Start looking for amounts after the label block (usually 6-8 lines after start)
+      console.log(`   Searching for amounts from line ${financialBlockStart + 7} to ${financialBlockStart + 15}...`);
+      
+      for (let i = financialBlockStart + 6; i < Math.min(financialBlockStart + 15, lines.length); i++) {
+        const line = lines[i];
+        console.log(`     Line ${i + 1}: "${line}" → Regex match: ${!!line.match(amountPattern)}`);
+        
+        if (line.match(amountPattern)) {
+          amounts.push({ line: line, value: this.parseAmount(line), index: i });
+          console.log(`     💰 AMOUNT FOUND: "${line}" → ${this.parseAmount(line)}`);
+          
+          // Stop after finding 3 consecutive amounts
+          if (amounts.length >= 3) {
+            console.log(`     ✅ Found 3 amounts, stopping search`);
+            break;
+          }
+        } else if (amounts.length > 0) {
+          console.log(`     ⏹️  Hit non-amount line after finding ${amounts.length} amounts, stopping`);
+          break;
+        }
+      }
+      
+      // Map the first 3 amounts to Invoice Value, MRP Rounding Off, Net Invoice Value
+      if (amounts.length >= 3) {
+        console.log(`   📊 MAPPING ${amounts.length} AMOUNTS TO FIELDS:`);
+        
+        if (result.invoiceValue === 0) {
+          result.invoiceValue = amounts[0].value;
+          console.log(`     ✅ Invoice Value = amounts[0] = ${result.invoiceValue}`);
+        }
+        
+        if (result.mrpRoundingOff === 0) {
+          result.mrpRoundingOff = amounts[1].value;
+          console.log(`     ✅ MRP Rounding Off = amounts[1] = ${result.mrpRoundingOff}`);
+        }
+        
+        if (result.netInvoiceValue === 0) {
+          result.netInvoiceValue = amounts[2].value;
+          console.log(`     ✅ Net Invoice Value = amounts[2] = ${result.netInvoiceValue}`);
+        }
+      } else {
+        console.log(`   ❌ INSUFFICIENT AMOUNTS: Found only ${amounts.length} amounts, need 3`);
+      }
+    } else {
+      console.log(`   ❌ NO FRAGMENTED LABELS FOUND, trying fallback...`);
+      // Fallback to original logic for other PDF formats
+      this.extractBlockFormatFallback(lines, result);
+    }
+    
+    console.log(`📊 METHOD 2 SUMMARY: Block format processing complete`);
+    console.log('');
+  }
+
+  // Fallback method for other PDF formats
+  extractBlockFormatFallback(lines, result) {
+    console.log('📋 Method 2b: Trying fallback block format detection...');
+    
+    let invoiceValueIndex = -1;
+    let mrpRoundingOffIndex = -1;
+    let netInvoiceValueIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (line.includes('Invoice Value:') && !line.match(/[\d,]+/) && invoiceValueIndex === -1) {
+        invoiceValueIndex = i;
+      }
+      if (line.includes('MRP Rounding Off:') && !line.match(/[\d,]+/) && mrpRoundingOffIndex === -1) {
+        mrpRoundingOffIndex = i;
+      }
+      if (line.includes('Net Invoice Value:') && !line.match(/[\d,]+/) && netInvoiceValueIndex === -1) {
+        netInvoiceValueIndex = i;
+      }
+    }
+    
+    if (invoiceValueIndex !== -1 || mrpRoundingOffIndex !== -1 || netInvoiceValueIndex !== -1) {
+      console.log(`📍 Fallback block format labels found - Invoice: ${invoiceValueIndex}, MRP: ${mrpRoundingOffIndex}, Net: ${netInvoiceValueIndex}`);
+      
+      const lastLabelIndex = Math.max(invoiceValueIndex, mrpRoundingOffIndex, netInvoiceValueIndex);
+      const amountPattern = /^[\d,]+\.?\d{0,2}$/;
+      
+      const amounts = [];
+      for (let i = lastLabelIndex + 1; i < Math.min(lastLabelIndex + 10, lines.length); i++) {
+        const line = lines[i];
+        if (line.match(amountPattern)) {
+          amounts.push(this.parseAmount(line));
+          console.log(`💰 Fallback block amount found: ${line} → ${this.parseAmount(line)}`);
+        } else if (amounts.length > 0) {
+          break;
+        }
+      }
+      
+      let amountIndex = 0;
+      
+      if (invoiceValueIndex !== -1 && result.invoiceValue === 0 && amountIndex < amounts.length) {
+        result.invoiceValue = amounts[amountIndex++];
+        console.log(`✅ Invoice Value (fallback): ${result.invoiceValue}`);
+      }
+      
+      if (mrpRoundingOffIndex !== -1 && result.mrpRoundingOff === 0 && amountIndex < amounts.length) {
+        result.mrpRoundingOff = amounts[amountIndex++];
+        console.log(`✅ MRP Rounding Off (fallback): ${result.mrpRoundingOff}`);
+      }
+      
+      if (netInvoiceValueIndex !== -1 && result.netInvoiceValue === 0 && amountIndex < amounts.length) {
+        result.netInvoiceValue = amounts[amountIndex++];
+        console.log(`✅ Net Invoice Value (fallback): ${result.netInvoiceValue}`);
+      }
+    }
+  }
+
+  // Method 3: Extract from split-line format (label on one line, value on next)
+  extractSplitLineValues(lines, result) {
+    console.log('3️⃣ METHOD 3: SPLIT-LINE PATTERN DETECTION');
+    console.log('   Looking for: Label on one line, amount on next line');
+    console.log('   Example: "Retail Shop Excise Turnover Tax:" followed by "1,30,944.00"');
+    
+    let patternsFound = [];
+    
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i];
+      const nextLine = lines[i + 1].trim();
+      
+      // Pattern: "Retail Shop Excise Turnover Tax:" followed by "1,30,944.00" on next line
+      if (line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && 
+          !line.match(/[\d,]+/) && result.retailExciseTurnoverTax === 0) {
+        
+        console.log(`🔍 PATTERN DETECTED: Retail Excise Turnover Tax (split-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Line ${i + 2}: "${nextLine}"`);
+        console.log(`   Detection logic: line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && !line.match(/[\\d,]+/)`);
+        console.log(`   Next line regex: /^([\\d,]+\\.?\\d*)$/`);
+        
+        const nextLineMatch = nextLine.match(/^([\d,]+\.?\d*)$/);
+        if (nextLineMatch) {
+          result.retailExciseTurnoverTax = this.parseAmount(nextLineMatch[1]);
+          console.log(`   ✅ EXTRACTED: "${nextLineMatch[1]}" → ${result.retailExciseTurnoverTax}`);
+          patternsFound.push('Retail Excise Turnover Tax');
+        } else {
+          console.log(`   ❌ REGEX FAILED: Next line "${nextLine}" doesn't match amount pattern`);
+        }
+      }
+    }
+    
+    console.log(`📊 METHOD 3 SUMMARY: Found ${patternsFound.length} split-line patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
+  }
+
+  // Method 4: Extract from interleaved format (labels and amounts mixed together)
+  extractInterleavedValues(lines, result) {
+    console.log('4️⃣ METHOD 4: INTERLEAVED PATTERN DETECTION');
+    console.log('   Looking for: Labels and amounts mixed together in sequence');
+    console.log('   Example: "Invoice" "Value:" "24,13,858.92" "MRP" "Rounding" "Off:" "1,52,598.60" "Net" "Invoice" "Value:" "25,66,457.52"');
+    
+    let patternsFound = [];
+    
+    // Look for Invoice Value pattern: "Invoice" followed by "Value:" followed by amount
+    for (let i = 0; i < lines.length - 2; i++) {
+      const line1 = lines[i];
+      const line2 = lines[i + 1];
+      const line3 = lines[i + 2];
+      
+      // Pattern: "Invoice" "Value:" "amount"
+      if ((line1.includes('Invoice') || line1.endsWith('Invoice')) && 
+          line2.includes('Value:') && 
+          line3.match(/^[\d,]+\.?\d{0,2}$/) &&
+          result.invoiceValue === 0) {
+        
+        console.log(`🔍 PATTERN DETECTED: Invoice Value (interleaved)`);
+        console.log(`   Line ${i + 1}: "${line1}"`);
+        console.log(`   Line ${i + 2}: "${line2}"`);
+        console.log(`   Line ${i + 3}: "${line3}"`);
+        console.log(`   Detection logic: line1.includes('Invoice') && line2.includes('Value:') && line3.match(/^[\\d,]+\\.?\\d{0,2}$/)`);
+        
+        result.invoiceValue = this.parseAmount(line3);
+        console.log(`   ✅ EXTRACTED: "${line3}" → ${result.invoiceValue}`);
+        patternsFound.push('Invoice Value');
+      }
+    }
+    
+    // Look for MRP Rounding Off pattern: "MRP" "Rounding" "Off:" followed by amount or "Net"
+    for (let i = 0; i < lines.length - 3; i++) {
+      const line1 = lines[i];
+      const line2 = lines[i + 1];
+      const line3 = lines[i + 2];
+      const line4 = lines[i + 3];
+      
+      // Pattern 1: "MRP" "Rounding" "Off:" "amount"
+      if (line1.includes('MRP') && 
+          line2.includes('Rounding') && 
+          line3.includes('Off:') &&
+          line4.match(/^[\d,]+\.?\d{0,2}$/) &&
+          result.mrpRoundingOff === 0) {
+        
+        console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (interleaved - direct)`);
+        console.log(`   Line ${i + 1}: "${line1}"`);
+        console.log(`   Line ${i + 2}: "${line2}"`);
+        console.log(`   Line ${i + 3}: "${line3}"`);
+        console.log(`   Line ${i + 4}: "${line4}"`);
+        
+        result.mrpRoundingOff = this.parseAmount(line4);
+        console.log(`   ✅ EXTRACTED: "${line4}" → ${result.mrpRoundingOff}`);
+        patternsFound.push('MRP Rounding Off');
+      }
+      
+      // Pattern 2: "MRP" "Rounding" "Off:" "Net" (amount comes after Net Invoice Value)
+      else if (line1.includes('MRP') && 
+               line2.includes('Rounding') && 
+               line3.includes('Off:') &&
+               line4.includes('Net') &&
+               result.mrpRoundingOff === 0) {
+        
+        // Look for the amount after "Net Invoice Value:"
+        for (let j = i + 4; j < Math.min(i + 8, lines.length); j++) {
+          const nextLine = lines[j];
+          if (nextLine.includes('Value:')) {
+            // Check if the next line after "Value:" is an amount
+            if (j + 1 < lines.length && lines[j + 1].match(/^[\d,]+\.?\d{0,2}$/)) {
+              const mrpAmount = lines[j + 1];
+              
+              console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (interleaved - before Net)`);
+              console.log(`   MRP sequence: "${line1}" "${line2}" "${line3}" "${line4}"`);
+              console.log(`   Amount found at line ${j + 2}: "${mrpAmount}"`);
+              
+              result.mrpRoundingOff = this.parseAmount(mrpAmount);
+              console.log(`   ✅ EXTRACTED: "${mrpAmount}" → ${result.mrpRoundingOff}`);
+              patternsFound.push('MRP Rounding Off');
               break;
             }
           }
         }
       }
     }
-
-    const retailTaxMatch = text.match(/Retail\s*Shop\s*Excise\s*Turnover\s*Tax[:\s]*([\d,]+\.?\d*)/i);
-    if (retailTaxMatch) result.retailExciseTax = this.parseAmount(retailTaxMatch[1]);
-
-    const specialCessMatch = text.match(/Special\s*Excise\s*Cess[:\s]*([\d,]+\.?\d*)/i);
-    if (specialCessMatch) result.specialExciseCess = this.parseAmount(specialCessMatch[1]);
-
-    const tcsMatch = text.match(/TCS[:\s]*([\d,]+\.?\d*)/i);
-    if (tcsMatch) result.tcs = this.parseAmount(tcsMatch[1]);
-
-    // Total Purchase Value = Invoice Value + MRP Rounding Off + TCS + Retail Excise Turnover Tax + Special Excise Cess
-    result.totalAmount = result.invoiceValue + result.mrpRoundingOff + result.tcs + result.retailExciseTax + result.specialExciseCess;
     
-    return result;
+    // Look for Net Invoice Value pattern: "Net" "Invoice" "Value:" followed by amount
+    // Need to find the SECOND amount after "Net Invoice Value:" sequence
+    for (let i = 0; i < lines.length - 3; i++) {
+      const line1 = lines[i];
+      const line2 = lines[i + 1];
+      const line3 = lines[i + 2];
+      
+      // Pattern: "Net" "Invoice" "Value:" then look for amounts after
+      if (line1.includes('Net') && 
+          line2.includes('Invoice') && 
+          line3.includes('Value:') &&
+          result.netInvoiceValue === 0) {
+        
+        // Look for amounts after "Net Invoice Value:" - we want the SECOND amount
+        let amountsFound = 0;
+        for (let j = i + 3; j < Math.min(i + 8, lines.length); j++) {
+          const amountLine = lines[j];
+          if (amountLine.match(/^[\d,]+\.?\d{0,2}$/)) {
+            amountsFound++;
+            if (amountsFound === 2) { // Take the second amount (Net Invoice Value)
+              console.log(`🔍 PATTERN DETECTED: Net Invoice Value (interleaved - second amount)`);
+              console.log(`   Net sequence: "${line1}" "${line2}" "${line3}"`);
+              console.log(`   Second amount found at line ${j + 1}: "${amountLine}"`);
+              console.log(`   Detection logic: Found 2nd amount after Net Invoice Value sequence`);
+              
+              result.netInvoiceValue = this.parseAmount(amountLine);
+              console.log(`   ✅ EXTRACTED: "${amountLine}" → ${result.netInvoiceValue}`);
+              patternsFound.push('Net Invoice Value');
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    // Alternative pattern for MRP Rounding Off: Look for amount between "Off:" and "Net"
+    if (result.mrpRoundingOff === 0) {
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i];
+        const nextLine = lines[i + 1];
+        
+        // If we find "Off:" followed by an amount, and the line after that contains "Net"
+        if (line.includes('Off:') && 
+            nextLine.match(/^[\d,]+\.?\d{0,2}$/) &&
+            i + 2 < lines.length && 
+            lines[i + 2].includes('Net')) {
+          
+          console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (alternative interleaved)`);
+          console.log(`   Line ${i + 1}: "${line}"`);
+          console.log(`   Line ${i + 2}: "${nextLine}"`);
+          console.log(`   Line ${i + 3}: "${lines[i + 2]}"`);
+          console.log(`   Detection logic: line.includes('Off:') && nextLine.match(/^[\\d,]+\\.?\\d{0,2}$/) && lines[i+2].includes('Net')`);
+          
+          result.mrpRoundingOff = this.parseAmount(nextLine);
+          console.log(`   ✅ EXTRACTED: "${nextLine}" → ${result.mrpRoundingOff}`);
+          patternsFound.push('MRP Rounding Off');
+          break;
+        }
+      }
+    }
+    
+    console.log(`📊 METHOD 4 SUMMARY: Found ${patternsFound.length} interleaved patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
   }
 
   parseAmount(amountStr) {
@@ -807,19 +1210,23 @@ class HybridInvoiceParser {
     if (!dateStr) return null;
     
     try {
-      const months = {
-        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-      };
-      
-      const match = dateStr.match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
-      if (match) {
-        const day = match[1].padStart(2, '0');
-        const month = months[match[2]];
-        const year = match[3];
-        if (month) return year + '-' + month + '-' + day;
+      // Handle DD-MMM-YYYY format (e.g., "06-Jun-2025")
+      if (dateStr.includes('-')) {
+        const [day, month, year] = dateStr.split('-');
+        const monthMap = {
+          'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
+          'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+        };
+        const monthNum = monthMap[month] || month;
+        return `${year}-${monthNum.padStart(2, '0')}-${day.padStart(2, '0')}`;
       }
+      
+      // Handle DD/MM/YYYY format
+      if (dateStr.includes('/')) {
+        const [day, month, year] = dateStr.split('/');
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+      
       return dateStr;
     } catch (error) {
       return dateStr;

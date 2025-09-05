@@ -52,7 +52,7 @@ psql -d your_database -f 05_sanity_checks.sql
 | `shop_inventory` | Shop-specific inventory | Auto-calculated final_price |
 | `daily_stock_records` | Daily stock movements | Generated sales calculations |
 | `invoices` | Purchase invoices | Auto-calculated net values |
-| `invoice_brands` | Invoice line items | Auto-linking to master brands |
+
 | `expenses` | Operational expenses | Category-based tracking |
 | `other_income` | Non-sales income | Source-based tracking |
 | `daily_payments` | Payment collections | Multi-method support |
@@ -93,7 +93,7 @@ psql -d your_database -f 05_sanity_checks.sql
 
 ### Invoice Processing Workflow
 1. Read invoice PDF → Extract brand details
-2. Insert into `invoice_brands` → Auto-linking trigger fires
+2. Insert into `received_stock_records` with invoice_id → Links to invoice
 3. Check `match_confidence` and `match_method` for quality
 4. Manual review for unmatched brands (`master_brand_id IS NULL`)
 5. Update `daily_stock_records.received_stock` for matched brands
@@ -112,15 +112,15 @@ SELECT
     COUNT(*) as total_brands,
     COUNT(master_brand_id) as matched,
     ROUND(COUNT(master_brand_id) * 100.0 / COUNT(*), 2) as match_rate
-FROM invoice_brands;
+FROM received_stock_records WHERE invoice_id IS NOT NULL;
 ```
 
 ### Unmatched Brands Analysis
 ```sql
 -- Find patterns in unmatched brands
 SELECT brand_number, size_ml, COUNT(*) as frequency
-FROM invoice_brands 
-WHERE master_brand_id IS NULL 
+FROM received_stock_records 
+WHERE invoice_id IS NOT NULL AND master_brand_id IS NULL 
 GROUP BY brand_number, size_ml 
 ORDER BY COUNT(*) DESC;
 ```
@@ -137,7 +137,7 @@ ORDER BY idx_scan DESC;
 | View | Purpose | Key Metrics |
 |------|---------|-------------|
 | `v_daily_stock` | Daily stock with all details | Sales %, stock values, status |
-| `v_invoice_brands_status` | Brand matching status | Match quality, confidence scores |
+
 | `v_shop_inventory_summary` | Shop-level inventory | Stock values, brand counts |
 | `v_daily_sales_summary` | Daily sales performance | Sales rates, revenue |
 | `v_invoice_processing_queue` | Processing priority | Match rates, pending reviews |

@@ -233,7 +233,7 @@ async function insertBatch(records) {
         INSERT INTO master_brands (
             brand_number, size_ml, brand_name, size_code, 
             product_type, pack_type, pack_quantity, standard_mrp, 
-            issue_price, special_margin, special_excise_cess, brand_kind, is_active
+            invoice, special_margin, special_excise_cess, brand_kind, is_active
         ) VALUES ${records.map((_, i) => 
             `($${i * 13 + 1}, $${i * 13 + 2}, $${i * 13 + 3}, $${i * 13 + 4}, $${i * 13 + 5}, $${i * 13 + 6}, $${i * 13 + 7}, $${i * 13 + 8}, $${i * 13 + 9}, $${i * 13 + 10}, $${i * 13 + 11}, $${i * 13 + 12}, $${i * 13 + 13})`
         ).join(', ')}
@@ -262,9 +262,9 @@ async function insertBatch(records) {
                 WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.standard_mrp 
                 ELSE master_brands.standard_mrp 
             END,
-            issue_price = CASE 
-                WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.issue_price 
-                ELSE master_brands.issue_price 
+            invoice = CASE 
+                WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.invoice 
+                ELSE master_brands.invoice 
             END,
             special_margin = CASE 
                 WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.special_margin 
@@ -335,7 +335,7 @@ async function insertSingleRecord(record) {
         INSERT INTO master_brands (
             brand_number, size_ml, brand_name, size_code, 
             product_type, pack_type, pack_quantity, standard_mrp, 
-            issue_price, special_margin, special_excise_cess, brand_kind, is_active
+            invoice, special_margin, special_excise_cess, brand_kind, is_active
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (brand_number, size_ml, pack_quantity, pack_type) DO UPDATE SET
             brand_name = CASE 

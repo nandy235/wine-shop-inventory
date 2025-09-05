@@ -19,7 +19,7 @@ DROP INDEX IF EXISTS idx_daily_stock_date_range CASCADE;
 DROP INDEX IF EXISTS idx_daily_stock_pending_closure CASCADE;
 DROP INDEX IF EXISTS idx_invoices_shop_date CASCADE;
 DROP INDEX IF EXISTS idx_invoices_status CASCADE;
--- invoice_brands indexes removed - using received_stock_records system
+
 DROP INDEX IF EXISTS idx_invoice_unmatched_queue CASCADE;
 DROP INDEX IF EXISTS idx_expenses_shop_date CASCADE;
 DROP INDEX IF EXISTS idx_income_shop_date CASCADE;
@@ -146,7 +146,7 @@ ANALYZE master_brands;
 ANALYZE shop_inventory;
 ANALYZE daily_stock_records;
 ANALYZE invoices;
--- ANALYZE invoice_brands; (removed)
+
 ANALYZE expenses;
 ANALYZE other_income;
 ANALYZE daily_payments;
@@ -180,7 +180,7 @@ ORDER BY idx_scan DESC;
 
 COMMENT ON INDEX idx_master_brands_lookup IS 'Critical: Most frequent lookup for brand matching';
 COMMENT ON INDEX idx_daily_stock_inventory_date IS 'Critical: Primary access pattern for stock records';
--- COMMENT ON INDEX idx_invoice_brands_match (removed);
+
 COMMENT ON INDEX idx_shop_inventory_reporting IS 'Performance: Optimizes inventory summary queries';
 COMMENT ON INDEX idx_master_brands_similarity IS 'Fuzzy matching: Enables fast similarity searches';
 

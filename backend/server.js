@@ -9,6 +9,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+// Import database pool
+const { pool } = require('./database');
 // Load master brands from database instead of JSON file
 let masterBrandsData = [];
 
@@ -67,7 +69,7 @@ async function loadMasterBrandsFromDB(packTypeFilter = null, applyStockOnboardin
         pack_type as "packType",
         pack_quantity as "packQuantity",
         standard_mrp as mrp,
-        issue_price as "issuePrice",
+        invoice,
         special_margin as "specialMargin",
         special_excise_cess as "specialExciseCess",
         brand_kind as "brandKind",
@@ -177,7 +179,12 @@ const aggregateProductsByBrandAndSize = (products) => {
       existing.openingStock += product.openingStock || 0;
       existing.receivedStock += product.receivedStock || 0;
       existing.totalStock += product.totalStock || 0;
-      existing.closingStock = (existing.closingStock || 0) + (product.closingStock || 0);
+      // Handle closingStock aggregation properly - if any product has null closingStock, result should be null
+      if (existing.closingStock !== null && product.closingStock !== null) {
+        existing.closingStock = existing.closingStock + product.closingStock;
+      } else if (existing.closingStock === null || product.closingStock === null) {
+        existing.closingStock = null;
+      }
       
       // Aggregate received quantities from new tables
       existing.totalReceivedToday = (existing.totalReceivedToday || 0) + (product.totalReceivedToday || 0);
@@ -315,8 +322,8 @@ app.post('/api/closing-stock/update', authenticateToken, async (req, res) => {
     console.log('\n📦 Closing stock update started...');
     
     const { date, stockUpdates } = req.body;
-    const userId = req.user.userId;
-    const shopId = req.user.shopId;
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
@@ -411,9 +418,9 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
   try {
     console.log('\n🚀 Invoice upload started...');
     
-    // Get user and shop info from JWT token
-    const userId = req.user.userId;
-    const shopId = req.user.shopId;
+    // Get user and shop info from JWT token (convert to integers)
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
@@ -489,30 +496,120 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
     console.log(`   Items validated: ${parseResult.data.summary.validatedItems}`);
     console.log(`   Items skipped: ${parseResult.data.summary.skippedItems}`);
 
-    // Generate temp ID and store data in memory
+    // Generate temp ID and store data in invoice_staging table
     const tempId = generateTempId();
-    storePendingInvoice(tempId, parseResult.data, userId, shopId);
+    
+    try {
+      console.log('💾 Storing invoice data in invoice_staging table...');
+      console.log('🔍 Debug info:', {
+        tempId,
+        userId,
+        shopId,
+        invoiceNumber: parseResult.data.invoiceNumber,
+        date: parseResult.data.date,
+        invoiceValue: parseResult.data.invoiceValue,
+        totalAmount: parseResult.data.totalAmount,
+        confidence: parseResult.confidence,
+        method: parseResult.method,
+        itemsCount: parseResult.data.items?.length || 0
+      });
+      
+      // Log all the values that will be inserted
+      const insertValues = [
+        tempId,
+        userId,
+        shopId,
+        parseResult.data.invoiceNumber,
+        parseResult.data.date,
+        parseResult.data.invoiceValue || parseResult.data.totalAmount || 0,
+        parseResult.data.netInvoiceValue || 0,
+        parseResult.data.mrpRoundingOff || 0,
+        parseResult.data.retailShopExciseTax || 0,
+        parseResult.data.retailExciseTurnoverTax || 0,
+        parseResult.data.specialExciseCess || 0,
+        parseResult.data.tcs || 0,
+        parseResult.data.totalAmount || 0,
+        parseResult.confidence,
+        parseResult.method,
+        JSON.stringify(parseResult.data.items),
+        JSON.stringify(parseResult.data.summary),
+        JSON.stringify(parseResult.warnings || []),
+        JSON.stringify(parseResult.data.skippedItems || [])
+      ];
+      
+      // Store in database instead of memory
+      await pool.query(`
+        INSERT INTO invoice_staging (
+          temp_id, user_id, shop_id, invoice_number, invoice_date, 
+          invoice_value, net_invoice_value, mrp_rounding_off, 
+          retail_shop_excise_tax, retail_excise_turnover_tax, special_excise_cess, tcs, total_amount,
+          confidence, parse_method, items_data, summary_data, 
+          warnings, skipped_items
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      `, [
+        tempId,
+        userId,
+        shopId,
+        parseResult.data.invoiceNumber,
+        parseResult.data.date,
+        parseResult.data.invoiceValue || parseResult.data.totalAmount || 0,
+        parseResult.data.netInvoiceValue || 0,
+        parseResult.data.mrpRoundingOff || 0,
+        parseResult.data.retailShopExciseTax || 0,
+        parseResult.data.retailExciseTurnoverTax || 0,
+        parseResult.data.specialExciseCess || 0,
+        parseResult.data.tcs || 0,
+        parseResult.data.totalAmount || 0,
+        parseResult.confidence,
+        parseResult.method,
+        JSON.stringify(parseResult.data.items),
+        JSON.stringify(parseResult.data.summary),
+        JSON.stringify(parseResult.warnings || []),
+        JSON.stringify(parseResult.data.skippedItems || [])
+      ]);
 
-    // Return the parsed and validated data WITH tempId for frontend display
-    res.json({
-      success: true,
-      message: 'File uploaded successfully',
-      tempId: tempId,
-      confidence: parseResult.confidence,
-      method: parseResult.method,
-      invoiceNumber: parseResult.data.invoiceNumber,
-      date: parseResult.data.date,
-      totalAmount: parseResult.data.totalAmount,
-      netInvoiceValue: parseResult.data.netInvoiceValue,
-      mrpRoundingOff: parseResult.data.mrpRoundingOff,
-      retailExciseTax: parseResult.data.retailExciseTax,
-      specialExciseCess: parseResult.data.specialExciseCess,
-      tcs: parseResult.data.tcs,
-      items: parseResult.data.items, // Only validated items for display
-      summary: parseResult.data.summary,
-      warnings: parseResult.warnings || [],
-      skippedItems: parseResult.data.skippedItems || []
-    });
+      console.log(`✅ Invoice data stored with tempId: ${tempId}`);
+
+      // Return the parsed and validated data WITH tempId for frontend display
+      res.json({
+        success: true,
+        message: 'File uploaded successfully',
+        tempId: tempId,
+        confidence: parseResult.confidence,
+        method: parseResult.method,
+        invoiceNumber: parseResult.data.invoiceNumber,
+        date: parseResult.data.date,
+        invoiceValue: parseResult.data.invoiceValue,
+        totalAmount: parseResult.data.totalAmount,
+        netInvoiceValue: parseResult.data.netInvoiceValue,
+        mrpRoundingOff: parseResult.data.mrpRoundingOff,
+        retailShopExciseTax: parseResult.data.retailShopExciseTax,
+        retailExciseTurnoverTax: parseResult.data.retailExciseTurnoverTax,
+        specialExciseCess: parseResult.data.specialExciseCess,
+        tcs: parseResult.data.tcs,
+        items: parseResult.data.items, // Only validated items for display
+        summary: parseResult.data.summary,
+        warnings: parseResult.warnings || [],
+        skippedItems: parseResult.data.skippedItems || []
+      });
+
+    } catch (storeError) {
+      console.error('❌ Failed to store invoice data:', storeError);
+      console.error('❌ Error details:', {
+        message: storeError.message,
+        code: storeError.code,
+        detail: storeError.detail,
+        constraint: storeError.constraint,
+        stack: storeError.stack
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Invoice parsed successfully but failed to store temporarily',
+        error: storeError.message,
+        errorCode: storeError.code,
+        errorDetail: storeError.detail
+      });
+    }
 
   } catch (error) {
     console.error('❌ Invoice upload error:', error);
@@ -543,227 +640,127 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
 // Confirm and add parsed invoice data to stock
 app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
   try {
-    console.log('\n📦 Invoice confirmation started...');
+    console.log('\n🔄 Invoice confirmation started...');
+    console.log('📦 Request body:', req.body);
     
-    const { tempId } = req.body;
-    const userId = req.user.userId;
-    const shopId = req.user.shopId;
-    const today = getBusinessDate();
-
+    const { tempId, businessDate } = req.body;
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
+    
+    console.log('📅 Received businessDate:', businessDate);
+    console.log('🆔 TempId:', tempId);
+    
     if (!tempId) {
-      return res.status(400).json({ message: 'No tempId provided' });
+      return res.status(400).json({ message: 'Temporary ID is required' });
     }
 
-    if (!shopId) {
-      return res.status(400).json({ message: 'Shop ID not found in token' });
-    }
-
-    // Retrieve stored invoice data from memory
-    const pendingInvoice = pendingInvoices.get(tempId);
-    if (!pendingInvoice) {
-      return res.status(404).json({ 
+    console.log(`🔍 Looking for tempId: ${tempId}`);
+    
+    // Retrieve stored invoice data from database
+    const result = await pool.query(`
+      SELECT * FROM invoice_staging 
+      WHERE temp_id = $1 AND user_id = $2 AND shop_id = $3 
+      AND expires_at > CURRENT_TIMESTAMP
+    `, [tempId, userId, shopId]);
+    
+    if (result.rows.length === 0) {
+      console.error(`❌ Invoice data not found for tempId: ${tempId}`);
+      return res.status(404).json({
         message: 'Invoice data expired or not found. Please upload again.',
         code: 'INVOICE_EXPIRED'
       });
     }
-
-    // Verify ownership
-    if (pendingInvoice.userId !== userId || pendingInvoice.shopId !== shopId) {
-      return res.status(403).json({ message: 'Unauthorized access to invoice data' });
-    }
-
-    // Update last accessed time
-    pendingInvoice.lastAccessed = new Date();
     
-    const invoiceData = pendingInvoice.data;
+    const invoiceRecord = result.rows[0];
+    console.log(`✅ Found pending invoice for tempId: ${tempId}`);
 
-    if (!invoiceData || !invoiceData.items || invoiceData.items.length === 0) {
-      return res.status(400).json({ message: 'No invoice data or items found' });
-    }
+    // Parse the JSON data
+    const invoiceData = {
+      invoiceNumber: invoiceRecord.invoice_number,
+      date: invoiceRecord.invoice_date,
+      invoiceValue: invoiceRecord.invoice_value,
+      netInvoiceValue: invoiceRecord.net_invoice_value,
+      mrpRoundingOff: invoiceRecord.mrp_rounding_off,
+      retailShopExciseTax: invoiceRecord.retail_shop_excise_tax,
+      retailExciseTurnoverTax: invoiceRecord.retail_excise_turnover_tax,
+      specialExciseCess: invoiceRecord.special_excise_cess,
+      tcs: invoiceRecord.tcs,
+      totalAmount: invoiceRecord.total_amount,
+      items: typeof invoiceRecord.items_data === 'string' ? JSON.parse(invoiceRecord.items_data) : invoiceRecord.items_data,
+      summary: typeof invoiceRecord.summary_data === 'string' ? JSON.parse(invoiceRecord.summary_data) : invoiceRecord.summary_data
+    };
 
-    console.log(`👤 User: ${userId}, Shop: ${shopId}`);
-    console.log(`📅 Date: ${today}`);
-    console.log(`📦 Items to process: ${invoiceData.items.length}`);
-    console.log(`🗂️ Processing tempId: ${tempId}`);
+    const today = new Date().toISOString().split('T')[0];
+    const finalBusinessDate = businessDate || today; // Use provided business date or fallback to today
+    
+    console.log('📅 Final business date being used:', finalBusinessDate);
+    console.log('📅 Today fallback date:', today);
 
-    let updatedCount = 0;
-    let addedToInventory = 0;
-    const processedItems = [];
-    const errors = [];
 
-    // Process each validated item
-    for (const item of invoiceData.items) {
-      try {
-        console.log(`\n📄 Processing: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
-
-        // Check if product exists in shop inventory
-        let shopProducts = await dbService.getShopProducts(shopId);
-        console.log(`🔍 Looking for: ${item.brandNumber} ${item.formattedSize} ${item.packType}`);
-        console.log(`📦 Available products: ${shopProducts.length}`);
-        
-        let shopProduct = shopProducts.find(product => {
-          const productFormattedSize = formatSize(product.sizeCode, product.size);
-          const matches = product.brandNumber === item.brandNumber && 
-                         productFormattedSize === item.formattedSize &&
-                         product.packType === item.packType;
-          if (matches) {
-            console.log(`✅ Match found: ${product.brandNumber} ${productFormattedSize} ${product.packType}`);
-          }
-          return matches;
-        });
-
-        // If not in inventory, add it (using masterBrand data)
-        if (!shopProduct) {
-          console.log(`➕ Adding new product to inventory: ${item.brandNumber}`);
-          
-          const newShopProduct = await dbService.addShopProduct({
-            masterBrandId: item.masterBrandId,
-            shopId: shopId,
-            markupPrice: 0, // Default markup
-            finalPrice: item.mrp, // Can be updated later
-            currentQuantity: item.totalQuantity
-          });
-          
-          shopProduct = newShopProduct;
-          addedToInventory++;
-        } else {
-          // Product exists, update quantity
-          console.log(`📦 Updating existing product quantity: ${item.brandNumber}`);
-          await dbService.updateShopProductQuantity(shopId, item.masterBrandId, item.totalQuantity, null, null);
-        }
-
-        // ADD TO RECEIVED STOCK RECORDS - Invoice quantity (this will auto-update daily_stock_records via trigger)
-        await dbService.addReceivedStock({
-          shopId: shopId,
-          masterBrandId: item.masterBrandId,
-          recordDate: today,
-          invoiceQuantity: item.totalQuantity, // Add to invoice column
-          manualQuantity: 0,
-          transferQuantity: 0,
-          invoiceId: null, // Will be set after invoice is saved
-          transferReference: null,
-          notes: `From invoice: ${invoiceData.invoiceNumber}`,
-          createdBy: userId
-        });
-
-        // Initialize daily stock record if it doesn't exist (opening stock and price only)
-        const stockRecord = await dbService.createOrUpdateDailyStockRecord({
-          shopInventoryId: shopProduct.id,
-          stockDate: today,
-          openingStock: 0, // Will be handled by the UPSERT logic
-          receivedStock: 0, // Will be auto-calculated from received_stock_records by trigger
-          closingStock: null, // Will auto-calculate
-          pricePerUnit: shopProduct.final_price
-        });
-
-        updatedCount++;
-        processedItems.push({
-          brandNumber: item.brandNumber,
-          description: item.description,
-          size: item.formattedSize,
-          receivedQuantity: item.totalQuantity,
-          newTotal: (stockRecord.opening_stock || 0) + (stockRecord.received_stock || 0),
-          newClosing: stockRecord.closing_stock
-        });
-
-        console.log(`✅ Updated: ${item.brandNumber} - Received: ${item.totalQuantity}, Opening: ${stockRecord.opening_stock}, Received: ${stockRecord.received_stock}`);
-
-      } catch (itemError) {
-        console.error(`❌ Error processing item ${item.brandNumber}:`, itemError);
-        errors.push({
-          brandNumber: item.brandNumber,
-          error: itemError.message
-        });
-      }
-    }
-
-    // Save the invoice record AND individual items to database
-    const invoiceRecord = await dbService.saveInvoiceWithItems({
+    // Save invoice using the database service
+    const savedInvoice = await dbService.saveInvoiceWithItems({
       userId,
       invoiceNumber: invoiceData.invoiceNumber,
-      date: invoiceData.date,
+      date: finalBusinessDate, // Use business date for received_stock_records
+      originalInvoiceDate: invoiceRecord.invoice_date, // Original invoice date for invoices table
       uploadDate: today,
-      totalValue: invoiceData.invoiceValue, // Store actual Invoice Value from PDF
-      netInvoiceValue: invoiceData.netInvoiceValue,
-      mrpRoundingOff: invoiceData.mrpRoundingOff,
-      retailExciseTax: invoiceData.retailExciseTax,
-      specialExciseCess: invoiceData.specialExciseCess,
-      tcs: invoiceData.tcs,
+      totalValue: invoiceData.invoiceValue || 0,
+      netInvoiceValue: invoiceData.netInvoiceValue || 0,
+      mrpRoundingOff: invoiceData.mrpRoundingOff || 0,
+      retailShopExciseTax: invoiceData.retailShopExciseTax || 0,
+      retailExciseTurnoverTax: invoiceData.retailExciseTurnoverTax || 0,
+      specialExciseCess: invoiceData.specialExciseCess || 0,
+      tcs: invoiceData.tcs || 0,
       itemsCount: invoiceData.items.length,
-      processedItemsCount: updatedCount
-    }, invoiceData.items); // Pass the validated items
+      processedItemsCount: invoiceData.items.filter(item => item.masterBrandId).length
+    }, invoiceData.items);
 
-    // Clean up - remove from memory after successful processing
-    pendingInvoices.delete(tempId);
+    console.log(`✅ Invoice saved successfully with ID: ${savedInvoice.id}`);
+
+    // Clean up the temporary data from invoice_staging table
+    await pool.query('DELETE FROM invoice_staging WHERE temp_id = $1', [tempId]);
     console.log(`🗑️ Cleaned up tempId: ${tempId}`);
 
-    console.log(`\n🎉 Invoice processing completed!`);
-    console.log(`   ✅ Items processed: ${updatedCount}`);
-    console.log(`   ➕ Added to inventory: ${addedToInventory}`);
-    console.log(`   ❌ Errors: ${errors.length}`);
-
     res.json({
-      message: 'Invoice processed and stock updated successfully',
-      invoiceNumber: invoiceData.invoiceNumber,
-      date: invoiceData.date,
-      updatedCount,
-      addedToInventory,
-      totalItems: invoiceData.items.length,
-      processedItems,
-      errors: errors.length > 0 ? errors : undefined,
-      invoiceRecord: {
-        id: invoiceRecord.id,
-        invoiceNumber: invoiceRecord.invoice_number,
-        totalValue: invoiceRecord.total_value,
-        date: invoiceRecord.date
-      }
+      success: true,
+      message: 'Invoice confirmed and saved successfully',
+      invoiceId: savedInvoice.id,
+      invoiceNumber: savedInvoice.invoice_number,
+      totalValue: savedInvoice.total_value,
+      date: savedInvoice.date,
+      itemsCount: savedInvoice.itemsCount,
+      matchedItemsCount: savedInvoice.matchedItemsCount
     });
 
   } catch (error) {
     console.error('❌ Invoice confirmation error:', error);
-    console.error('❌ Stack trace:', error.stack);
-    
-    // Check if it's a duplicate invoice error
-    if (error.message && error.message.includes('has already been processed')) {
-      return res.status(409).json({ 
-        message: 'Error: This invoice is already processed.',
-        code: 'INVOICE_ALREADY_PROCESSED',
-        error: error.message
-      });
-    }
-    
-    // Generic server error for other issues
     res.status(500).json({ 
-      message: 'Server error during invoice confirmation', 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: 'Failed to confirm invoice',
+      error: error.message 
     });
   }
 });
-
 // Cancel pending invoice (manual cleanup)
 app.post('/api/invoice/cancel', authenticateToken, async (req, res) => {
   try {
     const { tempId } = req.body;
-    const userId = req.user.userId;
-    const shopId = req.user.shopId;
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
 
     if (!tempId) {
       return res.status(400).json({ message: 'No tempId provided' });
     }
 
-    const pendingInvoice = pendingInvoices.get(tempId);
-    if (!pendingInvoice) {
+    // Delete from invoice_staging table
+    const result = await pool.query(`
+      DELETE FROM invoice_staging 
+      WHERE temp_id = $1 AND user_id = $2 AND shop_id = $3
+    `, [tempId, userId, shopId]);
+
+    if (result.rowCount === 0) {
       return res.status(404).json({ message: 'Invoice data not found or already expired' });
     }
 
-    // Verify ownership
-    if (pendingInvoice.userId !== userId || pendingInvoice.shopId !== shopId) {
-      return res.status(403).json({ message: 'Unauthorized access to invoice data' });
-    }
-
-    // Remove from memory
-    pendingInvoices.delete(tempId);
     console.log(`❌ Cancelled and cleaned up tempId: ${tempId}`);
 
     res.json({
@@ -783,8 +780,8 @@ app.post('/api/invoice/cancel', authenticateToken, async (req, res) => {
 // Optional: Get invoice history
 app.get('/api/invoices', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
-    const shopId = req.user.shopId;
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
@@ -806,23 +803,38 @@ app.get('/api/invoices', authenticateToken, async (req, res) => {
 
 // Debug endpoint to check pending invoices (development only)
 if (process.env.NODE_ENV === 'development') {
-  app.get('/api/debug/pending-invoices', authenticateToken, (req, res) => {
-    const pendingList = [];
-    for (const [tempId, invoice] of pendingInvoices) {
-      pendingList.push({
-        tempId,
-        userId: invoice.userId,
-        shopId: invoice.shopId,
-        createdAt: invoice.createdAt,
-        expiresAt: invoice.expiresAt,
-        itemCount: invoice.data.items?.length || 0
+  app.get('/api/debug/pending-invoices', authenticateToken, async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT temp_id, user_id, shop_id, invoice_number, 
+               created_at, expires_at, confidence, parse_method,
+               jsonb_array_length(items_data) as item_count
+        FROM invoice_brands 
+        WHERE expires_at > CURRENT_TIMESTAMP
+        ORDER BY created_at DESC
+      `);
+      
+      res.json({
+        totalPending: result.rows.length,
+        invoices: result.rows.map(row => ({
+          tempId: row.temp_id,
+          userId: row.user_id,
+          shopId: row.shop_id,
+          invoiceNumber: row.invoice_number,
+          createdAt: row.created_at,
+          expiresAt: row.expires_at,
+          confidence: row.confidence,
+          parseMethod: row.parse_method,
+          itemCount: row.item_count || 0
+        }))
+      });
+    } catch (error) {
+      console.error('❌ Debug pending invoices error:', error);
+      res.status(500).json({ 
+        message: 'Failed to fetch pending invoices',
+        error: error.message 
       });
     }
-    
-    res.json({
-      totalPending: pendingInvoices.size,
-      invoices: pendingList
-    });
   });
 }
 
@@ -936,7 +948,7 @@ app.post('/api/register', async (req, res) => {
 // Enhanced stock initialization with auto-recovery
 app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const today = getBusinessDate();
     
     const recordCount = await dbService.initializeTodayStock(shopId, today);
@@ -983,7 +995,7 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
 app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
  try {
    const { masterBrandId, quantity, shopMarkup = 0 } = req.body;
-   const shopId = req.user.shopId;
+   const shopId = parseInt(req.user.shopId);
    const today = getBusinessDate();
    const { pool } = require('./database');
    
@@ -1060,7 +1072,7 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
     invoiceId: null,
     transferReference: null,
     notes: `Manual stock addition - ${wasUpdated ? 'Updated existing' : 'New product'}`,
-    createdBy: req.user.userId
+    createdBy: parseInt(req.user.userId)
   });
 
   // Initialize daily stock record if it doesn't exist (opening stock and price only)
@@ -1092,7 +1104,7 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
 app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
   try {
     const { sortedBrandGroups } = req.body;
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     
     const result = await dbService.updateSortOrder(shopId, sortedBrandGroups);
     res.json(result);
@@ -1104,7 +1116,7 @@ app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
 
 app.get('/api/shop/products', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     const targetDate = date || getBusinessDate();
     
@@ -1116,6 +1128,11 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
     
     const rawProducts = await dbService.getShopProducts(shopId, targetDate);
     console.log(`📋 Found ${rawProducts.length} raw products in shop inventory`);
+    
+    // Debug: Log first raw product to see its structure
+    if (rawProducts.length > 0) {
+      console.log('📋 Sample raw product:', JSON.stringify(rawProducts[0], null, 2));
+    }
     
     // Get received stock data for the date
     const receivedStockData = await dbService.getReceivedStock(shopId, targetDate);
@@ -1154,6 +1171,12 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
     const aggregatedProducts = aggregateProductsByBrandAndSize(productsWithReceived);
     console.log(`📊 Aggregated to ${aggregatedProducts.length} display products with received quantities`);
     
+    // Debug: Log first few products to see their structure
+    if (aggregatedProducts.length > 0) {
+      console.log('📋 Sample aggregated product:', JSON.stringify(aggregatedProducts[0], null, 2));
+      console.log('📋 Total sales value:', aggregatedProducts.reduce((sum, p) => sum + ((p.totalStock || 0) - (p.closingStock || p.totalStock || 0)) * (p.finalPrice || 0), 0));
+    }
+    
     // Check if closing stock is already saved
     const closingStockStatus = await dbService.isClosingStockSaved(shopId, targetDate);
     
@@ -1176,7 +1199,7 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
  try {
    const { id } = req.params;
    const { quantity, finalPrice } = req.body;
-   const shopId = req.user.shopId;
+   const shopId = parseInt(req.user.shopId);
    
    const { pool } = require('./database');
    
@@ -1230,7 +1253,7 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
 app.delete('/api/shop/delete-product/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     
     const { pool } = require('./database');
     
@@ -1285,7 +1308,7 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
   try {
     const { id } = req.params; // shop_inventory.id
     const { receivedStock, finalPrice } = req.body;
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     
     const { pool } = require('./database');
     
@@ -1357,7 +1380,7 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
 app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
   try {
     const { date, stockUpdates } = req.body;
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     
     const result = await dbService.updateClosingStock(shopId, date, stockUpdates);
     
@@ -1383,7 +1406,7 @@ app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
 // Summary endpoint with improved stock value calculation
 app.get('/api/summary', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     const targetDate = date || getBusinessDate();
     
@@ -1403,7 +1426,7 @@ app.get('/api/summary', authenticateToken, async (req, res) => {
 // Income and Expenses endpoints
 app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     const targetDate = date || getBusinessDate();
     
@@ -1419,7 +1442,7 @@ app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
 
 app.get('/api/income-expenses/expenses', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     const targetDate = date || getBusinessDate();
     
@@ -1435,7 +1458,7 @@ app.get('/api/income-expenses/expenses', authenticateToken, async (req, res) => 
 
 app.post('/api/income-expenses/save-income', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date, income } = req.body;
     const targetDate = date || getBusinessDate();
     
@@ -1455,7 +1478,7 @@ app.post('/api/income-expenses/save-income', authenticateToken, async (req, res)
 
 app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date, expenses } = req.body;
     const targetDate = date || getBusinessDate();
     
@@ -1478,7 +1501,7 @@ app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, re
 // Get payment record for a specific date
 app.get('/api/payments', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
 
     if (!shopId) {
@@ -1511,7 +1534,7 @@ app.get('/api/payments', authenticateToken, async (req, res) => {
 // Save or update payment record
 app.post('/api/payments', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { payment_date, cash_amount, upi_amount, card_amount } = req.body;
 
     if (!shopId) {
@@ -1577,8 +1600,8 @@ app.post('/api/analytics/web-vitals', (req, res) => {
 // Received Stock Management Endpoints
 app.post('/api/received-stock', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
-    const userId = req.user.userId;
+    const shopId = parseInt(req.user.shopId);
+    const userId = parseInt(req.user.userId);
     const {
       masterBrandId, recordDate, invoiceQuantity, manualQuantity, 
       transferQuantity, invoiceId, transferReference, notes
@@ -1618,7 +1641,7 @@ app.post('/api/received-stock', authenticateToken, async (req, res) => {
 
 app.get('/api/received-stock', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date, masterBrandId } = req.query;
     
     console.log(`📋 Getting received stock for shop ${shopId}`);
@@ -1669,7 +1692,7 @@ app.put('/api/received-stock/:id', authenticateToken, async (req, res) => {
 app.delete('/api/received-stock/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     
     console.log(`🗑️ Deleting received stock record ${id}`);
     
@@ -1693,7 +1716,7 @@ app.delete('/api/received-stock/:id', authenticateToken, async (req, res) => {
 // Stock Transfer Endpoints
 app.post('/api/stock-transfers', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = parseInt(req.user.userId);
     const {
       fromShopId, toShopId, masterBrandId, quantity,
       transferReference, notes, recordDate
@@ -1737,7 +1760,7 @@ app.post('/api/stock-transfers', authenticateToken, async (req, res) => {
 
 app.get('/api/stock-transfers', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     
     console.log(`📋 Getting stock transfers for shop ${shopId}`);
@@ -1758,8 +1781,8 @@ app.get('/api/stock-transfers', authenticateToken, async (req, res) => {
 // Closing Stock Management Endpoints
 app.post('/api/closing-stock', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
-    const userId = req.user.userId;
+    const shopId = parseInt(req.user.shopId);
+    const userId = parseInt(req.user.userId);
     const {
       masterBrandId, recordDate, openingStock, closingStock,
       unitPrice, isFinalized, varianceNotes
@@ -1799,7 +1822,7 @@ app.post('/api/closing-stock', authenticateToken, async (req, res) => {
 
 app.get('/api/closing-stock', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date, masterBrandId } = req.query;
     
     console.log(`📋 Getting closing stock for shop ${shopId}`);
@@ -1819,8 +1842,8 @@ app.get('/api/closing-stock', authenticateToken, async (req, res) => {
 
 app.post('/api/closing-stock/finalize', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
-    const userId = req.user.userId;
+    const shopId = parseInt(req.user.shopId);
+    const userId = parseInt(req.user.userId);
     const { date, closingStockUpdates } = req.body;
     
     if (!date || !closingStockUpdates || !Array.isArray(closingStockUpdates)) {
@@ -1844,7 +1867,7 @@ app.post('/api/closing-stock/finalize', authenticateToken, async (req, res) => {
 // Enhanced Daily Stock Summary Endpoint
 app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
     const targetDate = date || getBusinessDate();
     
@@ -1872,7 +1895,7 @@ app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
 // Initialize closing stock records for a date
 app.post('/api/closing-stock/initialize', authenticateToken, async (req, res) => {
   try {
-    const shopId = req.user.shopId;
+    const shopId = parseInt(req.user.shopId);
     const { date } = req.body;
     const targetDate = date || getBusinessDate();
     
@@ -1917,7 +1940,11 @@ app.get('/', (req, res) => {
 // --- Start the server FIRST ---
 const server = app.listen(PORT, '0.0.0.0', () => {
   const addr = server.address();
-  console.log(`Server is running on ${addr.address}:${addr.port}`);
+  if (addr) {
+    console.log(`Server is running on ${addr.address}:${addr.port}`);
+  } else {
+    console.log(`Server is running on port ${PORT}`);
+  }
 });
 
 // --- Now do DB work in the background ---
