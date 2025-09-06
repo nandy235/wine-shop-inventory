@@ -213,6 +213,7 @@ function processCSVRow(row) {
             packQuantity,
             standardMRP,
 
+
             issuePrice: invoicePrice, // Use pre-calculated invoice price or calculate from issue price
             specialMargin,
             specialExciseCess,

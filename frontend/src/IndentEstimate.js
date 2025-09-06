@@ -786,7 +786,7 @@ function IndentEstimate({ onNavigate, onBack }) {
                       <span className="calculation-value">{formatIndianCurrency(estimate.specialExciseCess)}</span>
                     </div>
                     <div className="calculation-row">
-                      <span className="calculation-label">TCS (1.175%):</span>
+                      <span className="calculation-label">TCS :</span>
                       <span className="calculation-value">{formatIndianCurrency(estimate.tcs)}</span>
                     </div>
                     <div className="calculation-row grand-total-row">

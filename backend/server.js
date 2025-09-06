@@ -734,7 +734,20 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Invoice confirmation error:', error);
+    
+    // Check if this is a duplicate invoice error
+    if (error.message && error.message.includes('has already been processed for this shop')) {
+      return res.status(409).json({ 
+        success: false,
+        message: 'This invoice has already been processed.',
+        code: 'INVOICE_ALREADY_PROCESSED',
+        details: 'Each invoice can only be confirmed once per shop. If you need to reprocess this invoice, please contact support.'
+      });
+    }
+    
+    // Generic error handling for other issues
     res.status(500).json({ 
+      success: false,
       message: 'Failed to confirm invoice',
       error: error.message 
     });

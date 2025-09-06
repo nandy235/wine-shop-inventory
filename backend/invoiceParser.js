@@ -755,11 +755,12 @@ class HybridInvoiceParser {
     
     // COMPREHENSIVE EXTRACTION - Handle all PDF formats
     console.log('🔍 Starting multi-format extraction...');
-    console.log('📋 Will try 4 different pattern detection methods:');
+    console.log('📋 Will try 5 different pattern detection methods:');
     console.log('   1️⃣ Same-line patterns (e.g., "Retail Excise Turnover Tax:1,30,944.00")');
     console.log('   2️⃣ Block format patterns (labels first, then amounts in block)');
     console.log('   3️⃣ Split-line patterns (label on one line, value on next)');
     console.log('   4️⃣ Interleaved patterns (labels and amounts mixed together)');
+    console.log('   5️⃣ ICDC-0 Print format (positional extraction of standalone amounts)');
     console.log('');
     
     // Method 1: Same-line patterns
@@ -773,6 +774,9 @@ class HybridInvoiceParser {
     
     // Method 4: Interleaved patterns
     this.extractInterleavedValues(lines, result);
+    
+    // Method 5: ICDC-0 Print format (regex-based extraction for standalone amounts)
+    this.extractICDC0PrintFormatRegex(lines, result);
     
     // Calculate total amount
     result.totalAmount = result.invoiceValue + result.mrpRoundingOff + 
@@ -1199,6 +1203,316 @@ class HybridInvoiceParser {
     
     console.log(`📊 METHOD 4 SUMMARY: Found ${patternsFound.length} interleaved patterns: [${patternsFound.join(', ')}]`);
     console.log('');
+  }
+
+  // Method 5: Extract from ICDC-0 Print format using regex patterns for standalone amounts
+  extractICDC0PrintFormatRegex(lines, result) {
+    console.log('5️⃣ METHOD 5: ICDC-0 PRINT FORMAT REGEX PATTERN DETECTION');
+    console.log('   Looking for: Specific regex patterns for standalone financial amounts');
+    console.log('   Target amounts: Invoice Value, MRP Rounding Off, Net Invoice Value, Retail Excise Turnover Tax, Special Excise Cess, TCS');
+    
+    let patternsFound = [];
+    
+    // Define flexible regex patterns for ICDC-0 Print format financial values
+    const icdc0Patterns = {
+      // Large amounts (lakhs range) with decimals - for Invoice Value, MRP Rounding, Net Invoice Value
+      // Updated to handle concatenated amounts by finding proper currency patterns
+      largeAmountWithDecimals: /((?:\d{1,2},)*\d{2,3},\d{3}\.\d{2})/g,
+      
+      // Medium amounts (lakhs range) ending in .00 - for taxes and cess
+      mediumAmountRound: /((?:\d{1,2},)*\d{2,3},\d{3}\.00)/g,
+      
+      // Small amounts (thousands range) - for TCS and smaller fees
+      smallAmount: /(\d{1,2},\d{3}\.\d{2})/g
+    };
+    
+    console.log('   🔍 Collecting all potential financial amounts...');
+    
+    // Collect all potential amounts with their characteristics
+    const potentialAmounts = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Check for large amounts with decimals (using global regex to find all matches)
+      let matches = [...line.matchAll(icdc0Patterns.largeAmountWithDecimals)];
+      for (const match of matches) {
+        const amount = this.parseAmount(match[1]);
+        // Only include reasonable amounts (not too large to cause overflow)
+        if (amount < 100000000) { // Less than 100 million to avoid DB overflow
+          potentialAmounts.push({
+            line: match[1],
+            amount: amount,
+            index: i,
+            type: 'largeWithDecimals',
+            hasDecimals: true
+          });
+          console.log(`   💰 Large amount with decimals at line ${i + 1}: "${match[1]}" → ${amount}`);
+        } else {
+          console.log(`   ⚠️  Skipping oversized amount at line ${i + 1}: "${match[1]}" → ${amount} (too large for DB)`);
+        }
+      }
+      
+      // Check for medium amounts ending in .00
+      matches = [...line.matchAll(icdc0Patterns.mediumAmountRound)];
+      for (const match of matches) {
+        const amount = this.parseAmount(match[1]);
+        if (amount < 100000000) {
+          potentialAmounts.push({
+            line: match[1],
+            amount: amount,
+            index: i,
+            type: 'mediumRound',
+            hasDecimals: false
+          });
+          console.log(`   💰 Medium round amount at line ${i + 1}: "${match[1]}" → ${amount}`);
+        }
+      }
+      
+      // Check for small amounts
+      matches = [...line.matchAll(icdc0Patterns.smallAmount)];
+      for (const match of matches) {
+        const amount = this.parseAmount(match[1]);
+        if (amount < 100000000) {
+          potentialAmounts.push({
+            line: match[1],
+            amount: amount,
+            index: i,
+            type: 'small',
+            hasDecimals: true
+          });
+          console.log(`   💰 Small amount at line ${i + 1}: "${match[1]}" → ${amount}`);
+        }
+      }
+    }
+    
+    console.log(`   📊 Found ${potentialAmounts.length} potential financial amounts`);
+    
+    if (potentialAmounts.length >= 6) {
+      console.log('   🎯 Sufficient amounts found, applying intelligent mapping...');
+      
+      // Sort amounts by value (descending) to identify the largest amounts first
+      const sortedAmounts = [...potentialAmounts].sort((a, b) => b.amount - a.amount);
+      
+      // Filter amounts that appear in the last 40% of the document (financial summary section)
+      const documentLength = lines.length;
+      const summaryStart = Math.floor(documentLength * 0.6);
+      const summaryAmounts = sortedAmounts.filter(item => item.index >= summaryStart);
+      
+      console.log(`   📍 Found ${summaryAmounts.length} amounts in financial summary section (after line ${summaryStart})`);
+      
+      if (summaryAmounts.length >= 6) {
+        // Apply intelligent mapping based on amount characteristics
+        this.mapAmountsIntelligently(summaryAmounts, result, patternsFound);
+      } else {
+        console.log('   ⚠️  Using all amounts for mapping due to insufficient summary amounts');
+        this.mapAmountsIntelligently(sortedAmounts, result, patternsFound);
+      }
+    } else {
+      console.log('   ❌ Insufficient amounts found for ICDC-0 Print format mapping');
+    }
+    
+    console.log(`📊 METHOD 5 SUMMARY: Found ${patternsFound.length} ICDC-0 Print regex patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
+  }
+
+  // Helper method for intelligent amount mapping using mathematical relationships
+  mapAmountsIntelligently(amounts, result, patternsFound) {
+    console.log('   🧠 Applying relationship-based mapping logic...');
+    console.log('   📐 Using relationships: Net = Invoice + MRP, Turnover Tax = 10% of Invoice, TCS = ~1.175% of Invoice');
+    console.log('   📋 Expected sequence: Invoice → MRP → Net → Turnover Tax → Special Excise Cess → TCS');
+    
+    // Get all amounts sorted by value (descending)
+    const allAmounts = [...amounts].sort((a, b) => b.amount - a.amount);
+    console.log(`   📊 Total amounts to analyze: ${allAmounts.length}`);
+    
+    // Try different combinations to find the best fit based on mathematical relationships
+    let bestMatch = null;
+    let bestScore = 0;
+    
+    console.log('   🔍 Testing different combinations for mathematical relationships...');
+    
+    // Test each potential invoice value (try largest amounts first)
+    for (let i = 0; i < Math.min(allAmounts.length, 5); i++) {
+      const potentialInvoice = allAmounts[i];
+      console.log(`   🧪 Testing Invoice Value candidate: ${potentialInvoice.amount} (line ${potentialInvoice.index + 1})`);
+      
+      const testResult = this.testAmountCombination(potentialInvoice, allAmounts);
+      
+      if (testResult.score > bestScore) {
+        bestMatch = testResult;
+        bestScore = testResult.score;
+        console.log(`   ⭐ New best match found with score: ${bestScore}`);
+      }
+    }
+    
+    if (bestMatch && bestScore >= 3) { // Require at least 3 relationships to match
+      console.log(`   🎯 Best combination found with score ${bestScore}:`);
+      
+      if (bestMatch.invoiceValue && result.invoiceValue === 0) {
+        result.invoiceValue = bestMatch.invoiceValue.amount;
+        console.log(`   ✅ Invoice Value: ${result.invoiceValue} (line ${bestMatch.invoiceValue.index + 1})`);
+        patternsFound.push('Invoice Value');
+      }
+      
+      if (bestMatch.mrpRounding && result.mrpRoundingOff === 0) {
+        result.mrpRoundingOff = bestMatch.mrpRounding.amount;
+        console.log(`   ✅ MRP Rounding Off: ${result.mrpRoundingOff} (line ${bestMatch.mrpRounding.index + 1})`);
+        patternsFound.push('MRP Rounding Off');
+      }
+      
+      if (bestMatch.netInvoice && result.netInvoiceValue === 0) {
+        result.netInvoiceValue = bestMatch.netInvoice.amount;
+        console.log(`   ✅ Net Invoice Value: ${result.netInvoiceValue} (line ${bestMatch.netInvoice.index + 1})`);
+        patternsFound.push('Net Invoice Value');
+      }
+      
+      if (bestMatch.turnoverTax && result.retailExciseTurnoverTax === 0) {
+        result.retailExciseTurnoverTax = bestMatch.turnoverTax.amount;
+        console.log(`   ✅ Retail Excise Turnover Tax: ${result.retailExciseTurnoverTax} (line ${bestMatch.turnoverTax.index + 1})`);
+        patternsFound.push('Retail Excise Turnover Tax');
+      }
+      
+      if (bestMatch.tcs && result.tcs === 0) {
+        result.tcs = bestMatch.tcs.amount;
+        console.log(`   ✅ TCS: ${result.tcs} (line ${bestMatch.tcs.index + 1})`);
+        patternsFound.push('TCS');
+      }
+      
+      if (bestMatch.specialCess && result.specialExciseCess === 0) {
+        result.specialExciseCess = bestMatch.specialCess.amount;
+        console.log(`   ✅ Special Excise Cess: ${result.specialExciseCess} (line ${bestMatch.specialCess.index + 1})`);
+        patternsFound.push('Special Excise Cess');
+      }
+      
+    } else {
+      console.log(`   ❌ No valid combination found (best score: ${bestScore})`);
+      // Fallback to simple largest amount mapping
+      this.fallbackMapping(allAmounts, result, patternsFound);
+    }
+    
+    console.log('   🎯 Relationship-based mapping completed');
+  }
+
+  // Test a specific amount combination for mathematical relationships
+  testAmountCombination(potentialInvoice, allAmounts) {
+    const invoiceAmount = potentialInvoice.amount;
+    let score = 0;
+    const result = { invoiceValue: potentialInvoice };
+    
+    console.log(`     📐 Testing relationships for invoice: ${invoiceAmount}`);
+    
+    // Look for MRP Rounding Off and Net Invoice Value that satisfy: Net = Invoice + MRP
+    for (let j = 0; j < allAmounts.length; j++) {
+      const potentialMRP = allAmounts[j];
+      if (potentialMRP.amount === invoiceAmount) continue; // Skip same amount
+      
+      for (let k = 0; k < allAmounts.length; k++) {
+        const potentialNet = allAmounts[k];
+        if (potentialNet.amount === invoiceAmount || potentialNet.amount === potentialMRP.amount) continue;
+        
+        // Test: Net = Invoice + MRP (with 1% tolerance)
+        const expectedNet = invoiceAmount + potentialMRP.amount;
+        const netTolerance = expectedNet * 0.01; // 1% tolerance
+        
+        if (Math.abs(potentialNet.amount - expectedNet) <= netTolerance) {
+          result.mrpRounding = potentialMRP;
+          result.netInvoice = potentialNet;
+          score += 2; // High score for this critical relationship
+          console.log(`     ✅ Net = Invoice + MRP relationship found: ${potentialNet.amount} ≈ ${invoiceAmount} + ${potentialMRP.amount}`);
+          break;
+        }
+      }
+      if (result.netInvoice) break; // Found the relationship, stop searching
+    }
+    
+    // Look for Retail Excise Turnover Tax (10% of invoice)
+    const expectedTurnover = invoiceAmount * 0.10;
+    const turnoverTolerance = expectedTurnover * 0.15; // 15% tolerance
+    
+    const turnoverCandidate = allAmounts.find(a => 
+      a.amount !== invoiceAmount && 
+      (!result.mrpRounding || a.amount !== result.mrpRounding.amount) &&
+      (!result.netInvoice || a.amount !== result.netInvoice.amount) &&
+      Math.abs(a.amount - expectedTurnover) <= turnoverTolerance
+    );
+    
+    if (turnoverCandidate) {
+      result.turnoverTax = turnoverCandidate;
+      score += 1;
+      console.log(`     ✅ Turnover Tax (10% of invoice) found: ${turnoverCandidate.amount} ≈ ${expectedTurnover}`);
+    }
+    
+    // TCS will be handled later based on position after Special Excise Cess
+    
+    // Look for Special Excise Cess and TCS based on position after turnover tax
+    const usedAmounts = new Set([
+      invoiceAmount,
+      result.mrpRounding?.amount,
+      result.netInvoice?.amount,
+      result.turnoverTax?.amount
+    ].filter(Boolean));
+    
+    // Find amounts that come after the turnover tax in the document
+    let turnoverTaxIndex = result.turnoverTax ? result.turnoverTax.index : -1;
+    const remainingAmounts = allAmounts.filter(a => 
+      !usedAmounts.has(a.amount) && 
+      a.amount > 1000 && // Reasonable minimum
+      a.amount < 10000000 && // Not the huge total purchase values
+      (turnoverTaxIndex === -1 || a.index > turnoverTaxIndex) // Must come after turnover tax
+    ).sort((a, b) => a.index - b.index); // Sort by position in document
+    
+    console.log(`     🔍 Found ${remainingAmounts.length} candidates after turnover tax:`);
+    remainingAmounts.forEach(a => {
+      console.log(`       Line ${a.index + 1}: ${a.amount}`);
+    });
+    
+    // Special Excise Cess should be the first large amount after turnover tax
+    const cessCandidate = remainingAmounts.find(a => a.amount > 100000);
+    if (cessCandidate) {
+      result.specialCess = cessCandidate;
+      score += 1;
+      console.log(`     ✅ Special Excise Cess (first large amount after turnover tax) found: ${cessCandidate.amount}`);
+      usedAmounts.add(cessCandidate.amount);
+    }
+    
+    // TCS should be a smaller amount that comes after Special Excise Cess
+    const tcsCandidate = remainingAmounts.find(a => 
+      !usedAmounts.has(a.amount) && 
+      a.amount < 100000 && // TCS is typically smaller
+      (!cessCandidate || a.index > cessCandidate.index) // Must come after cess
+    );
+    
+    if (tcsCandidate) {
+      result.tcs = tcsCandidate;
+      score += 1;
+      console.log(`     ✅ TCS (smaller amount after Special Excise Cess) found: ${tcsCandidate.amount}`);
+    }
+    
+    console.log(`     📊 Combination score: ${score}`);
+    result.score = score;
+    return result;
+  }
+
+  // Fallback mapping when relationships don't work
+  fallbackMapping(allAmounts, result, patternsFound) {
+    console.log('   🔄 Applying fallback mapping...');
+    
+    const largeAmountsWithDecimals = allAmounts.filter(a => a.type === 'largeWithDecimals');
+    const mediumRoundAmounts = allAmounts.filter(a => a.type === 'mediumRound');
+    const smallAmounts = allAmounts.filter(a => a.type === 'small');
+    
+    if (largeAmountsWithDecimals.length > 0 && result.invoiceValue === 0) {
+      result.invoiceValue = largeAmountsWithDecimals[0].amount;
+      console.log(`   ✅ Fallback Invoice Value: ${result.invoiceValue}`);
+      patternsFound.push('Invoice Value');
+    }
+    
+    if (mediumRoundAmounts.length > 0 && result.specialExciseCess === 0) {
+      result.specialExciseCess = mediumRoundAmounts[0].amount;
+      console.log(`   ✅ Fallback Special Excise Cess: ${result.specialExciseCess}`);
+      patternsFound.push('Special Excise Cess');
+    }
   }
 
   parseAmount(amountStr) {
