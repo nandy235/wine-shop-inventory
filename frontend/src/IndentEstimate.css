@@ -383,6 +383,17 @@
   font-size: 0.9rem;
 }
 
+/* Remove spinners for number inputs */
+.quantity-input::-webkit-outer-spin-button,
+.quantity-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.quantity-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .quantity-input:focus {
   outline: none;
   border-color: #667eea;
@@ -641,5 +652,143 @@
 
   .quantity-input {
     width: 60px;
+  }
+}
+
+/* Notification Toast Styles */
+.notification-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 300px;
+  max-width: 500px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-weight: 500;
+  cursor: pointer;
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.notification-success {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  border-left: 4px solid #22543d;
+}
+
+.notification-error {
+  background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+  color: white;
+  border-left: 4px solid #742a2a;
+}
+
+.notification-warning {
+  background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+  color: white;
+  border-left: 4px solid #7b341e;
+}
+
+.notification-info {
+  background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+  color: white;
+  border-left: 4px solid #2a4365;
+}
+
+.notification-message {
+  flex: 1;
+  margin-right: 12px;
+}
+
+.notification-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+
+.notification-close:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Loading Spinner Styles */
+.loading-spinner-small {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Improved accessibility and UX */
+.help-text {
+  display: block;
+  margin-top: 4px;
+  color: #718096;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.summary-info {
+  color: #4a5568;
+  font-size: 0.9rem;
+  margin: 8px 0 0 0;
+  font-weight: 500;
+}
+
+/* Enhanced search results */
+.result-item:focus {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+}
+
+.result-item[aria-selected="true"] {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: #667eea;
+}
+
+/* Better input validation feedback */
+.quantity-input:invalid {
+  border-color: #e53e3e;
+  box-shadow: 0 0 0 1px #e53e3e;
+}
+
+.quantity-input:focus:invalid {
+  box-shadow: 0 0 0 2px #e53e3e;
+}
+
+/* Mobile notification adjustments */
+@media (max-width: 768px) {
+  .notification-toast {
+    left: 20px;
+    right: 20px;
+    min-width: auto;
   }
 }

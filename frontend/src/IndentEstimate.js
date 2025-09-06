@@ -1,62 +1,208 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
 import './IndentEstimate.css';
 import API_BASE_URL from './config';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+
+// Constants
+const SEARCH_DEBOUNCE_DELAY = 150;
+const MIN_SEARCH_LENGTH = 2;
+const TAX_RATES = {
+  TCS_RATE: 0.01175,
+  RETAIL_EXCISE_RATE: 0.10,
+};
+const DEFAULT_PACK_QUANTITY = 12;
+
+// State management using reducer
+const initialState = {
+  searchTerm: '',
+  searchResults: [],
+  selectedItems: [],
+  loading: false,
+  showResults: false,
+  showEstimate: false,
+  tenTimesCompleted: false,
+  notification: null,
+  searchCache: new Map(),
+};
+
+const actionTypes = {
+  SET_SEARCH_TERM: 'SET_SEARCH_TERM',
+  SET_SEARCH_RESULTS: 'SET_SEARCH_RESULTS',
+  SET_LOADING: 'SET_LOADING',
+  SET_SHOW_RESULTS: 'SET_SHOW_RESULTS',
+  SET_SHOW_ESTIMATE: 'SET_SHOW_ESTIMATE',
+  SET_TEN_TIMES_COMPLETED: 'SET_TEN_TIMES_COMPLETED',
+  ADD_ITEM: 'ADD_ITEM',
+  UPDATE_ITEM_QUANTITY: 'UPDATE_ITEM_QUANTITY',
+  REMOVE_ITEM: 'REMOVE_ITEM',
+  SET_NOTIFICATION: 'SET_NOTIFICATION',
+  CLEAR_NOTIFICATION: 'CLEAR_NOTIFICATION',
+  CACHE_SEARCH_RESULT: 'CACHE_SEARCH_RESULT',
+};
+
+function stateReducer(state, action) {
+  switch (action.type) {
+    case actionTypes.SET_SEARCH_TERM:
+      return { ...state, searchTerm: action.payload };
+    case actionTypes.SET_SEARCH_RESULTS:
+      return { ...state, searchResults: action.payload };
+    case actionTypes.SET_LOADING:
+      return { ...state, loading: action.payload };
+    case actionTypes.SET_SHOW_RESULTS:
+      return { ...state, showResults: action.payload };
+    case actionTypes.SET_SHOW_ESTIMATE:
+      return { ...state, showEstimate: action.payload };
+    case actionTypes.SET_TEN_TIMES_COMPLETED:
+      return { ...state, tenTimesCompleted: action.payload };
+    case actionTypes.ADD_ITEM:
+      return { ...state, selectedItems: [...state.selectedItems, action.payload] };
+    case actionTypes.UPDATE_ITEM_QUANTITY:
+      return {
+        ...state,
+        selectedItems: state.selectedItems.map(item =>
+          item.id === action.payload.id
+            ? { ...item, ...action.payload.updates }
+            : item
+        )
+      };
+    case actionTypes.REMOVE_ITEM:
+      return {
+        ...state,
+        selectedItems: state.selectedItems.filter(item => item.id !== action.payload)
+      };
+    case actionTypes.SET_NOTIFICATION:
+      return { ...state, notification: action.payload };
+    case actionTypes.CLEAR_NOTIFICATION:
+      return { ...state, notification: null };
+    case actionTypes.CACHE_SEARCH_RESULT:
+      const newCache = new Map(state.searchCache);
+      newCache.set(action.payload.term, action.payload.results);
+      return { ...state, searchCache: newCache };
+    default:
+      return state;
+  }
+}
 
 function IndentEstimate({ onNavigate, onBack }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [showEstimate, setShowEstimate] = useState(false);
-  const [tenTimesCompleted, setTenTimesCompleted] = useState(false);
+  const [state, dispatch] = useReducer(stateReducer, initialState);
   const searchContainerRef = useRef(null);
+  const summaryRef = useRef(null);
   const searchTimeoutRef = useRef(null);
+  const abortControllerRef = useRef(null);
+  const notificationTimeoutRef = useRef(null);
+  const [summaryPulse, setSummaryPulse] = useState(false);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const shopName = user.shopName || 'Liquor Ledger';
 
-  const handleSearch = async (term) => {
-    const searchQuery = term || searchTerm;
-    if (!searchQuery.trim() || searchQuery.length < 2) {
-      setSearchResults([]);
-      setShowResults(false);
+  // Utility functions
+  const calculateTotalBottles = useCallback((cases = 0, bottles = 0, packQuantity = DEFAULT_PACK_QUANTITY) => {
+    return (cases * packQuantity) + bottles;
+  }, []);
+
+  const calculateItemAmount = useCallback((cases = 0, bottles = 0, invoicePrice = 0, packQuantity = DEFAULT_PACK_QUANTITY) => {
+    const totalBottles = calculateTotalBottles(cases, bottles, packQuantity);
+    return totalBottles * invoicePrice;
+  }, [calculateTotalBottles]);
+
+  const validateQuantity = useCallback((value, min = 0, max = 9999) => {
+    const numValue = parseInt(value) || 0;
+    return Math.max(min, Math.min(max, numValue));
+  }, []);
+
+  const showNotification = useCallback((message, type = 'info') => {
+    dispatch({ type: actionTypes.SET_NOTIFICATION, payload: { message, type } });
+    
+    if (notificationTimeoutRef.current) {
+      clearTimeout(notificationTimeoutRef.current);
+    }
+    
+    notificationTimeoutRef.current = setTimeout(() => {
+      dispatch({ type: actionTypes.CLEAR_NOTIFICATION });
+    }, 3000);
+  }, []);
+
+  const createItemFromBrand = useCallback((brand) => {
+    const invoicePrice = parseFloat(brand.invoice) || 0;
+    const packQuantity = brand.pack_quantity || DEFAULT_PACK_QUANTITY;
+    const cases = 1;
+    const bottles = 0;
+    
+    return {
+      id: brand.id,
+      brandName: brand.brand_name,
+      brandNumber: brand.brand_number,
+      size: `${packQuantity}/${brand.size_ml}ml`,
+      sizeCode: brand.size_code,
+      cases,
+      bottles,
+      packQuantity,
+      invoicePrice,
+      specialMargin: parseFloat(brand.special_margin) || 0,
+      specialExciseCess: parseFloat(brand.special_excise_cess) || 0,
+      amount: calculateItemAmount(cases, bottles, invoicePrice, packQuantity)
+    };
+  }, [calculateItemAmount]);
+
+  const handleSearch = useCallback(async (term) => {
+    const searchQuery = (term || state.searchTerm).trim();
+    
+    if (!searchQuery || searchQuery.length < MIN_SEARCH_LENGTH) {
+      dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: [] });
+      dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: false });
+      return;
+    }
+
+    // Check cache first
+    if (state.searchCache.has(searchQuery)) {
+      const cachedResults = state.searchCache.get(searchQuery);
+      dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: cachedResults });
+      dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: true });
       return;
     }
     
-    setLoading(true);
+    // Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    abortControllerRef.current = new AbortController();
+    dispatch({ type: actionTypes.SET_LOADING, payload: true });
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        signal: abortControllerRef.current.signal
       });
 
       if (response.ok) {
         const data = await response.json();
-        setSearchResults(data.brands || []);
-        setShowResults(true);
+        const results = data.brands || [];
+        
+        dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: results });
+        dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: true });
+        dispatch({ type: actionTypes.CACHE_SEARCH_RESULT, payload: { term: searchQuery, results } });
       } else {
-        console.error('Search failed');
-        setSearchResults([]);
-        setShowResults(false);
+        throw new Error('Search failed');
       }
     } catch (error) {
-      console.error('Search error:', error);
-      setSearchResults([]);
-      setShowResults(false);
+      if (error.name !== 'AbortError') {
+        console.error('Search error:', error);
+        showNotification('Failed to search products. Please try again.', 'error');
+        dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: [] });
+        dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: false });
+      }
     } finally {
-      setLoading(false);
+      dispatch({ type: actionTypes.SET_LOADING, payload: false });
     }
-  };
+  }, [state.searchTerm, state.searchCache, showNotification]);
 
-  const handleInputChange = (e) => {
-    const value = e.target.value;
-    setSearchTerm(value);
+  const handleInputChange = useCallback((e) => {
+    const value = e.target.value.slice(0, 100); // Limit input length
+    dispatch({ type: actionTypes.SET_SEARCH_TERM, payload: value });
     
     // Clear previous timeout
     if (searchTimeoutRef.current) {
@@ -66,104 +212,127 @@ function IndentEstimate({ onNavigate, onBack }) {
     // Set new timeout for real-time search
     searchTimeoutRef.current = setTimeout(() => {
       handleSearch(value);
-    }, 300); // 300ms delay
-  };
+    }, SEARCH_DEBOUNCE_DELAY);
+  }, [handleSearch]);
 
-  const handleKeyPress = (e) => {
+  const handleKeyPress = useCallback((e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
       handleSearch();
+    } else if (e.key === 'Escape') {
+      dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: false });
+      dispatch({ type: actionTypes.SET_SEARCH_TERM, payload: '' });
     }
-  };
+  }, [handleSearch]);
 
-  // Handle click outside to close results
+  // Handle click outside to close results and cleanup
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
-        setShowResults(false);
+        dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: false });
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
+    
     return () => {
+      // Cleanup all timeouts and listeners
       document.removeEventListener('mousedown', handleClickOutside);
+      
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
+      }
+      
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
+      }
+      
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
   }, []);
 
-  const addToEstimate = (brand) => {
-    const existingItem = selectedItems.find(item => item.id === brand.id);
+  const addToEstimate = useCallback((brand) => {
+    const existingItem = state.selectedItems.find(item => item.id === brand.id);
     if (existingItem) {
-      alert('This item is already added to the estimate');
       return;
     }
 
-    const invoicePrice = parseFloat(brand.invoice) || 0;
-    const packQuantity = brand.pack_quantity || 12;
-    const totalBottles = 1 * packQuantity; // 1 case * pack quantity
-    const newItem = {
-      id: brand.id,
-      brandName: brand.brand_name,
-      brandNumber: brand.brand_number,
-      size: `${packQuantity}/${brand.size_ml}ml`,
-      sizeCode: brand.size_code,
-      cases: 1,
-      bottles: 0,
-      packQuantity: packQuantity,
-      invoicePrice: invoicePrice,
-      specialMargin: parseFloat(brand.special_margin) || 0,
-      specialExciseCess: parseFloat(brand.special_excise_cess) || 0,
-      amount: totalBottles * invoicePrice
-    };
+    const newItem = createItemFromBrand(brand);
+    dispatch({ type: actionTypes.ADD_ITEM, payload: newItem });
+    // Keep search open and term intact so user can add multiple items quickly
+  }, [state.selectedItems, createItemFromBrand, showNotification]);
 
-    setSelectedItems([...selectedItems, newItem]);
-    setShowResults(false);
-    setSearchTerm('');
-  };
+  const updateQuantity = useCallback((id, field, value) => {
+    const item = state.selectedItems.find(item => item.id === id);
+    if (!item) return;
+    
+    let validatedValue;
+    if (field === 'cases') {
+      validatedValue = validateQuantity(value, 0, 9999);
+    } else if (field === 'bottles') {
+      validatedValue = validateQuantity(value, 0, item.packQuantity - 1);
+    } else {
+      return;
+    }
+    
+    const updates = { [field]: validatedValue };
+    
+    // Recalculate amount
+    const newCases = field === 'cases' ? validatedValue : item.cases;
+    const newBottles = field === 'bottles' ? validatedValue : item.bottles;
+    updates.amount = calculateItemAmount(newCases, newBottles, item.invoicePrice, item.packQuantity);
+    
+    dispatch({ type: actionTypes.UPDATE_ITEM_QUANTITY, payload: { id, updates } });
+  }, [state.selectedItems, validateQuantity, calculateItemAmount]);
 
-  const updateQuantity = (id, field, value) => {
-    const numValue = parseInt(value) || 0;
-    setSelectedItems(items => 
-      items.map(item => {
-        if (item.id === id) {
-          const updatedItem = { ...item, [field]: numValue };
-          const totalBottles = (updatedItem.cases * updatedItem.packQuantity) + updatedItem.bottles;
-          updatedItem.amount = totalBottles * updatedItem.invoicePrice;
-          return updatedItem;
-        }
-        return item;
-      })
-    );
-  };
+  const removeItem = useCallback((id) => {
+    dispatch({ type: actionTypes.REMOVE_ITEM, payload: id });
+    showNotification('Item removed from estimate', 'info');
+  }, [showNotification]);
 
-  const removeItem = (id) => {
-    setSelectedItems(items => items.filter(item => item.id !== id));
-  };
+  const handleShowEstimate = useCallback(() => {
+    dispatch({ type: actionTypes.SET_SHOW_ESTIMATE, payload: true });
+    showNotification('Estimate summary generated', 'success');
+    // Scroll and highlight
+    requestAnimationFrame(() => {
+      if (summaryRef.current) {
+        summaryRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setSummaryPulse(true);
+        setTimeout(() => setSummaryPulse(false), 1500);
+      }
+    });
+  }, [showNotification]);
 
-  const getTotalBottles = () => {
-    return selectedItems.reduce((total, item) => {
-      const totalBottles = (item.cases * item.packQuantity) + item.bottles;
-      return total + totalBottles;
+  // Memoized calculations
+  const totalBottles = useMemo(() => {
+    return state.selectedItems.reduce((total, item) => {
+      return total + calculateTotalBottles(item.cases, item.bottles, item.packQuantity);
     }, 0);
-  };
+  }, [state.selectedItems, calculateTotalBottles]);
 
-  const calculateEstimate = () => {
-    const invoiceValue = selectedItems.reduce((total, item) => total + item.amount, 0);
-    const mrpRoundingOff = selectedItems.reduce((total, item) => {
-      const totalBottles = (item.cases * item.packQuantity) + item.bottles;
-      return total + (totalBottles * item.specialMargin);
+  const estimate = useMemo(() => {
+    const invoiceValue = state.selectedItems.reduce((total, item) => total + (item.amount || 0), 0);
+    
+    const mrpRoundingOff = state.selectedItems.reduce((total, item) => {
+      const itemTotalBottles = calculateTotalBottles(item.cases, item.bottles, item.packQuantity);
+      return total + (itemTotalBottles * (item.specialMargin || 0));
     }, 0);
+    
     const netInvoiceValue = invoiceValue + mrpRoundingOff;
-    const retailExciseTurnoverTax = tenTimesCompleted ? invoiceValue * 0.10 : 0;
-    const specialExciseCess = selectedItems.reduce((total, item) => {
-      const totalBottles = (item.cases * item.packQuantity) + item.bottles;
-      return total + (totalBottles * item.specialExciseCess);
+    const retailExciseTurnoverTax = state.tenTimesCompleted ? invoiceValue * TAX_RATES.RETAIL_EXCISE_RATE : 0;
+    
+    const specialExciseCess = state.selectedItems.reduce((total, item) => {
+      const itemTotalBottles = calculateTotalBottles(item.cases, item.bottles, item.packQuantity);
+      return total + (itemTotalBottles * (item.specialExciseCess || 0));
     }, 0);
-    const tcs = invoiceValue * 0.01175;
+    
+    const tcs = invoiceValue * TAX_RATES.TCS_RATE;
+    const grandTotal = netInvoiceValue + retailExciseTurnoverTax + specialExciseCess + tcs;
 
     return {
       invoiceValue,
@@ -172,161 +341,175 @@ function IndentEstimate({ onNavigate, onBack }) {
       retailExciseTurnoverTax,
       specialExciseCess,
       tcs,
-      grandTotal: netInvoiceValue + retailExciseTurnoverTax + specialExciseCess + tcs
+      grandTotal
     };
-  };
+  }, [state.selectedItems, state.tenTimesCompleted, calculateTotalBottles]);
 
-  const generatePDF = () => {
-    if (selectedItems.length === 0) {
-      alert('Please add items to the estimate before generating PDF');
+  // Utility function to format numbers with Indian comma system
+  const formatIndianCurrency = useCallback((amount) => {
+    const num = parseFloat(amount || 0);
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(num);
+  }, []);
+
+  // Simple currency formatter for PDF (jsPDF compatible)
+  const formatCurrencyForPDF = useCallback((amount) => {
+    const num = parseFloat(amount || 0);
+    const formatted = num.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    return `₹${formatted}`;
+  }, []);
+
+  // Clean PDF generation utility function - Print-to-PDF HTML approach
+  const generatePDF = useCallback((items, totalAmount, estimateData = null) => {
+    if (!items || items.length === 0) {
+      showNotification('Please add items to the estimate before generating PDF', 'warning');
       return;
     }
 
-    try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.width;
-      
-      // Header
-      doc.setFontSize(20);
-      doc.setFont(undefined, 'bold');
-      doc.text('Indent Estimate', pageWidth / 2, 20, { align: 'center' });
-      
-      doc.setFontSize(12);
-      doc.setFont(undefined, 'normal');
-      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
-      
-      // Items Table - Force use autoTable
-      const tableColumns = [
-        'S.No',
-        'Brand Name', 
-        'Size',
-        'Cases',
-        'Bottles',
-        'Invoice Price',
-        'Amount'
-      ];
-      
-      const tableRows = selectedItems.map((item, index) => [
-        (index + 1).toString(),
-        item.brandName,
-        item.size,
-        item.cases.toString(),
-        item.bottles.toString(),
-        `Rs ${parseFloat(item.invoicePrice || 0).toFixed(2)}`,
-        `Rs ${parseFloat(item.amount || 0).toFixed(2)}`
-      ]);
+    const formatINR = (amount) => {
+      const num = parseFloat(amount || 0);
+      return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
 
-      // Use autoTable directly - it should be attached to jsPDF prototype
-      autoTable(doc, {
-        head: [tableColumns],
-        body: tableRows,
-        startY: 45,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [102, 126, 234],
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: 10
-        },
-        styles: {
-          fontSize: 9,
-          cellPadding: 4,
-          lineColor: [200, 200, 200],
-          lineWidth: 0.5
-        },
-        columnStyles: {
-          0: { halign: 'center', cellWidth: 15 },
-          1: { cellWidth: 65 },
-          2: { halign: 'center', cellWidth: 25 },
-          3: { halign: 'center', cellWidth: 20 },
-          4: { halign: 'center', cellWidth: 20 },
-          5: { halign: 'right', cellWidth: 30 },
-          6: { halign: 'right', cellWidth: 30 }
-        },
-        margin: { top: 45, left: 10, right: 10 }
-      });
+    const rowsHtml = items.map((item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${item.brandName}</td>
+        <td>${item.size}</td>
+        <td>${item.cases}</td>
+        <td>${item.bottles}</td>
+        <td>${formatINR(item.invoicePrice || 0)}</td>
+        <td class="text-right">${formatINR(item.amount || 0)}</td>
+      </tr>
+    `).join('');
 
-      // Calculate estimate if available
-      if (showEstimate) {
-        const estimate = calculateEstimate();
-        const finalY = doc.lastAutoTable.finalY + 20;
+    const summaryHtml = estimateData ? `
+      <h3 style="margin-top: 24px; text-align: center;">Estimate Summary</h3>
+      <table style="width:100%; border-collapse: collapse;">
+        <tbody>
+          <tr><td style="padding:8px; border:1px solid #ddd;">Invoice Value:</td><td style="padding:8px; border:1px solid #ddd; text-align:right;">${formatINR(estimateData.invoiceValue)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">MRP Rounding Off:</td><td style="padding:8px; border:1px solid #ddd; text-align:right;">${formatINR(estimateData.mrpRoundingOff)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">Net Invoice Value:</td><td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:700;">${formatINR(estimateData.netInvoiceValue)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">Retail Excise Turnover Tax:</td><td style="padding:8px; border:1px solid #ddd; text-align:right;">${formatINR(estimateData.retailExciseTurnoverTax)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">Special Excise Cess:</td><td style="padding:8px; border:1px solid #ddd; text-align:right;">${formatINR(estimateData.specialExciseCess)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">TCS:</td><td style="padding:8px; border:1px solid #ddd; text-align:right;">${formatINR(estimateData.tcs)}</td></tr>
+          <tr><td style="padding:8px; border:1px solid #ddd;">Grand Total:</td><td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:700;">${formatINR(estimateData.grandTotal)}</td></tr>
+        </tbody>
+      </table>
+    ` : '';
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Indent Estimate</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; margin-bottom: 30px; }
+          .company-name { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+          .document-title { font-size: 18px; color: #666; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f5f5f5; font-weight: bold; }
+          .text-right { text-align: right; }
+          .total-row { background-color: #f0f0f0; font-weight: bold; }
+          .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-name">${shopName}</div>
+          <div class="document-title">Indent Estimate</div>
+          <div style="margin-top: 10px; color: #666;">Generated on: ${new Date().toLocaleDateString('en-IN')}</div>
+        </div>
         
-        // Estimate Summary Header
-        doc.setFontSize(16);
-        doc.setFont(undefined, 'bold');
-        doc.text('Estimate Summary', 20, finalY);
+        <table>
+          <thead>
+            <tr>
+              <th>S.No</th>
+              <th>Brand Name</th>
+              <th>Size</th>
+              <th>Cases</th>
+              <th>Bottles</th>
+              <th>Invoice Price/Bottle</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+            <tr class="total-row">
+              <td colspan="6" class="text-right">Invoice Value:</td>
+              <td class="text-right">${formatINR(totalAmount)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        ${summaryHtml}
         
-        const summaryData = [
-          ['Invoice Value:', `Rs ${estimate.invoiceValue.toFixed(2)}`],
-          ['MRP Rounding Off:', `Rs ${estimate.mrpRoundingOff.toFixed(2)}`],
-          ['Net Invoice Value:', `Rs ${estimate.netInvoiceValue.toFixed(2)}`],
-          ['Retail Excise Turnover Tax:', `Rs ${estimate.retailExciseTurnoverTax.toFixed(2)}`],
-          ['Special Excise Cess:', `Rs ${estimate.specialExciseCess.toFixed(2)}`],
-          ['TCS (1.175%):', `Rs ${estimate.tcs.toFixed(2)}`]
-        ];
-        
-        autoTable(doc, {
-          head: [['Description', 'Amount']],
-          body: summaryData,
-          startY: finalY + 10,
-          theme: 'grid',
-          headStyles: {
-            fillColor: [102, 126, 234],
-            textColor: 255,
-            fontStyle: 'bold',
-            fontSize: 11
-          },
-          styles: {
-            fontSize: 10,
-            cellPadding: 4,
-            lineColor: [200, 200, 200],
-            lineWidth: 0.5
-          },
-          columnStyles: {
-            0: { fontStyle: 'bold', cellWidth: 100 },
-            1: { halign: 'right', cellWidth: 50, fontStyle: 'bold' }
-          },
-          margin: { left: 20, right: 20 }
-        });
-        
-        // Grand Total with border
-        const grandTotalY = doc.lastAutoTable.finalY + 15;
-        
-        autoTable(doc, {
-          body: [['Grand Total:', `Rs ${estimate.grandTotal.toFixed(2)}`]],
-          startY: grandTotalY,
-          theme: 'grid',
-          headStyles: {
-            fillColor: [102, 126, 234]
-          },
-          styles: {
-            fontSize: 14,
-            cellPadding: 5,
-            fontStyle: 'bold',
-            fillColor: [240, 248, 255],
-            lineColor: [102, 126, 234],
-            lineWidth: 1
-          },
-          columnStyles: {
-            0: { cellWidth: 100 },
-            1: { halign: 'right', cellWidth: 50 }
-          },
-          margin: { left: 20, right: 20 }
-        });
-      }
-      
-      // Save the PDF
-      const fileName = `indent-estimate-${new Date().toISOString().split('T')[0]}.pdf`;
-      doc.save(fileName);
-      
-    } catch (error) {
-      console.error('PDF generation error:', error);
-      alert('Error generating PDF. Please try again.');
+        <div class="footer">
+          <p>This is computer generated estimate, actuals may slightly vary.</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.print();
+        setTimeout(() => {
+          printWindow.close();
+        }, 1000);
+      };
+      showNotification('Print dialog opened. Save as PDF to download.', 'info');
+    } else {
+      showNotification('Please allow popups to generate PDF', 'warning');
     }
+  }, [showNotification, shopName]);
+
+  // Wrapper function to maintain compatibility
+  const handleGeneratePDF = useCallback(() => {
+    const estimateData = state.showEstimate ? estimate : null;
+    generatePDF(state.selectedItems, estimate.invoiceValue, estimateData);
+  }, [generatePDF, state.selectedItems, state.showEstimate, estimate]);
+
+  // Notification component
+  const NotificationToast = ({ notification, onClose }) => {
+    if (!notification) return null;
+    
+    const { message, type } = notification;
+    const typeClass = {
+      success: 'notification-success',
+      error: 'notification-error',
+      warning: 'notification-warning',
+      info: 'notification-info'
+    }[type] || 'notification-info';
+    
+    return (
+      <div className={`notification-toast ${typeClass}`} onClick={onClose}>
+        <span className="notification-message">{message}</span>
+        <button className="notification-close" onClick={onClose}>×</button>
+      </div>
+    );
   };
 
   return (
     <div className="indent-estimate-container">
+      {/* Notification Toast */}
+      <NotificationToast 
+        notification={state.notification} 
+        onClose={() => dispatch({ type: actionTypes.CLEAR_NOTIFICATION })} 
+      />
+      
       <header className="indent-estimate-header">
         <div className="indent-estimate-logo-section">
           <h1 className="indent-estimate-app-title">{shopName}</h1>
@@ -363,50 +546,84 @@ function IndentEstimate({ onNavigate, onBack }) {
               type="text"
               className="search-input"
               placeholder="Search by brand number or brand name..."
-              value={searchTerm}
+              value={state.searchTerm}
               onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               onFocus={() => {
-                if (searchResults.length > 0 && searchTerm.length >= 2) {
-                  setShowResults(true);
+                if (state.searchResults.length > 0 && state.searchTerm.length >= MIN_SEARCH_LENGTH) {
+                  dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: true });
                 }
               }}
+              aria-label="Search products"
+              aria-expanded={state.showResults}
+              aria-autocomplete="list"
             />
             <button 
               className="search-button"
               onClick={() => handleSearch()}
-              disabled={loading}
+              disabled={state.loading}
+              aria-label="Search products"
             >
-              {loading ? 'Searching...' : 'Search'}
+              {state.loading ? (
+                <>
+                  <span className="loading-spinner-small">⟳</span>
+                  Searching...
+                </>
+              ) : (
+                'Search'
+              )}
             </button>
           </div>
 
           {/* Search Results */}
-          {showResults && (
-            <div className="search-results">
-              {loading ? (
-                <div className="loading-results">
+          {state.showResults && (
+            <div className="search-results" role="listbox" aria-label="Search results">
+              {state.loading ? (
+                <div className="loading-results" role="status" aria-live="polite">
                   <div className="loading-spinner">🔄</div>
                   <span>Searching...</span>
                 </div>
-              ) : searchResults.length > 0 ? (
+              ) : state.searchResults.length > 0 ? (
                 <div className="results-list">
-                  {searchResults.map(brand => (
-                    <div key={brand.id} className="result-item" onClick={() => addToEstimate(brand)}>
+                  {state.searchResults.map((brand, index) => (
+                    <div 
+                      key={brand.id} 
+                      className="result-item" 
+                      onClick={() => addToEstimate(brand)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          addToEstimate(brand);
+                        }
+                      }}
+                      tabIndex={0}
+                      role="option"
+                      aria-selected={false}
+                    >
                       <div className="result-info">
                         <span className="brand-number">{brand.brand_number}</span>
                         <span className="brand-name">{brand.brand_name}</span>
                         <span className="pack-type">{brand.pack_type || 'G'}</span>
-                        <span className="brand-size">{brand.pack_quantity || 12}/{brand.size_ml}ml</span>
+                        <span className="brand-size">{brand.pack_quantity || DEFAULT_PACK_QUANTITY}/{brand.size_ml}ml</span>
                       </div>
-                      <button className="add-button">Add</button>
+                      <button 
+                        className="add-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToEstimate(brand);
+                        }}
+                        aria-label={`Add ${brand.brand_name} to estimate`}
+                        disabled={state.selectedItems.some(item => item.id === brand.id)}
+                      >
+                        {state.selectedItems.some(item => item.id === brand.id) ? 'Added' : 'Add'}
+                      </button>
                     </div>
                   ))}
                 </div>
-              ) : searchTerm.length >= 2 ? (
-                <div className="no-results">No products found for "{searchTerm}"</div>
+              ) : state.searchTerm.length >= MIN_SEARCH_LENGTH ? (
+                <div className="no-results" role="status">No products found for "{state.searchTerm}"</div>
               ) : (
-                <div className="no-results">Type at least 2 characters to search</div>
+                <div className="no-results" role="status">Type at least {MIN_SEARCH_LENGTH} characters to search</div>
               )}
             </div>
           )}
@@ -418,7 +635,7 @@ function IndentEstimate({ onNavigate, onBack }) {
             <h3>Estimation</h3>
           </div>
 
-          {selectedItems.length === 0 ? (
+          {state.selectedItems.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">📄</div>
               <div className="empty-text">
@@ -442,7 +659,7 @@ function IndentEstimate({ onNavigate, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedItems.map((item, index) => (
+                  {state.selectedItems.map((item, index) => (
                     <tr key={item.id}>
                       <td>{index + 1}</td>
                       <td>{item.brandName}</td>
@@ -451,9 +668,24 @@ function IndentEstimate({ onNavigate, onBack }) {
                         <input
                           type="number"
                           min="0"
+                          max="9999"
+                          step="1"
                           value={item.cases}
                           onChange={(e) => updateQuantity(item.id, 'cases', e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault();
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const value = validateQuantity(e.target.value, 0, 9999);
+                            if (value !== item.cases) {
+                              updateQuantity(item.id, 'cases', value);
+                            }
+                          }}
                           className="quantity-input"
+                          aria-label={`Cases for ${item.brandName}`}
                         />
                       </td>
                       <td>
@@ -461,17 +693,33 @@ function IndentEstimate({ onNavigate, onBack }) {
                           type="number"
                           min="0"
                           max={item.packQuantity - 1}
+                          step="1"
                           value={item.bottles}
                           onChange={(e) => updateQuantity(item.id, 'bottles', e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                              e.preventDefault();
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const value = validateQuantity(e.target.value, 0, item.packQuantity - 1);
+                            if (value !== item.bottles) {
+                              updateQuantity(item.id, 'bottles', value);
+                            }
+                          }}
                           className="quantity-input"
+                          aria-label={`Bottles for ${item.brandName}`}
                         />
                       </td>
-                      <td>₹{parseFloat(item.invoicePrice || 0).toFixed(2)}</td>
-                      <td>₹{parseFloat(item.amount || 0).toFixed(2)}</td>
+                      <td>{formatIndianCurrency(item.invoicePrice || 0)}</td>
+                      <td>{formatIndianCurrency(item.amount || 0)}</td>
                       <td>
                         <button 
                           className="remove-button"
                           onClick={() => removeItem(item.id)}
+                          aria-label={`Remove ${item.brandName} from estimate`}
+                          title="Remove item"
                         >
                           🗑️
                         </button>
@@ -485,8 +733,9 @@ function IndentEstimate({ onNavigate, onBack }) {
               <div className="action-buttons">
                 <button 
                   className="get-estimate-button" 
-                  onClick={() => setShowEstimate(true)}
-                  disabled={selectedItems.length === 0}
+                  onClick={handleShowEstimate}
+                  disabled={state.selectedItems.length === 0}
+                  aria-label="Calculate estimate summary"
                 >
                   📊 Get Estimate
                 </button>
@@ -496,8 +745,8 @@ function IndentEstimate({ onNavigate, onBack }) {
         </div>
 
         {/* Estimate Summary Section */}
-        {showEstimate && selectedItems.length > 0 && (
-          <div className="estimate-summary-section">
+        {state.showEstimate && state.selectedItems.length > 0 && (
+          <div ref={summaryRef} className={`estimate-summary-section ${summaryPulse ? 'summary-pulse' : ''}`}>
             <div className="estimate-summary-header">
               <h3>Estimate Summary</h3>
             </div>
@@ -506,54 +755,65 @@ function IndentEstimate({ onNavigate, onBack }) {
               <label>
                 <input
                   type="checkbox"
-                  checked={tenTimesCompleted}
-                  onChange={(e) => setTenTimesCompleted(e.target.checked)}
+                  checked={state.tenTimesCompleted}
+                  onChange={(e) => dispatch({ type: actionTypes.SET_TEN_TIMES_COMPLETED, payload: e.target.checked })}
                 />
                 10 Times Stock Lifted Completed (10% Retail Excise Turnover Tax)
               </label>
             </div>
 
             <div className="estimate-calculations">
-              {(() => {
-                const estimate = calculateEstimate();
-                return (
+              <div className="calculation-table">
                   <div className="calculation-table">
                     <div className="calculation-row">
                       <span className="calculation-label">Invoice Value:</span>
-                      <span className="calculation-value">₹{estimate.invoiceValue.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.invoiceValue)}</span>
                     </div>
                     <div className="calculation-row">
                       <span className="calculation-label">MRP Rounding Off:</span>
-                      <span className="calculation-value">₹{estimate.mrpRoundingOff.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.mrpRoundingOff)}</span>
                     </div>
                     <div className="calculation-row total-row">
                       <span className="calculation-label">Net Invoice Value:</span>
-                      <span className="calculation-value">₹{estimate.netInvoiceValue.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.netInvoiceValue)}</span>
                     </div>
                     <div className="calculation-row">
                       <span className="calculation-label">Retail Excise Turnover Tax:</span>
-                      <span className="calculation-value">₹{estimate.retailExciseTurnoverTax.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.retailExciseTurnoverTax)}</span>
                     </div>
                     <div className="calculation-row">
                       <span className="calculation-label">Special Excise Cess:</span>
-                      <span className="calculation-value">₹{estimate.specialExciseCess.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.specialExciseCess)}</span>
                     </div>
                     <div className="calculation-row">
                       <span className="calculation-label">TCS (1.175%):</span>
-                      <span className="calculation-value">₹{estimate.tcs.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.tcs)}</span>
                     </div>
                     <div className="calculation-row grand-total-row">
                       <span className="calculation-label">Grand Total:</span>
-                      <span className="calculation-value">₹{estimate.grandTotal.toFixed(2)}</span>
+                      <span className="calculation-value">{formatIndianCurrency(estimate.grandTotal)}</span>
                     </div>
                   </div>
-                );
-              })()}
+              </div>
             </div>
 
             <div className="pdf-action-buttons">
-              <button className="download-pdf-button" onClick={generatePDF}>
-                📄 Download Indent Estimate (PDF)
+              <button 
+                className="download-pdf-button" 
+                onClick={handleGeneratePDF}
+                disabled={state.loading}
+                aria-label="Download estimate as PDF"
+              >
+                {state.loading ? (
+                  <>
+                    <span className="loading-spinner-small">⟳</span>
+                    Generating PDF...
+                  </>
+                ) : (
+                  <>
+                    📄 Download Indent Estimate (PDF)
+                  </>
+                )}
               </button>
             </div>
           </div>
