@@ -89,7 +89,7 @@
 
 .manage-stock-container .stock-actions-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 25px;
   max-width: 1200px;
   margin: 0 auto;
@@ -128,6 +128,10 @@
 
 .manage-stock-container .action-icon.invoice {
   background-color: #7C3AED;
+}
+
+.manage-stock-container .action-icon.estimate {
+  background-color: #3B82F6;
 }
 
 .manage-stock-container .action-icon.transfer {

@@ -1631,6 +1631,54 @@ class DatabaseService {
     }
   }
 
+  // Master Brands Search Method
+  async searchMasterBrands(searchTerm, limit = 20) {
+    const query = `
+      SELECT 
+        id,
+        brand_number,
+        brand_name,
+        size_ml,
+        size_code,
+        standard_mrp,
+        product_type,
+        pack_quantity,
+        pack_type,
+        brand_kind,
+        invoice,
+        special_margin,
+        special_excise_cess,
+        CASE 
+          WHEN product_type = 'IML' THEN 'IML'
+          WHEN product_type = 'DUTY_PAID' THEN 'Duty Paid'
+          WHEN product_type = 'BEER' THEN 'Beer'
+          WHEN product_type = 'DUTY_FREE' THEN 'Duty Free'
+          ELSE product_type
+        END as category
+      FROM master_brands 
+      WHERE is_active = true
+        AND (
+          brand_number ILIKE $1 
+          OR brand_name ILIKE $1
+        )
+      ORDER BY 
+        CASE 
+          WHEN brand_number ILIKE $2 THEN 1
+          WHEN brand_name ILIKE $2 THEN 2
+          ELSE 3
+        END,
+        brand_number
+      LIMIT $3
+    `;
+    
+    try {
+      const result = await pool.query(query, [`%${searchTerm}%`, `${searchTerm}%`, limit]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error searching master brands: ${error.message}`);
+    }
+  }
+
 
 }
 

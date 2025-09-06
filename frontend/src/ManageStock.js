@@ -1,11 +1,16 @@
-// ManageStock.js - Replace your current file with this
-import React from 'react';
+import React, { useState } from 'react';
 import './ManageStock.css';
+import IndentEstimate from './IndentEstimate';
 import API_BASE_URL from './config';
 
 function ManageStock({ onNavigate }) {
+  const [currentView, setCurrentView] = useState('main');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const shopName = user.shopName || 'Liquor Ledger';
+
+  if (currentView === 'indentEstimate') {
+    return <IndentEstimate onNavigate={onNavigate} onBack={() => setCurrentView('main')} />;
+  }
 
   return (
     <div className="manage-stock-container">
@@ -36,6 +41,14 @@ function ManageStock({ onNavigate }) {
             <div className="action-content">
               <h3 className="action-title">Upload Invoice</h3>
               <p className="action-description">Upload government invoice PDF to automatically update stock</p>
+            </div>
+          </div>
+
+          <div className="stock-action-card" onClick={() => setCurrentView('indentEstimate')}>
+            <div className="action-icon estimate">📊</div>
+            <div className="action-content">
+              <h3 className="action-title">Indent Estimate</h3>
+              <p className="action-description">Estimate the value of products to be purchased</p>
             </div>
           </div>
 

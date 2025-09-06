@@ -198,7 +198,7 @@ function processCSVRow(row) {
         const packType = validatePackType(row['Pack Type']);
         const packQuantity = parseInteger(row['Pack Quantity'], 12);
         const standardMRP = parseMRP(row['MRP']);
-        const issuePrice = parseMRP(row['Issue Price']);
+        const invoicePrice = parseMRP(row['Invoice']) || (parseMRP(row['Issue Price']) / packQuantity);
         const specialMargin = parseMRP(row['Special Margin']);
         const specialExciseCess = parseMRP(row['Special Cess']);
         const brandKind = mapBrandKind(row[' Sub Category']); // Note the leading space in CSV header
@@ -212,7 +212,8 @@ function processCSVRow(row) {
             packType,
             packQuantity,
             standardMRP,
-            issuePrice,
+
+            issuePrice: invoicePrice, // Use pre-calculated invoice price or calculate from issue price
             specialMargin,
             specialExciseCess,
             brandKind,
@@ -262,18 +263,9 @@ async function insertBatch(records) {
                 WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.standard_mrp 
                 ELSE master_brands.standard_mrp 
             END,
-            invoice = CASE 
-                WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.invoice 
-                ELSE master_brands.invoice 
-            END,
-            special_margin = CASE 
-                WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.special_margin 
-                ELSE master_brands.special_margin 
-            END,
-            special_excise_cess = CASE 
-                WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.special_excise_cess 
-                ELSE master_brands.special_excise_cess 
-            END,
+            invoice = EXCLUDED.invoice,
+            special_margin = EXCLUDED.special_margin,
+            special_excise_cess = EXCLUDED.special_excise_cess,
             brand_kind = CASE 
                 WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.brand_kind 
                 ELSE master_brands.brand_kind 
@@ -366,6 +358,9 @@ async function insertSingleRecord(record) {
                 WHEN EXCLUDED.standard_mrp > master_brands.standard_mrp THEN EXCLUDED.brand_kind 
                 ELSE master_brands.brand_kind 
             END,
+            invoice = EXCLUDED.invoice,
+            special_margin = EXCLUDED.special_margin,
+            special_excise_cess = EXCLUDED.special_excise_cess,
             is_active = EXCLUDED.is_active
         RETURNING id;
     `;
@@ -545,7 +540,7 @@ async function validateSampleData() {
                         console.log(`  Brand: ${processed.brandNumber} | ${processed.brandName}`);
                         console.log(`  Size: ${processed.sizeML}ml (${processed.sizeCode}) | Pack: ${processed.packQuantity} ${processed.packType}`);
                         console.log(`  Type: ${processed.productType} | Kind: ${processed.brandKind || 'N/A'}`);
-                        console.log(`  💰 MRP: ₹${processed.standardMRP || 'N/A'} | Issue: ₹${processed.issuePrice || 'N/A'} | Margin: ₹${processed.specialMargin || 'N/A'} | Cess: ₹${processed.specialExciseCess || 'N/A'}`);
+                        console.log(`  💰 MRP: ₹${processed.standardMRP || 'N/A'} | Invoice/bottle: ₹${processed.issuePrice || 'N/A'} | Margin: ₹${processed.specialMargin || 'N/A'} | Cess: ₹${processed.specialExciseCess || 'N/A'}`);
                         console.log('');
                     } catch (error) {
                         console.error(`✗ Sample ${count + 1} error: ${error.message}`);

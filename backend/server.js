@@ -991,6 +991,28 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
   }
 });
 
+// Search brands endpoint for indent estimate
+app.get('/api/search-brands', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    
+    if (!q || q.trim().length < 2) {
+      return res.json({ brands: [] });
+    }
+    
+    const searchTerm = q.trim();
+    const databaseService = require('./databaseService');
+    
+    // Use DatabaseService method for searching
+    const brands = await databaseService.searchMasterBrands(searchTerm, 20);
+    
+    res.json({ brands });
+  } catch (error) {
+    console.error('Error searching brands:', error);
+    res.status(500).json({ error: 'Failed to search brands' });
+  }
+});
+
 // Shop product management
 app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
  try {
@@ -1930,6 +1952,30 @@ app.get('/api/debug/time', (req, res) => {
     timezone: process.env.TZ || 'Not set',
     currentBusinessLogic: istTime.getHours() >= 11 && !(istTime.getHours() === 11 && istTime.getMinutes() < 30) ? 'After 11:30 AM - using today' : 'Before 11:30 AM - using yesterday'
   });
+});
+
+// Search master brands endpoint
+app.get('/api/search-brands', authenticateToken, async (req, res) => {
+  try {
+    const { q: searchTerm } = req.query;
+    
+    if (!searchTerm || searchTerm.trim().length < 2) {
+      return res.json([]);
+    }
+    
+    console.log(`🔍 Searching brands for: "${searchTerm}"`);
+    const results = await databaseService.searchMasterBrands(searchTerm.trim(), 20);
+    console.log(`📊 Found ${results.length} results`);
+    
+    if (results.length > 0) {
+      console.log(`🍷 First result: ${results[0].brand_number} - ${results[0].brand_name}`);
+    }
+    
+    res.json(results);
+  } catch (error) {
+    console.error('❌ Search brands error:', error);
+    res.status(500).json({ message: 'Search failed', error: error.message });
+  }
 });
 
 // Basic route
