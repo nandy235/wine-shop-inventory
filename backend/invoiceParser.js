@@ -74,6 +74,9 @@ class HybridInvoiceParser {
             description: matchingBrand.name, // Use the database brand name instead of parsed description
             sizeCode: matchingBrand.sizeCode,
             mrp: matchingBrand.mrp,
+            invoicePrice: matchingBrand.invoice,
+            specialMargin: matchingBrand.specialMargin,
+            specialExciseCess: matchingBrand.specialExciseCess,
             category: matchingBrand.category,
             masterBrandId: matchingBrand.id,
             packType: matchingBrand.packType, // Add pack type for matching
@@ -112,6 +115,48 @@ class HybridInvoiceParser {
         }
       });
       
+      // ---- Post-processing fallback for financials when invoice value is missing ----
+      const computeFromItems = (items) => {
+        let invoiceSum = 0;
+        let mrpRoundingSum = 0;
+        let specialExciseCessSum = 0;
+        for (const it of items) {
+          const qty = parseInt(it.totalQuantity) || 0;
+          const invoiceUnit = parseFloat(it.invoicePrice || 0) || 0; // Prefer invoice price from master brands
+          const marginPerBottle = parseFloat(it.specialMargin || 0) || 0;
+          const cessPerBottle = parseFloat(it.specialExciseCess || 0) || 0;
+          invoiceSum += qty * invoiceUnit;
+          mrpRoundingSum += qty * marginPerBottle;
+          specialExciseCessSum += qty * cessPerBottle;
+        }
+        return {
+          invoiceSum: Math.round(invoiceSum * 100) / 100,
+          mrpRoundingSum: Math.round(mrpRoundingSum * 100) / 100,
+          specialExciseCessSum: Math.round(specialExciseCessSum * 100) / 100
+        };
+      };
+
+      const computed = computeFromItems(validatedItems);
+
+      if (!financialData.invoiceValue || financialData.invoiceValue === 0) {
+        financialData.invoiceValue = computed.invoiceSum;
+      }
+      if (!financialData.mrpRoundingOff || financialData.mrpRoundingOff === 0) {
+        financialData.mrpRoundingOff = computed.mrpRoundingSum;
+      }
+      if (!financialData.specialExciseCess || financialData.specialExciseCess === 0) {
+        financialData.specialExciseCess = computed.specialExciseCessSum;
+      }
+      if (!financialData.netInvoiceValue || financialData.netInvoiceValue === 0) {
+        financialData.netInvoiceValue = Math.round((financialData.invoiceValue + financialData.mrpRoundingOff) * 100) / 100;
+      }
+      // Retail Excise Turnover Tax can legitimately be 0 (when <10 times), so only compute if missing and you want a baseline.
+      if (!financialData.tcs || financialData.tcs === 0) {
+        const tcsBase = (financialData.invoiceValue || 0) + (financialData.mrpRoundingOff || 0) + (financialData.retailExciseTurnoverTax || 0);
+        financialData.tcs = Math.round(tcsBase * 0.01 * 100) / 100;
+      }
+      financialData.totalAmount = Math.round(((financialData.invoiceValue || 0) + (financialData.mrpRoundingOff || 0) + (financialData.retailExciseTurnoverTax || 0) + (financialData.specialExciseCess || 0) + (financialData.tcs || 0)) * 100) / 100;
+
       console.log('\n📊 Validation Results:');
       console.log('   ✅ Validated:', validatedItems.length);
       console.log('   ⭐️ Skipped:', skippedItems.length);
@@ -732,26 +777,12 @@ class HybridInvoiceParser {
       invoiceValue: 0, 
       netInvoiceValue: 0, 
       mrpRoundingOff: 0,
-      retailShopExciseTax: 0,  // From top of document
       retailExciseTurnoverTax: 0,  // From financial section
       specialExciseCess: 0, 
       tcs: 0 
     };
     
     const lines = text.split('\n').map(line => line.trim());
-    
-    // Extract Retail Shop Excise Tax from top section first
-    for (let i = 0; i < Math.min(50, lines.length); i++) {
-      const line = lines[i];
-      if (line.includes('Retail Shop Excise Tax:')) {
-        const match = line.match(/Retail Shop Excise Tax:(\d+)/);
-        if (match) {
-          result.retailShopExciseTax = this.parseAmount(match[1]);
-          console.log(`✅ Retail Shop Excise Tax: ${result.retailShopExciseTax}`);
-        }
-        break;
-      }
-    }
     
     // COMPREHENSIVE EXTRACTION - Handle all PDF formats
     console.log('🔍 Starting multi-format extraction...');
@@ -760,7 +791,7 @@ class HybridInvoiceParser {
     console.log('   2️⃣ Block format patterns (labels first, then amounts in block)');
     console.log('   3️⃣ Split-line patterns (label on one line, value on next)');
     console.log('   4️⃣ Interleaved patterns (labels and amounts mixed together)');
-    console.log('   5️⃣ ICDC-0 Print format (positional extraction of standalone amounts)');
+    console.log('   5️⃣ Standalone amounts format (regex-based extraction)');
     console.log('');
     
     // Method 1: Same-line patterns
@@ -775,8 +806,8 @@ class HybridInvoiceParser {
     // Method 4: Interleaved patterns
     this.extractInterleavedValues(lines, result);
     
-    // Method 5: ICDC-0 Print format (regex-based extraction for standalone amounts)
-    this.extractICDC0PrintFormatRegex(lines, result);
+    // Method 5: Standalone amounts format (regex-based extraction)
+    this.extractStandaloneAmountsRegex(lines, result);
     
     // Calculate total amount
     result.totalAmount = result.invoiceValue + result.mrpRoundingOff + 
@@ -786,7 +817,6 @@ class HybridInvoiceParser {
     console.log(`  Invoice Value: ${result.invoiceValue}`);
     console.log(`  MRP Rounding Off: ${result.mrpRoundingOff}`);
     console.log(`  Net Invoice Value: ${result.netInvoiceValue}`);
-    console.log(`  Retail Shop Excise Tax: ${result.retailShopExciseTax}`);
     console.log(`  Retail Excise Turnover Tax: ${result.retailExciseTurnoverTax}`);
     console.log(`  Special Excise Cess: ${result.specialExciseCess}`);
     console.log(`  TCS: ${result.tcs}`);
@@ -1205,16 +1235,16 @@ class HybridInvoiceParser {
     console.log('');
   }
 
-  // Method 5: Extract from ICDC-0 Print format using regex patterns for standalone amounts
-  extractICDC0PrintFormatRegex(lines, result) {
-    console.log('5️⃣ METHOD 5: ICDC-0 PRINT FORMAT REGEX PATTERN DETECTION');
-    console.log('   Looking for: Specific regex patterns for standalone financial amounts');
+  // Method 5: Extract from standalone amounts format using regex patterns
+  extractStandaloneAmountsRegex(lines, result) {
+    console.log('5️⃣ METHOD 5: STANDALONE AMOUNTS REGEX PATTERN DETECTION');
+    console.log('   Looking for: Regex patterns for standalone financial amounts');
     console.log('   Target amounts: Invoice Value, MRP Rounding Off, Net Invoice Value, Retail Excise Turnover Tax, Special Excise Cess, TCS');
     
     let patternsFound = [];
     
-    // Define flexible regex patterns for ICDC-0 Print format financial values
-    const icdc0Patterns = {
+    // Define flexible regex patterns for standalone financial values
+    const standalonePatterns = {
       // Large amounts (lakhs range) with decimals - for Invoice Value, MRP Rounding, Net Invoice Value
       // Updated to handle concatenated amounts by finding proper currency patterns
       largeAmountWithDecimals: /((?:\d{1,2},)*\d{2,3},\d{3}\.\d{2})/g,
@@ -1235,7 +1265,7 @@ class HybridInvoiceParser {
       const line = lines[i].trim();
       
       // Check for large amounts with decimals (using global regex to find all matches)
-      let matches = [...line.matchAll(icdc0Patterns.largeAmountWithDecimals)];
+      let matches = [...line.matchAll(standalonePatterns.largeAmountWithDecimals)];
       for (const match of matches) {
         const amount = this.parseAmount(match[1]);
         // Only include reasonable amounts (not too large to cause overflow)
@@ -1254,7 +1284,7 @@ class HybridInvoiceParser {
       }
       
       // Check for medium amounts ending in .00
-      matches = [...line.matchAll(icdc0Patterns.mediumAmountRound)];
+      matches = [...line.matchAll(standalonePatterns.mediumAmountRound)];
       for (const match of matches) {
         const amount = this.parseAmount(match[1]);
         if (amount < 100000000) {
@@ -1270,7 +1300,7 @@ class HybridInvoiceParser {
       }
       
       // Check for small amounts
-      matches = [...line.matchAll(icdc0Patterns.smallAmount)];
+      matches = [...line.matchAll(standalonePatterns.smallAmount)];
       for (const match of matches) {
         const amount = this.parseAmount(match[1]);
         if (amount < 100000000) {
@@ -1309,10 +1339,10 @@ class HybridInvoiceParser {
         this.mapAmountsIntelligently(sortedAmounts, result, patternsFound);
       }
     } else {
-      console.log('   ❌ Insufficient amounts found for ICDC-0 Print format mapping');
+      console.log('   ❌ Insufficient amounts found for standalone amounts mapping');
     }
     
-    console.log(`📊 METHOD 5 SUMMARY: Found ${patternsFound.length} ICDC-0 Print regex patterns: [${patternsFound.join(', ')}]`);
+    console.log(`📊 METHOD 5 SUMMARY: Found ${patternsFound.length} standalone amounts regex patterns: [${patternsFound.join(', ')}]`);
     console.log('');
   }
 

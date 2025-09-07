@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS invoice_staging (
     invoice_value DECIMAL(10,2),
     net_invoice_value DECIMAL(10,2),
     mrp_rounding_off DECIMAL(10,2),
-    retail_shop_excise_tax DECIMAL(10,2),
     retail_excise_turnover_tax DECIMAL(10,2),
     special_excise_cess DECIMAL(10,2),
     tcs DECIMAL(10,2),

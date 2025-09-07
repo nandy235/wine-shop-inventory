@@ -331,7 +331,7 @@ function UploadInvoice({ onNavigate }) {
                 <div className="financial-breakdown">
                   <p><strong>Invoice Value:</strong> {formatCurrency(parsedData.invoiceValue)}</p>
                   <p><strong>MRP Rounding Off:</strong> {formatCurrency(parsedData.mrpRoundingOff)}</p>
-                  <p><strong>Retail Shop Excise Tax:</strong> {formatCurrency(parsedData.retailShopExciseTax)}</p>
+                  
                   <p><strong>Retail Shop Excise Turnover Tax:</strong> {formatCurrency(parsedData.retailExciseTurnoverTax)}</p>
                   <p><strong>Special Excise Cess:</strong> {formatCurrency(parsedData.specialExciseCess)}</p>
                   <p><strong>TCS:</strong> {formatCurrency(parsedData.tcs)}</p>

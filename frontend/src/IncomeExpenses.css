@@ -247,6 +247,111 @@
   overflow-y: auto;
 }
 
+.income-expenses-add-category-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1rem 0.25rem 1rem;
+}
+
+.income-expenses-add-category-btn {
+  background: linear-gradient(135deg, #7e3af2, #6b21a8);
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(110, 0, 255, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.income-expenses-add-category-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(110, 0, 255, 0.35);
+}
+
+.income-expenses-add-category-btn:active {
+  transform: translateY(0);
+}
+
+.income-expenses-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.income-expenses-modal {
+  background: #ffffff;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 12px;
+  padding: 1.25rem 1.25rem 1rem 1.25rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.income-expenses-modal-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #2d3748;
+}
+
+.income-expenses-modal-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 1rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  display: block;
+}
+
+.income-expenses-modal-input:focus {
+  outline: none;
+  border-color: #7e3af2;
+  box-shadow: 0 0 0 2px rgba(126, 58, 242, 0.15);
+}
+
+.income-expenses-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.income-expenses-modal-cancel {
+  background: #edf2f7;
+  color: #2d3748;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.income-expenses-modal-confirm {
+  background: linear-gradient(135deg, #7e3af2, #6b21a8);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(110, 0, 255, 0.25);
+}
+
+.income-expenses-modal-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .income-expenses-table {
   width: 100%;
   border-collapse: collapse;
@@ -303,6 +408,39 @@
 .income-expenses-table td:nth-child(2) {
   text-align: left;
   font-weight: 500;
+}
+
+.income-expenses-category-row {
+  position: relative;
+}
+
+.income-expenses-delete-btn {
+  background: transparent;
+  border: none;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.income-expenses-delete-btn:hover {
+  color: #e53e3e;
+  background: rgba(229, 62, 62, 0.08);
+}
+
+.income-expenses-category-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-left: 0.5rem;
+}
+
+.income-expenses-default-badge {
+  background: #edf2f7;
+  color: #4a5568;
 }
 
 .income-expenses-table td:nth-child(3) {

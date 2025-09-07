@@ -590,6 +590,11 @@ function DownloadSaleSheet({ onNavigate }) {
       return total + ((item.closingStock || 0) * (item.price || 0));
     }, 0);
 
+    // Calculate received stock value: sum of (received stock * price)
+    const receivedStockValue = state.stockData.reduce((total, item) => {
+      return total + ((item.receivedStock || 0) * (item.price || 0));
+    }, 0);
+
     // Generate table rows
     const generateTableRows = (data) => {
       return data.map(item => `
@@ -732,15 +737,16 @@ function DownloadSaleSheet({ onNavigate }) {
           </thead>
           <tbody>
             <tr><td>1</td><td>OPENING STOCK VALUE</td><td>${formatCurrency(openingStockValue)}</td></tr>
-            <tr><td>2</td><td>CLOSING STOCK VALUE</td><td>${formatCurrency(closingStockValue)}</td></tr>
-            <tr><td>3</td><td>TOTAL SALE</td><td>${formatCurrency(totalSales)}</td></tr>
-            <tr><td>4</td><td>OTHER INCOME</td><td>${formatCurrency(totalIncome)}</td></tr>
-            <tr><td>5</td><td>OPENING COUNTER BALANCE</td><td>${formatCurrency(openingBalance)}</td></tr>
-            <tr><td>6</td><td>CASH</td><td>${formatCurrency(cash)}</td></tr>
-            <tr><td>7</td><td>CARD</td><td>${formatCurrency(card)}</td></tr>
-            <tr><td>8</td><td>UPI</td><td>${formatCurrency(upi)}</td></tr>
-            <tr><td>9</td><td>EXPENSES</td><td>${formatCurrency(totalExpenses)}</td></tr>
-            <tr><td>10</td><td>CLOSING COUNTER BALANCE</td><td>${formatCurrency(closingBalance)}</td></tr>
+            <tr><td>2</td><td>RECEIVED STOCK VALUE</td><td>${formatCurrency(receivedStockValue)}</td></tr>
+            <tr><td>3</td><td>CLOSING STOCK VALUE</td><td>${formatCurrency(closingStockValue)}</td></tr>
+            <tr><td>4</td><td>TOTAL SALE</td><td>${formatCurrency(totalSales)}</td></tr>
+            <tr><td>5</td><td>OTHER INCOME</td><td>${formatCurrency(totalIncome)}</td></tr>
+            <tr><td>6</td><td>OPENING COUNTER BALANCE</td><td>${formatCurrency(openingBalance)}</td></tr>
+            <tr><td>7</td><td>CASH</td><td>${formatCurrency(cash)}</td></tr>
+            <tr><td>8</td><td>CARD</td><td>${formatCurrency(card)}</td></tr>
+            <tr><td>9</td><td>UPI</td><td>${formatCurrency(upi)}</td></tr>
+            <tr><td>10</td><td>EXPENSES</td><td>${formatCurrency(totalExpenses)}</td></tr>
+            <tr><td>11</td><td>CLOSING COUNTER BALANCE</td><td>${formatCurrency(closingBalance)}</td></tr>
           </tbody>
         </table>
       </div>

@@ -123,7 +123,6 @@ CREATE TABLE invoices (
     net_invoice_value DECIMAL(12,2) GENERATED ALWAYS AS (
         COALESCE(invoice_value, 0) + COALESCE(mrp_rounding_off, 0)
     ) STORED,
-    retail_shop_excise_tax DECIMAL(12,2),
     retail_shop_excise_turnover_tax DECIMAL(10,2),
     special_excise_cess DECIMAL(10,2),
     tcs DECIMAL(10,2),

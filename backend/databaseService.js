@@ -689,9 +689,8 @@ class DatabaseService {
       
       // 1. Save invoice record
       const {
-
         userId, invoiceNumber, date, originalInvoiceDate, totalValue,
-        netInvoiceValue, mrpRoundingOff, retailShopExciseTax, retailExciseTurnoverTax, specialExciseCess, tcs
+        netInvoiceValue, mrpRoundingOff, retailExciseTurnoverTax, specialExciseCess, tcs
       } = invoiceData;
       
       // Get shop_id from user_id
@@ -715,14 +714,14 @@ class DatabaseService {
       const invoiceQuery = `
         INSERT INTO invoices 
         (shop_id, icdc_number, invoice_date, invoice_value, mrp_rounding_off,
-         retail_shop_excise_tax, retail_shop_excise_turnover_tax, special_excise_cess, tcs)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         retail_shop_excise_turnover_tax, special_excise_cess, tcs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
       `;
       
       const invoiceValues = [
         shopId, invoiceNumber, originalInvoiceDate || date, totalValue, mrpRoundingOff,
-        retailShopExciseTax, retailExciseTurnoverTax, specialExciseCess, tcs
+        retailExciseTurnoverTax, specialExciseCess, tcs
       ];
       
       const invoiceResult = await client.query(invoiceQuery, invoiceValues);
@@ -1045,6 +1044,211 @@ class DatabaseService {
   }
 
   // Income and Expenses methods
+  async ensureIncomeCategoriesTable() {
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS income_categories (
+        id SERIAL PRIMARY KEY,
+        shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    const createUniqueIndexQuery = `
+      CREATE UNIQUE INDEX IF NOT EXISTS income_categories_unique_shop_lower_name
+      ON income_categories (shop_id, lower(name));
+    `;
+    try {
+      await pool.query(createTableQuery);
+      await pool.query(createUniqueIndexQuery);
+    } catch (error) {
+      throw new Error(`Error ensuring income_categories table: ${error.message}`);
+    }
+  }
+
+  async seedDefaultIncomeCategories(shopId) {
+    await this.ensureIncomeCategoriesTable();
+    // Always attempt to upsert defaults/repairs; safe due to NOT EXISTS guards
+
+    const defaults = [
+      { name: 'Sitting', is_default: true, sort_order: 1 },
+      { name: 'Cash discounts', is_default: true, sort_order: 2 },
+      { name: 'Used bottles/cartons sale', is_default: true, sort_order: 3 },
+      { name: 'Others', is_default: true, sort_order: 4 }
+    ];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const d of defaults) {
+        await client.query(
+          `INSERT INTO income_categories (shop_id, name, sort_order, is_default)
+           SELECT $1, $2, $3, $4
+           WHERE NOT EXISTS (
+             SELECT 1 FROM income_categories
+             WHERE shop_id = $1 AND lower(name) = lower($2)
+           )`,
+          [shopId, d.name, d.sort_order, d.is_default]
+        );
+      }
+
+      // Ensure 'Used bottles/cartons sale' is the default (order 3)
+      await client.query(
+        `UPDATE income_categories
+         SET is_default = TRUE, sort_order = 3
+         WHERE shop_id = $1 AND lower(name) = lower('Used bottles/cartons sale')`,
+        [shopId]
+      );
+
+      // Make alternative text non-default so it can be deleted from UI
+      await client.query(
+        `UPDATE income_categories
+         SET is_default = FALSE
+         WHERE shop_id = $1 AND lower(name) = lower('sold old cartons/used bottles')`,
+        [shopId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Error seeding default income categories: ${error.message}`);
+    } finally {
+      client.release();
+    }
+  }
+
+  async getIncomeCategories(shopId) {
+    await this.ensureIncomeCategoriesTable();
+    await this.seedDefaultIncomeCategories(shopId);
+    const query = `
+      SELECT id, name, sort_order, is_default
+      FROM income_categories
+      WHERE shop_id = $1
+      ORDER BY sort_order ASC, name ASC
+    `;
+    try {
+      const result = await pool.query(query, [shopId]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error fetching income categories: ${error.message}`);
+    }
+  }
+
+  async addIncomeCategory(shopId, name) {
+    await this.ensureIncomeCategoriesTable();
+    await this.seedDefaultIncomeCategories(shopId);
+
+    const trimmed = (name || '').trim();
+    if (!trimmed) {
+      throw new Error('Category name is required');
+    }
+
+    // Prevent naming as Others (reserved)
+    if (trimmed.toLowerCase() === 'others') {
+      throw new Error('Category name "Others" is reserved');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Ensure Others exists
+      const othersRes = await client.query(
+        `SELECT id, sort_order FROM income_categories WHERE shop_id = $1 AND lower(name) = 'others'`,
+        [shopId]
+      );
+
+      if (othersRes.rows.length === 0) {
+        // Create Others at the end if missing
+        const maxRes = await client.query(
+          `SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM income_categories WHERE shop_id = $1`,
+          [shopId]
+        );
+        const nextOrder = (parseInt(maxRes.rows[0].max_order, 10) || 0) + 1;
+        await client.query(
+          `INSERT INTO income_categories (shop_id, name, sort_order, is_default)
+           SELECT $1, 'Others', $2, true
+           WHERE NOT EXISTS (
+             SELECT 1 FROM income_categories WHERE shop_id = $1 AND lower(name) = 'others'
+           )`,
+          [shopId, nextOrder]
+        );
+      }
+
+      // Find max sort among non-Others
+      const maxNonOthersRes = await client.query(
+        `SELECT COALESCE(MAX(sort_order), 0) AS max_non_others
+         FROM income_categories
+         WHERE shop_id = $1 AND lower(name) <> 'others'`,
+        [shopId]
+      );
+      const maxNonOthers = parseInt(maxNonOthersRes.rows[0].max_non_others, 10) || 0;
+
+      // Insert new category right before Others
+      const newOrder = maxNonOthers + 1;
+      await client.query(
+        `INSERT INTO income_categories (shop_id, name, sort_order, is_default)
+         SELECT $1, $2, $3, false
+         WHERE NOT EXISTS (
+           SELECT 1 FROM income_categories WHERE shop_id = $1 AND lower(name) = lower($2)
+         )`,
+        [shopId, trimmed, newOrder]
+      );
+
+      // Move Others to last (after the newly added)
+      const maxAfterInsertRes = await client.query(
+        `SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM income_categories WHERE shop_id = $1`,
+        [shopId]
+      );
+      const maxOrder = parseInt(maxAfterInsertRes.rows[0].max_order, 10) || newOrder;
+      await client.query(
+        `UPDATE income_categories
+         SET sort_order = $2
+         WHERE shop_id = $1 AND lower(name) = 'others'`,
+        [shopId, maxOrder + 1]
+      );
+
+      await client.query('COMMIT');
+
+      // Return updated list
+      const updated = await this.getIncomeCategories(shopId);
+      return updated;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw new Error(`Error adding income category: ${error.message}`);
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteIncomeCategory(shopId, name) {
+    await this.ensureIncomeCategoriesTable();
+    const trimmed = (name || '').trim();
+    if (!trimmed) {
+      throw new Error('Category name is required');
+    }
+
+    // Do not allow deleting defaults
+    const defaults = ['sitting', 'cash discounts', 'used bottles/cartons sale', 'others'];
+    if (defaults.includes(trimmed.toLowerCase())) {
+      throw new Error('Cannot delete default categories');
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM income_categories 
+         WHERE shop_id = $1 AND lower(name) = lower($2) AND is_default = FALSE
+         RETURNING id, name`,
+        [shopId, trimmed]
+      );
+      if (result.rowCount === 0) {
+        throw new Error('Category not found or cannot be deleted');
+      }
+      // Return updated list
+      return await this.getIncomeCategories(shopId);
+    } catch (error) {
+      throw new Error(`Error deleting income category: ${error.message}`);
+    }
+  }
   async getIncome(shopId, date) {
     const query = `
       SELECT source, amount, description 

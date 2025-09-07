@@ -6,7 +6,7 @@ import API_BASE_URL from './config';
 const SEARCH_DEBOUNCE_DELAY = 150;
 const MIN_SEARCH_LENGTH = 2;
 const TAX_RATES = {
-  TCS_RATE: 0.01175,
+  TCS_RATE: 0.01,
   RETAIL_EXCISE_RATE: 0.10,
 };
 const DEFAULT_PACK_QUANTITY = 12;
@@ -331,7 +331,9 @@ function IndentEstimate({ onNavigate, onBack }) {
       return total + (itemTotalBottles * (item.specialExciseCess || 0));
     }, 0);
     
-    const tcs = invoiceValue * TAX_RATES.TCS_RATE;
+    // TCS = 1% of (Invoice + MRP Rounding Off + Retail Excise Turnover Tax)
+    const tcsBase = netInvoiceValue + retailExciseTurnoverTax;
+    const tcs = tcsBase * TAX_RATES.TCS_RATE;
     const grandTotal = netInvoiceValue + retailExciseTurnoverTax + specialExciseCess + tcs;
 
     return {

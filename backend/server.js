@@ -524,7 +524,7 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
         parseResult.data.invoiceValue || parseResult.data.totalAmount || 0,
         parseResult.data.netInvoiceValue || 0,
         parseResult.data.mrpRoundingOff || 0,
-        parseResult.data.retailShopExciseTax || 0,
+        0,
         parseResult.data.retailExciseTurnoverTax || 0,
         parseResult.data.specialExciseCess || 0,
         parseResult.data.tcs || 0,
@@ -583,7 +583,7 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
         totalAmount: parseResult.data.totalAmount,
         netInvoiceValue: parseResult.data.netInvoiceValue,
         mrpRoundingOff: parseResult.data.mrpRoundingOff,
-        retailShopExciseTax: parseResult.data.retailShopExciseTax,
+        retailShopExciseTax: 0,
         retailExciseTurnoverTax: parseResult.data.retailExciseTurnoverTax,
         specialExciseCess: parseResult.data.specialExciseCess,
         tcs: parseResult.data.tcs,
@@ -681,7 +681,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       invoiceValue: invoiceRecord.invoice_value,
       netInvoiceValue: invoiceRecord.net_invoice_value,
       mrpRoundingOff: invoiceRecord.mrp_rounding_off,
-      retailShopExciseTax: invoiceRecord.retail_shop_excise_tax,
+      retailShopExciseTax: 0,
       retailExciseTurnoverTax: invoiceRecord.retail_excise_turnover_tax,
       specialExciseCess: invoiceRecord.special_excise_cess,
       tcs: invoiceRecord.tcs,
@@ -707,7 +707,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
       totalValue: invoiceData.invoiceValue || 0,
       netInvoiceValue: invoiceData.netInvoiceValue || 0,
       mrpRoundingOff: invoiceData.mrpRoundingOff || 0,
-      retailShopExciseTax: invoiceData.retailShopExciseTax || 0,
+      retailShopExciseTax: 0,
       retailExciseTurnoverTax: invoiceData.retailExciseTurnoverTax || 0,
       specialExciseCess: invoiceData.specialExciseCess || 0,
       tcs: invoiceData.tcs || 0,
@@ -1459,6 +1459,48 @@ app.get('/api/summary', authenticateToken, async (req, res) => {
 });
 
 // Income and Expenses endpoints
+// Income Categories
+app.get('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    if (!shopId) return res.status(400).json({ message: 'Shop ID not found in token' });
+    const categories = await dbService.getIncomeCategories(shopId);
+    res.json(categories);
+  } catch (error) {
+    console.error('Error fetching income categories:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+app.post('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const { name } = req.body;
+    if (!shopId) return res.status(400).json({ message: 'Shop ID not found in token' });
+    if (!name || !name.trim()) return res.status(400).json({ message: 'Category name is required' });
+
+    const categories = await dbService.addIncomeCategory(shopId, name);
+    res.status(201).json({ message: 'Category added', categories });
+  } catch (error) {
+    console.error('Error adding income category:', error);
+    res.status(400).json({ message: error.message });
+  }
+});
+
+app.delete('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const { name } = req.body;
+    if (!shopId) return res.status(400).json({ message: 'Shop ID not found in token' });
+    if (!name || !name.trim()) return res.status(400).json({ message: 'Category name is required' });
+
+    const categories = await dbService.deleteIncomeCategory(shopId, name);
+    res.json({ message: 'Category deleted', categories });
+  } catch (error) {
+    console.error('Error deleting income category:', error);
+    res.status(400).json({ message: error.message });
+  }
+});
 app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
