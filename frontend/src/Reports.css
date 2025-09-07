@@ -84,9 +84,9 @@
 
 .reports-action-cards-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1.5rem;
-  max-width: 600px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
@@ -117,6 +117,30 @@
 
 .reports-action-card-blue:hover {
   border-color: #3182ce;
+}
+
+.reports-action-card-green {
+  border-left: 4px solid #38a169;
+}
+
+.reports-action-card-green:hover {
+  border-color: #38a169;
+}
+
+.reports-action-card-purple {
+  border-left: 4px solid #805ad5;
+}
+
+.reports-action-card-purple:hover {
+  border-color: #805ad5;
+}
+
+.reports-action-card-orange {
+  border-left: 4px solid #dd6b20;
+}
+
+.reports-action-card-orange:hover {
+  border-color: #dd6b20;
 }
 
 .reports-card-icon {

@@ -9,6 +9,7 @@ import UploadInvoice from './UploadInvoice';
 import Sheets from './Sheets';
 import UpdateClosingStock from './UpdateClosingStock';
 import IncomeExpenses from './IncomeExpenses';
+import IncomeExpensesReport from './IncomeExpensesReport';
 import TrackPayments from './TrackPayments';
 import DownloadSaleSheet from './DownloadSaleSheet';
 import Reports from './Reports';
@@ -116,6 +117,9 @@ function App() {
       )}
       {currentView === 'incomeExpenses' && (
         <IncomeExpenses onNavigate={handleNavigate} />
+      )}
+      {currentView === 'incomeExpensesReport' && (
+        <IncomeExpensesReport onNavigate={handleNavigate} />
       )}
       {currentView === 'trackPayments' && (
         <TrackPayments onNavigate={handleNavigate} />
