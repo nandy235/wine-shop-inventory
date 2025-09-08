@@ -13,6 +13,8 @@ import IncomeExpensesReport from './IncomeExpensesReport';
 import TrackPayments from './TrackPayments';
 import DownloadSaleSheet from './DownloadSaleSheet';
 import Reports from './Reports';
+import StockLifted from './StockLifted';
+import SalesReport from './SalesReport';
 import './App.css';
 import API_BASE_URL from './config';
 
@@ -129,6 +131,12 @@ function App() {
       )}
       {currentView === 'reports' && (
         <Reports onNavigate={handleNavigate} />
+      )}
+      {currentView === 'stockLifted' && (
+        <StockLifted onNavigate={handleNavigate} />
+      )}
+      {currentView === 'brandWiseSales' && (
+        <SalesReport onNavigate={handleNavigate} />
       )}
     </div>
   );

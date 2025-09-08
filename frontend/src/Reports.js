@@ -71,7 +71,7 @@ function Reports({ onNavigate }) {
           >
             <div className="reports-card-icon">🏷️</div>
             <div className="reports-card-content">
-              <h3 className="reports-card-title">Brand Wise Sales Report</h3>
+              <h3 className="reports-card-title">Sales Report</h3>
               <p className="reports-card-description">Sales analysis by brand with performance metrics</p>
             </div>
             <div className="reports-card-arrow">→</div>

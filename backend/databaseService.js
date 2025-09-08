@@ -1808,6 +1808,38 @@ class DatabaseService {
     }
   }
 
+  // Aggregated Sales (uses generated dsr.sales) between dates
+  async getAggregatedSalesByBrand(shopId, startDate, endDate) {
+    const query = `
+      SELECT 
+        mb.id AS master_brand_id,
+        mb.brand_number,
+        mb.brand_name,
+        mb.size_ml,
+        mb.size_code,
+        mb.standard_mrp,
+        mb.pack_quantity,
+        mb.brand_kind,
+        SUM(dsr.sales) AS sold_bottles
+      FROM daily_stock_records dsr
+      JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      WHERE si.shop_id = $1
+        AND dsr.stock_date BETWEEN $2 AND $3
+      GROUP BY 
+        mb.id, mb.brand_number, mb.brand_name, mb.size_ml, mb.size_code, 
+        mb.standard_mrp, mb.pack_quantity, mb.brand_kind
+      ORDER BY mb.brand_number, mb.size_ml
+    `;
+
+    try {
+      const result = await pool.query(query, [shopId, startDate, endDate]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Error getting aggregated sales: ${error.message}`);
+    }
+  }
+
   // Initialize closing stock records for a date
   async initializeClosingStockRecords(shopId, date) {
     const query = `

@@ -1969,6 +1969,22 @@ app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
   }
 });
 
+// Sales Report (aggregated using dsr.sales)
+app.get('/api/reports/sales', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const { startDate, endDate } = req.query;
+    const s = startDate || getBusinessDate();
+    const e = endDate || s;
+
+    const rows = await dbService.getAggregatedSalesByBrand(shopId, s, e);
+    res.json({ rows, startDate: s, endDate: e });
+  } catch (error) {
+    console.error('Error getting sales report:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Initialize closing stock records for a date
 app.post('/api/closing-stock/initialize', authenticateToken, async (req, res) => {
   try {

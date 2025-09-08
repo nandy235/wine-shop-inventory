@@ -15,18 +15,19 @@ const path = require('path');
 const csv = require('csv-parser');
 const { Pool } = require('pg');
 
-// Load environment variables
-require('dotenv').config();
+// Load environment variables from project root first, then backend/.env (fallback)
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
-// Database configuration - Railway setup
-// Use PUBLIC_URL for local development, DATABASE_URL for Railway deployment
+// Database configuration
+// Prefer DATABASE_PUBLIC_URL (your convention), fallback to DATABASE_URL, else local
 const databaseUrl = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL || 'postgresql://localhost:5432/wine_inventory';
 const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: databaseUrl.includes('railway') ? { rejectUnauthorized: false } : false
+    ssl: { rejectUnauthorized: false }
 });
 
-console.log('🔗 Connecting to database:', databaseUrl.replace(/\/\/.*@/, '//***:***@')); // Hide credentials in log
+console.log('🔗 Connecting to database:', databaseUrl.replace(/\/\/.*@/, '//***:***@'));
 
 // Command line arguments
 const isDryRun = process.argv.includes('--dry-run');
