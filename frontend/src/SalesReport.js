@@ -86,6 +86,7 @@ function SalesReport({ onNavigate }) {
   const [brandMap, setBrandMap] = useState(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [periodTotals, setPeriodTotals] = useState([]);
 
   const weeksInMonth = useMemo(() => {
     if (reportType === 'weekly') return getWeeksInMonth(selectedYear, selectedMonth);
@@ -227,6 +228,42 @@ function SalesReport({ onNavigate }) {
       });
 
       setRows(list);
+
+      // Build period totals (day-wise or month-wise)
+      if (reportType === 'yearly') {
+        const months = Array.from({ length: 12 }, (_, i) => i + 1);
+        const ranges = months.map(m => ({
+          start: new Date(selectedYear, m - 1, 1).toLocaleDateString('en-CA'),
+          end: new Date(selectedYear, m, 0).toLocaleDateString('en-CA'),
+          label: new Date(selectedYear, m - 1).toLocaleDateString('en-US', { month: 'long' })
+        }));
+        const results = await Promise.all(ranges.map(r =>
+          fetch(`${API_BASE_URL}/api/reports/sales?startDate=${r.start}&endDate=${r.end}`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+          }).then(x => x.ok ? x.json() : { rows: [] }).catch(() => ({ rows: [] }))
+        ));
+        const totals = results.map((resp, idx) => {
+          const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
+          return { label: ranges[idx].label, mrpTotal: sum };
+        });
+        setPeriodTotals(totals);
+      } else {
+        const dates = [];
+        const c = new Date(startDate);
+        const e = new Date(endDate);
+        while (c <= e) { dates.push(c.toLocaleDateString('en-CA')); c.setDate(c.getDate() + 1); }
+        const results = await Promise.all(dates.map(d =>
+          fetch(`${API_BASE_URL}/api/reports/sales?startDate=${d}&endDate=${d}`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+          }).then(x => x.ok ? x.json() : { rows: [] }).catch(() => ({ rows: [] }))
+        ));
+        const totals = results.map((resp, idx) => {
+          const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
+          const label = new Date(dates[idx]).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+          return { label, mrpTotal: sum };
+        });
+        setPeriodTotals(totals);
+      }
     } catch (e) {
       setError(e.message || 'Failed to load data');
       setRows([]);
@@ -412,6 +449,74 @@ function SalesReport({ onNavigate }) {
       `;
     }).join('');
 
+    // Brand-wise table: group by baseName with size variants
+    const byBase = new Map();
+    rows.forEach(r => {
+      if (!byBase.has(r.baseName)) byBase.set(r.baseName, []);
+      byBase.get(r.baseName).push(r);
+    });
+    const brandWiseHtml = (() => {
+      // Order brands and variants using the same latest order as View Current Stock
+      const groups = Array.from(byBase.entries()).map(([base, list]) => {
+        const groupOrder = Math.min(...list.map(r => (typeof r.order === 'number' ? r.order : 9999)));
+        return [base, list, groupOrder];
+      }).sort((a, b) => a[2] - b[2]);
+      const body = groups.map(([base, list], gIdx) => {
+        const sorted = list.slice().sort((a,b)=>{
+          const ao = (typeof a.order === 'number' ? a.order : 9999);
+          const bo = (typeof b.order === 'number' ? b.order : 9999);
+          return ao - bo;
+        });
+        return sorted.map((r, idx) => {
+          const pq = parseInt(r.packQuantity, 10) || 0;
+          const cases = pq > 0 ? Math.floor((r.soldBottles || 0) / pq) : null;
+          const loose = pq > 0 ? ((r.soldBottles || 0) % pq) : (r.soldBottles || 0);
+          const mrp = (r.soldBottles || 0) * (r.mrp || 0);
+          const pct = totalMrp > 0 ? (mrp * 100) / totalMrp : 0;
+          return `
+            <tr>
+              ${idx === 0 ? `<td class="center" rowSpan="${sorted.length}">${gIdx + 1}</td>` : ''}
+              ${idx === 0 ? `<td rowSpan="${sorted.length}">${base}</td>` : ''}
+              <td class="center">${r.sizeCode || ''}</td>
+              <td>${cases != null ? cases.toFixed(2) : '-'}</td>
+              <td>${loose}</td>
+              <td>${formatNum(mrp)}</td>
+              <td>${pct.toFixed(2)}%</td>
+            </tr>
+          `;
+        }).join('');
+      }).join('');
+      const total = Math.round(rows.reduce((s,r)=> s + ((r.soldBottles||0)*(r.mrp||0)), 0)).toLocaleString('en-IN');
+      return `
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2">S.No</th>
+              <th rowspan="2">Brand</th>
+              <th rowspan="2">Size</th>
+              <th colspan="2">Quantity</th>
+              <th rowspan="2">Sales (MRP)</th>
+              <th rowspan="2">% of Total (MRP)</th>
+            </tr>
+            <tr>
+              <th>Cases</th>
+              <th>Bottles</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${body}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="5"><strong>Total</strong></td>
+              <td class="right total-red">${total}</td>
+              <td class="right total-red">100.00%</td>
+            </tr>
+          </tfoot>
+        </table>
+      `;
+    })();
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -423,16 +528,16 @@ function SalesReport({ onNavigate }) {
     body { font-family: Arial, sans-serif; font-size: 11px; }
     .header { text-align: center; margin-bottom: 10px; }
     .shop { font-weight: 800; font-size: 22px; }
-    .title { font-weight: 700; font-size: 14px; text-align: center; }
+    .title { font-weight: 700; font-size: 14px; text-align: center; margin-bottom: 12px; }
     .report { font-weight: 800; font-size: 18px; text-transform: uppercase; }
     .meta { font-weight: 600; font-size: 12px; }
     .month { font-weight: 600; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { border: 1px solid #000; padding: 4px; text-align: center; }
     th { background: #f0f0f0; }
     .right { text-align: center; }
     .center { text-align: center; }
-    .section { margin-top: 14px; }
+    .section { margin-top: 18px; }
     .page-break { page-break-before: always; }
     .bold { font-weight: bold; }
     .subhead-left { text-align: left; font-weight: bold; margin: 6px 0; }
@@ -472,7 +577,43 @@ function SalesReport({ onNavigate }) {
     </table>
   </div>
 
-  <div class="section share-section">
+  <div class="section">
+    <div class="title">${reportType === 'yearly' ? 'Sales Report - Month Wise' : 'Sales Report - Day Wise'}</div>
+    <table class="share-table">
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>${reportType === 'yearly' ? 'Month' : 'Date'}</th>
+          <th>Sales (MRP)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(periodTotals || []).map((p, idx) => `
+          <tr>
+            <td class="center">${idx + 1}</td>
+            <td>${p.label}</td>
+            <td class="right">${Math.round(p.mrpTotal || 0).toLocaleString('en-IN')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2"><strong>Total</strong></td>
+          <td class="right total-red">${Math.round((periodTotals || []).reduce((s, p) => s + (p.mrpTotal || 0), 0)).toLocaleString('en-IN')}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="page-break"></div>
+  <div class="header">
+    <div class="shop">${shopName}</div>
+    <div class="report">SALES REPORT</div>
+    ${monthStr ? `<div class=\"month\">${monthStr}</div>` : ''}
+    <div class="meta">${rangeStr}</div>
+  </div>
+
+  <div class="section">
     <div class="title">Sales - Brand Type wise</div>
     <table class="share-table">
       <thead>
@@ -552,6 +693,55 @@ function SalesReport({ onNavigate }) {
   <div class="section">
     <div class="title">Sales Report - All Brands</div>
     ${allKindsHtml}
+  </div>
+
+  <div class="page-break"></div>
+  <div class="header">
+    <div class="shop">${shopName}</div>
+    <div class="report">SALES REPORT</div>
+    ${monthStr ? `<div class=\"month\">${monthStr}</div>` : ''}
+    <div class="meta">${rangeStr}</div>
+  </div>
+
+  <div class="section">
+    <div class="title">Sales Report - Brand Wise</div>
+    ${brandWiseHtml}
+  </div>
+
+  <div class="page-break"></div>
+  <div class="header">
+    <div class="shop">${shopName}</div>
+    <div class="report">SALES REPORT</div>
+    ${monthStr ? `<div class=\"month\">${monthStr}</div>` : ''}
+    <div class="meta">${rangeStr}</div>
+  </div>
+
+  <div class="section">
+    <div class="title">${reportType === 'yearly' ? 'Sales Report - Month Wise' : 'Sales Report - Day Wise'}</div>
+    <table>
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>${reportType === 'yearly' ? 'Month' : 'Date'}</th>
+          <th>Sales (MRP)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(periodTotals || []).map((p, idx) => `
+          <tr>
+            <td class="center">${idx + 1}</td>
+            <td>${p.label}</td>
+            <td class="right">${Math.round(p.mrpTotal || 0).toLocaleString('en-IN')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2"><strong>Total</strong></td>
+          <td class="right total-red">${Math.round((periodTotals || []).reduce((s, p) => s + (p.mrpTotal || 0), 0)).toLocaleString('en-IN')}</td>
+        </tr>
+      </tfoot>
+    </table>
   </div>
 
 </body>

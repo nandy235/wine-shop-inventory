@@ -1,3 +1,7 @@
+.ie-summary { display: grid; grid-template-rows: auto auto; grid-template-columns: 1fr; }
+.ie-summary .summary-cards { grid-row: 1; grid-column: 1 / -1; display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 1rem; width: 100%; align-items: stretch; margin: 0 auto; }
+.ie-summary .ie-pdf { grid-row: 2; grid-column: 1 / -1; display: flex; justify-content: center !important; margin-top: 0.25rem; }
+.ie-summary .ie-pdf .generate-pdf-btn { margin: 0 auto !important; }
 /* Income & Expenses Report Styles */
 .income-expenses-container {
   min-height: 100vh;
@@ -276,22 +280,35 @@
 /* Summary Cards */
 .summary-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 0 auto 1rem auto;
+  width: min(860px, 100%);
+  align-items: stretch;
 }
+
+/* Ensure cards occupy the row symmetrically and PDF button sits below */
+.income-expenses-container .summary-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.income-expenses-container .summary-cards { width: 100%; }
 
 .summary-card {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  padding: 2rem;
+  padding: 1.25rem 1.5rem;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   display: flex;
   align-items: center;
   gap: 1.5rem;
   transition: transform 0.3s ease;
+  width: 100%;
 }
 
 .summary-card:hover {
@@ -311,9 +328,9 @@
 }
 
 .card-icon {
-  font-size: 3rem;
-  width: 80px;
-  height: 80px;
+  font-size: 2.25rem;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -350,8 +367,9 @@
 
 /* PDF Section */
 .pdf-section {
-  text-align: center;
-  margin-top: 2rem;
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
 }
 
 .generate-pdf-btn {
@@ -551,9 +569,7 @@
     flex-direction: column;
   }
 
-  .summary-cards {
-    grid-template-columns: 1fr;
-  }
+  .summary-cards { grid-template-columns: 1fr; }
 
   .summary-card {
     flex-direction: column;

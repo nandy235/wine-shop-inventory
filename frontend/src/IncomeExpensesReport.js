@@ -730,7 +730,7 @@ function IncomeExpensesReport({ onNavigate }) {
           </div>
         </div>
 
-        <div className="summary-section">
+        <div className="summary-section ie-summary">
           <div className="summary-cards">
             <div className="summary-card income-card">
               <div className="card-icon">💰</div>
@@ -751,7 +751,7 @@ function IncomeExpensesReport({ onNavigate }) {
             </div>
           </div>
 
-          <div className="pdf-section">
+          <div className="pdf-section ie-pdf">
             <button 
               className="generate-pdf-btn"
               onClick={generatePDF}

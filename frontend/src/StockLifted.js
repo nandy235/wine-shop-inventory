@@ -86,6 +86,7 @@ function StockLifted({ onNavigate }) {
   const [brandMap, setBrandMap] = useState(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [periodTotals, setPeriodTotals] = useState([]); // [{ label, invTotal, mrpTotal }]
 
   const weeksInMonth = useMemo(() => {
     if (reportType === 'weekly') return getWeeksInMonth(selectedYear, selectedMonth);
@@ -203,6 +204,7 @@ function StockLifted({ onNavigate }) {
       ));
 
       const agg = new Map(); // key by master_brand_id
+      const dayTotals = new Map(); // dateStr -> { inv, mrp }
       for (const day of allReceived) {
         const recs = day.receivedStock || [];
         for (const rs of recs) {
@@ -235,6 +237,43 @@ function StockLifted({ onNavigate }) {
           const row = agg.get(mbId);
           row.liftedBottles += qty;
         }
+      }
+
+      // Compute period totals (day-wise or month-wise) using allReceived and dates
+      const invMrpByDate = new Map();
+      for (let i = 0; i < dates.length; i++) {
+        const d = dates[i];
+        const day = allReceived[i] || {};
+        const recs = day.receivedStock || [];
+        let invSum = 0;
+        let mrpSum = 0;
+        for (const rs of recs) {
+          const mb = brandMap.get(rs.master_brand_id);
+          const priceInv = (mb?.invoicePrice || 0);
+          const priceMrp = (mb?.mrp || rs.mrp_price || 0);
+          const qty = rs.invoice_quantity || 0;
+          invSum += qty * priceInv;
+          mrpSum += qty * priceMrp;
+        }
+        invMrpByDate.set(d, { inv: invSum, mrp: mrpSum });
+      }
+
+      if (reportType === 'yearly') {
+        const monthMap = new Map(); // 'YYYY-M' -> { label, inv, mrp }
+        for (const d of dates) {
+          const dt = new Date(d);
+          const key = `${dt.getFullYear()}-${dt.getMonth()+1}`;
+          if (!monthMap.has(key)) monthMap.set(key, { label: dt.toLocaleDateString('en-US', { month: 'long' }), inv: 0, mrp: 0 });
+          const acc = monthMap.get(key);
+          const dayv = invMrpByDate.get(d) || { inv: 0, mrp: 0 };
+          acc.inv += dayv.inv || 0;
+          acc.mrp += dayv.mrp || 0;
+          monthMap.set(key, acc);
+        }
+        setPeriodTotals(Array.from(monthMap.values()));
+      } else {
+        const totals = dates.map(d => ({ label: new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }), invTotal: (invMrpByDate.get(d)||{}).inv || 0, mrpTotal: (invMrpByDate.get(d)||{}).mrp || 0 }));
+        setPeriodTotals(totals);
       }
 
       const list = Array.from(agg.values());
@@ -508,6 +547,75 @@ function StockLifted({ onNavigate }) {
       `;
     }).join('');
 
+    // Brand-wise (one table per base brand; thead repeats across page breaks)
+    const byBase = new Map();
+    rows.forEach(r => { if (!byBase.has(r.baseName)) byBase.set(r.baseName, []); byBase.get(r.baseName).push(r); });
+    const brandWiseHtml = (() => {
+      const groups = Array.from(byBase.entries()).map(([base, list]) => {
+        const groupOrder = Math.min(...list.map(r => (typeof r.order === 'number' ? r.order : 9999)));
+        return [base, list, groupOrder];
+      }).sort((a,b)=>a[2]-b[2]);
+      const tables = groups.map(([base, list]) => {
+        const sorted = list.slice().sort((a,b)=>{
+          const ao = (typeof a.order === 'number' ? a.order : 9999);
+          const bo = (typeof b.order === 'number' ? b.order : 9999);
+          return ao - bo;
+        });
+        const rowsHtmlBrand = sorted.map((r, idx) => {
+          const { cases, loose, inv, mrp, pct } = calc(r);
+          return `
+            <tr>
+              <td class=\"center\">${idx + 1}</td>
+              <td class=\"center\">${r.sizeCode || ''}</td>
+              <td>${cases != null ? cases.toFixed(2) : '-'}</td>
+              <td>${loose}</td>
+              <td>${formatNum(inv)}</td>
+              <td>${formatNum(mrp)}</td>
+              <td>${pct.toFixed(2)}%</td>
+            </tr>
+          `;
+        }).join('');
+        const invSumBrand = Math.round(sorted.reduce((s,r)=> s + ((r.liftedBottles||0)*(r.invoicePrice||0)), 0)).toLocaleString('en-IN');
+        const mrpSumBrand = Math.round(sorted.reduce((s,r)=> s + ((r.liftedBottles||0)*(r.mrp||0)), 0)).toLocaleString('en-IN');
+        const pctSumBrand = totalMrp > 0 ? ((sorted.reduce((s,r)=> s + ((r.liftedBottles||0)*(r.mrp||0)), 0) * 100) / totalMrp).toFixed(2) : '0.00';
+        return `
+          <table>
+            <thead>
+              <tr><th colspan=\"7\">${base}</th></tr>
+              <tr>
+                <th>S.No</th>
+                <th>Size</th>
+                <th colspan=\"2\">Quantity</th>
+                <th colspan=\"2\">Stock lifted</th>
+                <th>% of Total (MRP)</th>
+              </tr>
+              <tr>
+                <th></th>
+                <th></th>
+                <th>Cases</th>
+                <th>Bottles</th>
+                <th>Invoice</th>
+                <th>MRP</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtmlBrand}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan=\"4\"><strong>Total</strong></td>
+                <td class=\"right total-red\">${invSumBrand}</td>
+                <td class=\"right total-red\">${mrpSumBrand}</td>
+                <td class=\"right total-red\">${pctSumBrand}%</td>
+              </tr>
+            </tfoot>
+          </table>
+        `;
+      }).join('');
+      return tables;
+    })();
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -573,6 +681,45 @@ function StockLifted({ onNavigate }) {
         </tr>
       </tbody>
     </table>
+  </div>
+
+  <div class="section">
+    <div class="title">${reportType === 'yearly' ? 'Stock Lifted - Month Wise' : 'Stock Lifted - Day Wise'}</div>
+    <table class="share-table">
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>${reportType === 'yearly' ? 'Month' : 'Date'}</th>
+          <th>Invoice</th>
+          <th>MRP</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(periodTotals || []).map((p, idx) => `
+          <tr>
+            <td class="center">${idx + 1}</td>
+            <td>${p.label}</td>
+            <td class="right">${Math.round(p.invTotal || p.inv || 0).toLocaleString('en-IN')}</td>
+            <td class="right">${Math.round(p.mrpTotal || p.mrp || 0).toLocaleString('en-IN')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2"><strong>Total</strong></td>
+          <td class="right total-red">${Math.round((periodTotals || []).reduce((s, p) => s + (p.invTotal || p.inv || 0), 0)).toLocaleString('en-IN')}</td>
+          <td class="right total-red">${Math.round((periodTotals || []).reduce((s, p) => s + (p.mrpTotal || p.mrp || 0), 0)).toLocaleString('en-IN')}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="page-break"></div>
+  <div class="header">
+    <div class="shop">${shopName}</div>
+    <div class="report">STOCK LIFTED REPORT</div>
+    ${monthStr ? `<div class=\"month\">${monthStr}</div>` : ''}
+    <div class="meta">${rangeStr}</div>
   </div>
 
   <div class="section share-section">
@@ -664,6 +811,19 @@ function StockLifted({ onNavigate }) {
   <div class="section">
     <div class="title">Stock lifted - All Brands</div>
     ${allKindsHtml}
+  </div>
+
+  <div class="page-break"></div>
+  <div class="header">
+    <div class="shop">${shopName}</div>
+    <div class="report">STOCK LIFTED REPORT</div>
+    ${monthStr ? `<div class=\"month\">${monthStr}</div>` : ''}
+    <div class="meta">${rangeStr}</div>
+  </div>
+
+  <div class="section">
+    <div class="title">Stock Lifted - Brand Wise</div>
+    ${brandWiseHtml}
   </div>
 
   
