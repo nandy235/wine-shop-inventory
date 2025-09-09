@@ -477,6 +477,7 @@ function IncomeExpenses({ onNavigate }) {
                             value={item.amount || ''}
                             onChange={(e) => handleIncomeChange(index, 'amount', e.target.value)}
                             onWheel={(e) => e.target.blur()}
+                            onFocus={(e) => e.target.select()}
                             min="0"
                             step="0.01"
                             placeholder="0.00"
@@ -531,6 +532,7 @@ function IncomeExpenses({ onNavigate }) {
                             value={item.amount || ''}
                             onChange={(e) => handleExpenseChange(index, 'amount', e.target.value)}
                             onWheel={(e) => e.target.blur()}
+                            onFocus={(e) => e.target.select()}
                             min="0"
                             step="0.01"
                             placeholder="0.00"

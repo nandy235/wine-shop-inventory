@@ -4,7 +4,7 @@ import API_BASE_URL from './config';
 
 // Constants
 const SEARCH_DEBOUNCE_DELAY = 150;
-const MIN_SEARCH_LENGTH = 2;
+const MIN_SEARCH_LENGTH = 1;
 const TAX_RATES = {
   TCS_RATE: 0.01,
   RETAIL_EXCISE_RATE: 0.10,
@@ -170,7 +170,8 @@ function IndentEstimate({ onNavigate, onBack }) {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
+      const url = `${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -180,13 +181,16 @@ function IndentEstimate({ onNavigate, onBack }) {
 
       if (response.ok) {
         const data = await response.json();
-        const results = data.brands || [];
+        // Support both shapes: { brands: [...] } or [...]
+        const results = Array.isArray(data) ? data : (data.brands || []);
         
         dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: results });
         dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: true });
         dispatch({ type: actionTypes.CACHE_SEARCH_RESULT, payload: { term: searchQuery, results } });
       } else {
-        throw new Error('Search failed');
+        const errorText = await response.text().catch(() => '');
+        console.error('IndentEstimate: search failed', { status: response.status, errorText });
+        throw new Error(`Search failed (${response.status})`);
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
@@ -540,7 +544,7 @@ function IndentEstimate({ onNavigate, onBack }) {
         {/* Product Search Section */}
         <div className="search-section" ref={searchContainerRef}>
           <div className="search-header">
-            <span className="search-icon">🔍</span>
+            <span className="indent-search-icon">🔍</span>
             <h3>Product Search</h3>
           </div>
           <div className="search-input-group">
@@ -672,7 +676,7 @@ function IndentEstimate({ onNavigate, onBack }) {
                           min="0"
                           max="9999"
                           step="1"
-                          value={item.cases}
+                          value={item.cases === 0 ? '' : item.cases}
                           onChange={(e) => updateQuantity(item.id, 'cases', e.target.value)}
                           onWheel={(e) => e.currentTarget.blur()}
                           onKeyDown={(e) => {
@@ -687,6 +691,8 @@ function IndentEstimate({ onNavigate, onBack }) {
                             }
                           }}
                           className="quantity-input"
+                          placeholder="0"
+                          onFocus={(e) => e.target.select()}
                           aria-label={`Cases for ${item.brandName}`}
                         />
                       </td>
@@ -696,7 +702,7 @@ function IndentEstimate({ onNavigate, onBack }) {
                           min="0"
                           max={item.packQuantity - 1}
                           step="1"
-                          value={item.bottles}
+                          value={item.bottles === 0 ? '' : item.bottles}
                           onChange={(e) => updateQuantity(item.id, 'bottles', e.target.value)}
                           onWheel={(e) => e.currentTarget.blur()}
                           onKeyDown={(e) => {
@@ -711,6 +717,8 @@ function IndentEstimate({ onNavigate, onBack }) {
                             }
                           }}
                           className="quantity-input"
+                          placeholder="0"
+                          onFocus={(e) => e.target.select()}
                           aria-label={`Bottles for ${item.brandName}`}
                         />
                       </td>

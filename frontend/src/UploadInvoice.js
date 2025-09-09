@@ -239,7 +239,7 @@ function UploadInvoice({ onNavigate }) {
         <nav className="navigation">
           <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
           <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
+          <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
           <button className="nav-btn">Settings</button>

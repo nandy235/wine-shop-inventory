@@ -15,6 +15,8 @@ import DownloadSaleSheet from './DownloadSaleSheet';
 import Reports from './Reports';
 import StockLifted from './StockLifted';
 import SalesReport from './SalesReport';
+import AddSupplier from './AddSupplier';
+import ShiftTransfer from './ShiftTransfer';
 import './App.css';
 import API_BASE_URL from './config';
 
@@ -137,6 +139,12 @@ function App() {
       )}
       {currentView === 'brandWiseSales' && (
         <SalesReport onNavigate={handleNavigate} />
+      )}
+      {currentView === 'addSupplier' && (
+        <AddSupplier onNavigate={handleNavigate} />
+      )}
+      {currentView === 'shiftTransfer' && (
+        <ShiftTransfer onNavigate={handleNavigate} />
       )}
     </div>
   );

@@ -14,44 +14,29 @@ const { pool } = require('./database');
 // Load master brands from database instead of JSON file
 let masterBrandsData = [];
 
-// Helper function to get business date (day starts at 11:30 AM)
+// Helper: reliable business date in IST (day rolls at 11:30 AM IST)
 function getBusinessDate() {
   const now = new Date();
-  
-  // Check if server is already in IST timezone
-  const serverTimezoneOffset = now.getTimezoneOffset();
-  const istTimezoneOffset = -330; // IST is UTC+5:30, so offset is -330 minutes
-  
-  let istTime;
-  if (serverTimezoneOffset === istTimezoneOffset) {
-    // Server is already in IST (local server), use current time
-    istTime = now;
-    console.log('Server already in IST timezone');
-  } else {
-    // Server is in UTC (Railway), convert to IST
-    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-    istTime = new Date(now.getTime() + istOffset);
-    console.log('Converting from UTC to IST');
+  // Current date and time in IST, independent of server timezone
+  const istDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+  const istTimeStr = now.toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const [hoursStr, minutesStr] = istTimeStr.split(':');
+  const hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+
+  if (hours < 11 || (hours === 11 && minutes < 30)) {
+    // Before 11:30 AM IST → business date is yesterday (IST)
+    const midnightIst = new Date(`${istDateStr}T00:00:00+05:30`);
+    midnightIst.setDate(midnightIst.getDate() - 1);
+    return midnightIst.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   }
-  
-  console.log('Server time:', now.toString());
-  console.log('IST time:', istTime.toString());
-  console.log('IST hours:', istTime.getHours(), 'minutes:', istTime.getMinutes());
-  console.log('Timezone offset (minutes):', serverTimezoneOffset);
-  
-  if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
-    // Before 11:30 AM IST - use previous day
-    const yesterday = new Date(istTime);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const businessDate = yesterday.toLocaleDateString('en-CA');
-    console.log('Business date (before 11:30 AM):', businessDate);
-    return businessDate;
-  } else {
-    // After 11:30 AM IST - use current day
-    const businessDate = istTime.toLocaleDateString('en-CA');
-    console.log('Business date (after 11:30 AM):', businessDate);
-    return businessDate;
-  }
+
+  return istDateStr;
 }
 
 async function loadMasterBrandsFromDB(packTypeFilter = null, applyStockOnboardingLogic = false) {
@@ -313,6 +298,245 @@ const cleanupExpiredInvoices = () => {
 
 // Run cleanup every 10 minutes
 setInterval(cleanupExpiredInvoices, 10 * 60 * 1000);
+
+// ===== STOCK SHIFT ENDPOINT =====
+
+// Handle stock shift in/out operations
+app.post('/api/stock-shift', authenticateToken, async (req, res) => {
+  try {
+    console.log('\n🔄 Stock shift operation started...');
+    
+    const { masterBrandId, quantity, supplierName, isFromTGBCL, supplierCode, supplierShopId, sourceShopId, shiftType, recordDate } = req.body;
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
+    
+    console.log(`👤 User: ${userId}, Shop: ${shopId}`);
+    console.log(`📦 Product: ${masterBrandId}, Quantity: ${quantity}, Type: ${shiftType}`);
+    console.log(`🏪 Supplier: ${supplierName}, TGBCL: ${isFromTGBCL}`);
+    
+    if (!masterBrandId || !quantity || quantity === 0) {
+      return res.status(400).json({ message: 'Product and quantity are required' });
+    }
+
+    // Enforce supplier selection (front-end also disables Confirm until supplier chosen)
+    if (!isFromTGBCL && (!supplierName || supplierName === 'Unknown')) {
+      return res.status(400).json({ message: 'Supplier is required for stock shift' });
+    }
+    
+    const targetDate = getBusinessDate();
+    
+    // Ensure shop_inventory row exists for this shop + brand (required for daily_stock_records linkage)
+    try {
+      const existingInv = await dbService.findShopProduct(shopId, masterBrandId);
+      if (!existingInv) {
+        // Use MRP as default final price if available
+        let defaultFinalPrice = 0;
+        try {
+          const mrpRes = await pool.query('SELECT standard_mrp FROM master_brands WHERE id = $1', [masterBrandId]);
+          defaultFinalPrice = parseFloat(mrpRes.rows[0]?.standard_mrp || 0) || 0;
+        } catch (_) {}
+
+        await dbService.addShopProduct({
+          masterBrandId,
+          shopId,
+          markupPrice: 0,
+          finalPrice: defaultFinalPrice,
+          currentQuantity: 0
+        });
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not ensure shop_inventory for shift item:', e.message);
+    }
+
+    // Get or create received stock record for this product+date+supplier linkage
+    let receivedStockRecord = await dbService.getReceivedStockRecord(
+      shopId,
+      masterBrandId,
+      targetDate,
+      supplierCode || (isFromTGBCL ? 'TGBCL' : null),
+      sourceShopId || null,
+      supplierShopId || null
+    );
+    
+    if (!receivedStockRecord) {
+      // Insert with actual intended quantity to satisfy CHECK constraint
+      const isTgbclInvoiceIn = isFromTGBCL && shiftType === 'in';
+      const initialInvoiceQty = isTgbclInvoiceIn ? Math.abs(parseInt(quantity)) : 0;
+      const initialTransferQty = isTgbclInvoiceIn ? 0 : parseInt(quantity);
+
+      receivedStockRecord = await dbService.createReceivedStockRecord({
+        shopId,
+        masterBrandId,
+        recordDate: targetDate,
+        invoiceQuantity: initialInvoiceQty,
+        manualQuantity: 0,
+        shiftTransferQuantity: initialTransferQty,
+        createdBy: userId,
+        supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null),
+        supplierShopId: supplierShopId || null,
+        sourceShopId: sourceShopId || null
+      });
+    }
+    
+    // Calculate new quantities according to business rule:
+    // If TGBCL & shift in → update invoice_quantity only (do NOT touch transfer)
+    // Otherwise → update transfer_quantity (positive for IN, negative for OUT)
+    const currentShiftQuantity = receivedStockRecord.shift_transfer_quantity || 0;
+    const currentInvoiceQuantity = receivedStockRecord.invoice_quantity || 0;
+
+    const isTgbclInvoiceIn = isFromTGBCL && shiftType === 'in';
+
+    const updates = {};
+    if (isTgbclInvoiceIn) {
+      updates.invoiceQuantity = currentInvoiceQuantity + Math.abs(parseInt(quantity));
+      // leave transfer as-is
+    } else {
+      updates.shiftTransferQuantity = currentShiftQuantity + parseInt(quantity);
+      // invoice unchanged
+    }
+
+    await dbService.updateReceivedStockQuantities(receivedStockRecord.id, updates);
+
+    // Update current inventory quantity in shop_inventory (cannot go below zero)
+    try {
+      await dbService.updateShopProductQuantity(shopId, masterBrandId, parseInt(quantity));
+    } catch (e) {
+      console.warn('⚠️ Could not update shop_inventory current_quantity:', e.message);
+    }
+    
+    // If internal transfer: create mirror transfer IN at destination shop
+    try {
+      const destShopId = sourceShopId ? parseInt(sourceShopId) : null; // front-end sends user_shop_<id> as sourceShopId
+      const isInternal = shiftType === 'out' && !!destShopId;
+
+      if (isInternal) {
+        const absQty = Math.abs(parseInt(quantity));
+
+        // Validate available stock on backend as well
+        try {
+          const availRes = await pool.query('SELECT current_quantity FROM shop_inventory WHERE shop_id = $1 AND master_brand_id = $2', [shopId, masterBrandId]);
+          const available = parseInt(availRes.rows[0]?.current_quantity || 0);
+          if (available < absQty) {
+            return res.status(400).json({ message: `Insufficient stock. Available ${available}, requested ${absQty}` });
+          }
+        } catch (_) {}
+
+        // Ensure destination inventory exists
+        try {
+          const existingInvDest = await dbService.findShopProduct(destShopId, masterBrandId);
+          if (!existingInvDest) {
+            let defaultFinalPrice = 0;
+            try {
+              const mrpRes2 = await pool.query('SELECT standard_mrp FROM master_brands WHERE id = $1', [masterBrandId]);
+              defaultFinalPrice = parseFloat(mrpRes2.rows[0]?.standard_mrp || 0) || 0;
+            } catch (_) {}
+            await dbService.addShopProduct({
+              masterBrandId,
+              shopId: destShopId,
+              markupPrice: 0,
+              finalPrice: defaultFinalPrice,
+              currentQuantity: 0
+            });
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not ensure destination shop_inventory for shift item:', e.message);
+        }
+
+        // Create or update destination received_stock_records (transfer IN)
+        let destRecord = await dbService.getReceivedStockRecord(
+          destShopId,
+          masterBrandId,
+          targetDate,
+          null,                 // supplier_code
+          shopId,               // source_shop_id = current shop (sender)
+          null                  // supplier_shop_id
+        );
+
+        if (!destRecord) {
+          destRecord = await dbService.createReceivedStockRecord({
+            shopId: destShopId,
+            masterBrandId,
+            recordDate: targetDate,
+            invoiceQuantity: 0,
+            manualQuantity: 0,
+            shiftTransferQuantity: absQty, // incoming
+            createdBy: userId,
+            supplierCode: null,
+            supplierShopId: null,
+            sourceShopId: shopId
+          });
+        } else {
+          const destCurrent = destRecord.shift_transfer_quantity || 0;
+          await dbService.updateReceivedStockQuantities(destRecord.id, { shiftTransferQuantity: destCurrent + absQty });
+        }
+
+        // Update destination inventory
+        try {
+          await dbService.updateShopProductQuantity(destShopId, masterBrandId, absQty);
+        } catch (e) {
+          console.warn('⚠️ Could not update destination shop_inventory current_quantity:', e.message);
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Internal mirror transfer failed:', e.message);
+    }
+
+    // Log the shift operation
+    await dbService.logStockShift({
+      shopId,
+      masterBrandId,
+      quantity: parseInt(quantity),
+      shiftType,
+      supplierName,
+      supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null),
+      supplierShopId: supplierShopId || null,
+      sourceShopId: sourceShopId || null,
+      isFromTGBCL,
+      recordDate: targetDate,
+      createdBy: userId
+    });
+    
+    console.log(`✅ Stock shift completed: ${quantity > 0 ? '+' : ''}${quantity} units`);
+
+    // Update today's daily_stock_records price_per_unit using final_price if available
+    try {
+      const inv = await pool.query(
+        `SELECT id, final_price FROM shop_inventory WHERE shop_id = $1 AND master_brand_id = $2`,
+        [shopId, masterBrandId]
+      );
+      if (inv.rows.length > 0) {
+        const shopInventoryId = inv.rows[0].id;
+        const unitPrice = parseFloat(inv.rows[0].final_price || 0) || 0;
+        await pool.query(
+          `INSERT INTO daily_stock_records (shop_inventory_id, stock_date, opening_stock, received_stock, closing_stock, price_per_unit)
+           VALUES ($1, $2, 0, 0, NULL, $3)
+           ON CONFLICT (shop_inventory_id, stock_date)
+           DO UPDATE SET price_per_unit = COALESCE(EXCLUDED.price_per_unit, daily_stock_records.price_per_unit)`,
+          [shopInventoryId, targetDate, unitPrice]
+        );
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not update price_per_unit for DSR:', e.message);
+    }
+    
+    res.json({
+      message: 'Stock shift completed successfully',
+      shiftType,
+      quantity: parseInt(quantity),
+      supplierName,
+      supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null),
+      newShiftQuantity: updates.shiftTransferQuantity,
+      newInvoiceQuantity: updates.invoiceQuantity
+    });
+    
+  } catch (error) {
+    console.error('❌ Stock shift error:', error);
+    res.status(500).json({ 
+      message: 'Server error during stock shift', 
+      error: error.message 
+    });
+  }
+});
 
 // ===== CLOSING STOCK UPDATE ENDPOINT =====
 
@@ -1008,12 +1232,13 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
 app.get('/api/search-brands', authenticateToken, async (req, res) => {
   try {
     const { q } = req.query;
+    const query = (q || '').trim();
     
-    if (!q || q.trim().length < 2) {
+    if (!query || query.length < 1) {
       return res.json({ brands: [] });
     }
     
-    const searchTerm = q.trim();
+    const searchTerm = query;
     const databaseService = require('./databaseService');
     
     // Use DatabaseService method for searching
@@ -2025,27 +2250,246 @@ app.get('/api/debug/time', (req, res) => {
   });
 });
 
-// Search master brands endpoint
-app.get('/api/search-brands', authenticateToken, async (req, res) => {
+// (duplicate /api/search-brands route removed; the canonical one above returns { brands: [...] })
+
+// ===============================================
+// USER SHOPS ENDPOINT (for multi-shop suppliers)
+// ===============================================
+
+// Get all shops belonging to the current user
+app.get('/api/user-shops', authenticateToken, async (req, res) => {
   try {
-    const { q: searchTerm } = req.query;
+    const userId = parseInt(req.user.userId);
     
-    if (!searchTerm || searchTerm.trim().length < 2) {
-      return res.json([]);
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID not found in token' });
     }
     
-    console.log(`🔍 Searching brands for: "${searchTerm}"`);
-    const results = await databaseService.searchMasterBrands(searchTerm.trim(), 20);
-    console.log(`📊 Found ${results.length} results`);
+    console.log(`📋 Getting all shops for user ${userId}`);
     
-    if (results.length > 0) {
-      console.log(`🍷 First result: ${results[0].brand_number} - ${results[0].brand_name}`);
-    }
+    const result = await pool.query(`
+      SELECT 
+        id,
+        shop_name,
+        retailer_code,
+        address,
+        license_number,
+        created_at
+      FROM shops 
+      WHERE user_id = $1 
+      ORDER BY shop_name ASC
+    `, [userId]);
     
-    res.json(results);
+    console.log(`📊 Found ${result.rows.length} shops for user ${userId}:`, result.rows.map(shop => ({
+      id: shop.id,
+      shop_name: shop.shop_name,
+      retailer_code: shop.retailer_code
+    })));
+    
+    res.json({
+      shops: result.rows,
+      totalCount: result.rows.length
+    });
+    
   } catch (error) {
-    console.error('❌ Search brands error:', error);
-    res.status(500).json({ message: 'Search failed', error: error.message });
+    console.error('Error getting user shops:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Debug endpoint to check user shops data
+app.get('/api/debug/user-shops', authenticateToken, async (req, res) => {
+  try {
+    const userId = parseInt(req.user.userId);
+    const shopId = parseInt(req.user.shopId);
+    
+    console.log(`🔍 Debug - User ID: ${userId}, Current Shop ID: ${shopId}`);
+    
+    const result = await pool.query(`
+      SELECT 
+        id,
+        user_id,
+        shop_name,
+        retailer_code,
+        address,
+        license_number,
+        created_at
+      FROM shops 
+      WHERE user_id = $1 
+      ORDER BY shop_name ASC
+    `, [userId]);
+    
+    res.json({
+      userId: userId,
+      currentShopId: shopId,
+      allUserShops: result.rows,
+      otherShops: result.rows.filter(shop => shop.id !== shopId)
+    });
+    
+  } catch (error) {
+    console.error('Error in debug endpoint:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// ===============================================
+// SUPPLIER SHOPS MANAGEMENT ENDPOINTS
+// ===============================================
+
+// Get all supplier shops for a shop
+app.get('/api/supplier-shops', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    console.log(`📋 Getting supplier shops for shop ${shopId}`);
+    
+    const result = await pool.query(`
+      SELECT 
+        id,
+        shop_name,
+        retailer_code,
+        contact,
+        created_at
+      FROM supplier_shops 
+      WHERE shop_id = $1 
+      ORDER BY shop_name ASC
+    `, [shopId]);
+    
+    res.json({
+      shops: result.rows,
+      totalCount: result.rows.length
+    });
+    
+  } catch (error) {
+    console.error('Error getting supplier shops:', error);
+    // Return empty array if table doesn't exist yet
+    res.json({
+      shops: [],
+      totalCount: 0
+    });
+  }
+});
+
+// Add new supplier shop
+app.post('/api/supplier-shops', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const { shopName, retailerCode, contact } = req.body;
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    if (!shopName || !retailerCode || !contact) {
+      return res.status(400).json({ 
+        message: 'Shop name, retailer code, and contact are required' 
+      });
+    }
+    
+    if (retailerCode.length !== 7 || !/^\d{7}$/.test(retailerCode)) {
+      return res.status(400).json({ 
+        message: 'Retailer code must be exactly 7 digits' 
+      });
+    }
+    
+    if (contact.length !== 10 || !/^\d{10}$/.test(contact)) {
+      return res.status(400).json({ 
+        message: 'Contact must be exactly 10 digits' 
+      });
+    }
+    
+    console.log(`➕ Adding supplier shop for shop ${shopId}: ${shopName}`);
+    
+    // Create supplier_shops table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS supplier_shops (
+        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        shop_id BIGINT NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
+        shop_name VARCHAR(255) NOT NULL,
+        retailer_code VARCHAR(7) NOT NULL CHECK (retailer_code ~ '^\\d{7}$'),
+        contact VARCHAR(10) NOT NULL CHECK (contact ~ '^\\d{10}$'),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(shop_id, shop_name),
+        UNIQUE(shop_id, retailer_code)
+      )
+    `);
+    
+    // Check if supplier shop name already exists for this shop
+    const existingShop = await pool.query(
+      'SELECT id FROM supplier_shops WHERE shop_id = $1 AND (shop_name = $2 OR retailer_code = $3)',
+      [shopId, shopName.trim(), retailerCode]
+    );
+    
+    if (existingShop.rows.length > 0) {
+      return res.status(400).json({ 
+        message: 'A supplier shop with this name or retailer code already exists' 
+      });
+    }
+    
+    const result = await pool.query(`
+      INSERT INTO supplier_shops (shop_id, shop_name, retailer_code, contact)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [shopId, shopName.trim(), retailerCode, contact]);
+    
+    console.log(`✅ Supplier shop added successfully: ${result.rows[0].shop_name}`);
+    
+    res.status(201).json({
+      message: 'Supplier shop added successfully',
+      shop: result.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Error adding supplier shop:', error);
+    
+    if (error.code === '23505') { // Unique constraint violation
+      return res.status(400).json({ 
+        message: 'A supplier shop with this name or retailer code already exists' 
+      });
+    }
+    
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Delete supplier shop
+app.delete('/api/supplier-shops/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const shopId = parseInt(req.user.shopId);
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    console.log(`🗑️ Deleting supplier shop ${id} for shop ${shopId}`);
+    
+    const result = await pool.query(`
+      DELETE FROM supplier_shops 
+      WHERE id = $1 AND shop_id = $2
+      RETURNING shop_name
+    `, [id, shopId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        message: 'Supplier shop not found or not authorized' 
+      });
+    }
+    
+    console.log(`✅ Supplier shop deleted successfully: ${result.rows[0].shop_name}`);
+    
+    res.json({
+      message: 'Supplier shop deleted successfully',
+      deletedShop: result.rows[0]
+    });
+    
+  } catch (error) {
+    console.error('Error deleting supplier shop:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

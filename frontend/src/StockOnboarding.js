@@ -227,6 +227,7 @@ function StockOnboarding({ onNavigate }) {
                       onWheel={(e) => e.target.blur()}
                       min="0"
                       className="field-input"
+                      placeholder="0"
                     />
                   </div>
                   
@@ -240,6 +241,7 @@ function StockOnboarding({ onNavigate }) {
                       onWheel={(e) => e.target.blur()}
                       min="0"
                       className="field-input"
+                      placeholder="0"
                     />
                   </div>
                   
@@ -258,6 +260,7 @@ function StockOnboarding({ onNavigate }) {
                       min="0"
                       step="0.01"
                       className="field-input"
+                      placeholder="0.00"
                     />
                   </div>
                 </div>

@@ -48,9 +48,10 @@
 }
 
 .manage-stock-container .nav-btn.active {
-  color: #7C3AED;
+  color: white;
   font-weight: bold;
-  background-color: #F3F4F6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
 }
 
 .manage-stock-container .nav-btn:hover {

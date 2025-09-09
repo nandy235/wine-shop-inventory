@@ -362,10 +362,11 @@ Object.keys(groupedInventory).forEach(baseName => {
             {editingRow === item.id ? (
               <input
                 type="number"
-                value={editValues.receivedStock}
+                value={editValues.receivedStock === 0 ? '' : editValues.receivedStock}
                 onChange={(e) => setEditValues({...editValues, receivedStock: parseInt(e.target.value) || 0})}
                 className="edit-input"
                 min="0"
+                placeholder="0"
               />
             ) : (
               item.receivedStock || 0
@@ -381,11 +382,12 @@ Object.keys(groupedInventory).forEach(baseName => {
             {editingRow === item.id ? (
               <input
                 type="number"
-                value={editValues.finalPrice}
+                value={editValues.finalPrice === 0 ? '' : editValues.finalPrice}
                 onChange={(e) => setEditValues({...editValues, finalPrice: parseFloat(e.target.value) || 0})}
                 className="edit-input"
                 step="0.01"
                 min="0"
+                placeholder="0.00"
               />
             ) : (
               `₹${item.finalPrice || 0}`

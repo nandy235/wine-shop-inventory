@@ -19,6 +19,9 @@ CREATE TABLE received_stock_records (
     record_date DATE NOT NULL DEFAULT CURRENT_DATE,
     -- Supplier code identifying source: 'TGBCL' or 7-digit retailer code
     supplier_code VARCHAR(10),
+    -- Linkage to internal or external supplier records
+    source_shop_id BIGINT REFERENCES shops(id) ON DELETE SET NULL, -- internal supplier (same user)
+    supplier_shop_id BIGINT REFERENCES supplier_shops(id) ON DELETE SET NULL, -- external supplier
     
     -- Stock source tracking (quantities in bottles)
     invoice_quantity INTEGER DEFAULT 0,           -- From confirmed invoices

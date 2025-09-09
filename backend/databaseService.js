@@ -294,6 +294,7 @@ class DatabaseService {
         mb.brand_kind,
         mb.product_type,
         mb.pack_type as "packType",
+        mb.pack_quantity as pack_quantity,
         CASE 
           WHEN mb.product_type = 'IML' THEN 'IML'
           WHEN mb.product_type = 'DUTY_PAID' THEN 'Duty Paid'
@@ -1468,21 +1469,22 @@ class DatabaseService {
     const {
       shopId, masterBrandId, recordDate, invoiceQuantity = 0, 
       manualQuantity = 0, transferQuantity = 0, invoiceId = null,
-      transferReference = null, notes = null, createdBy = null, supplierCode = null
+      transferReference = null, notes = null, createdBy = null, supplierCode = null,
+      supplierShopId = null, sourceShopId = null
     } = stockData;
     
     const query = `
       INSERT INTO received_stock_records (
-        shop_id, master_brand_id, record_date, supplier_code, invoice_quantity, 
-        manual_quantity, transfer_quantity, invoice_id, 
+        shop_id, master_brand_id, record_date, supplier_code, source_shop_id, supplier_shop_id,
+        invoice_quantity, manual_quantity, transfer_quantity, invoice_id, 
         transfer_reference, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *
     `;
     
     const values = [
-      shopId, masterBrandId, recordDate, supplierCode, invoiceQuantity,
-      manualQuantity, transferQuantity, invoiceId,
+      shopId, masterBrandId, recordDate, supplierCode, sourceShopId, supplierShopId,
+      invoiceQuantity, manualQuantity, transferQuantity, invoiceId,
       transferReference, notes, createdBy
     ];
     
@@ -1920,14 +1922,20 @@ class DatabaseService {
   }
 
   // Stock Shift Methods
-  async getReceivedStockRecord(shopId, masterBrandId, recordDate) {
+  async getReceivedStockRecord(shopId, masterBrandId, recordDate, supplierCode = null, sourceShopId = null, supplierShopId = null) {
     const query = `
-      SELECT * FROM received_stock 
-      WHERE shop_id = $1 AND master_brand_id = $2 AND record_date = $3
+      SELECT * FROM received_stock_records
+      WHERE shop_id = $1
+        AND master_brand_id = $2
+        AND record_date = $3
+        AND supplier_code IS NOT DISTINCT FROM $4
+        AND source_shop_id IS NOT DISTINCT FROM $5
+        AND supplier_shop_id IS NOT DISTINCT FROM $6
+      LIMIT 1
     `;
     
     try {
-      const result = await pool.query(query, [shopId, masterBrandId, recordDate]);
+      const result = await pool.query(query, [shopId, masterBrandId, recordDate, supplierCode, sourceShopId, supplierShopId]);
       return result.rows[0] || null;
     } catch (error) {
       throw new Error(`Error getting received stock record: ${error.message}`);
@@ -1935,22 +1943,23 @@ class DatabaseService {
   }
 
   async createReceivedStockRecord(data) {
-    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy } = data;
+    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy, supplierCode = null, supplierShopId = null, sourceShopId = null } = data;
     
     const query = `
-      INSERT INTO received_stock (
-        shop_id, master_brand_id, record_date, 
-        invoice_quantity, manual_quantity, shift_transfer_quantity, 
-        created_by, created_at
-      ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+      INSERT INTO received_stock_records (
+        shop_id, master_brand_id, record_date,
+        supplier_code, source_shop_id, supplier_shop_id,
+        invoice_quantity, manual_quantity, transfer_quantity,
+        created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `;
     
     try {
       const result = await pool.query(query, [
-        shopId, masterBrandId, recordDate, 
-        invoiceQuantity, manualQuantity, shiftTransferQuantity, 
+        shopId, masterBrandId, recordDate,
+        supplierCode, sourceShopId, supplierShopId,
+        invoiceQuantity, manualQuantity, shiftTransferQuantity,
         createdBy
       ]);
       return result.rows[0];
@@ -1962,13 +1971,13 @@ class DatabaseService {
   async updateReceivedStockQuantities(recordId, quantities) {
     const { shiftTransferQuantity, invoiceQuantity } = quantities;
     
-    let query = 'UPDATE received_stock SET ';
+    let query = 'UPDATE received_stock_records SET ';
     const values = [];
     const updates = [];
     let paramCount = 1;
 
     if (shiftTransferQuantity !== undefined) {
-      updates.push(`shift_transfer_quantity = $${paramCount}`);
+      updates.push(`transfer_quantity = $${paramCount}`);
       values.push(shiftTransferQuantity);
       paramCount++;
     }

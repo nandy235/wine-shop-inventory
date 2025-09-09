@@ -329,7 +329,7 @@ function UpdateClosingStock({ onNavigate }) {
                    <td>
                      <input
                        type="number"
-                       className={`update-closing-stock-input ${!item.isClosingStockSet ? 'not-set' : ''}`}
+                       className={`update-closing-stock-input zero-ph ${!item.isClosingStockSet ? 'not-set' : ''}`}
                        value={item.closingStock === 0 ? '' : item.closingStock}
                        onChange={(e) => handleClosingStockChange(item.id, e.target.value)}
                        onWheel={(e) => e.target.blur()}

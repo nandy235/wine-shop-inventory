@@ -336,6 +336,7 @@ function TrackPayments({ onNavigate }) {
                       onChange={handleInputChange}
                       onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
+                      onFocus={(e) => e.target.select()}
                     />
                   </td>
                 </tr>
@@ -350,6 +351,7 @@ function TrackPayments({ onNavigate }) {
                       onChange={handleInputChange}
                       onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
+                      onFocus={(e) => e.target.select()}
                     />
                   </td>
                 </tr>
@@ -364,6 +366,7 @@ function TrackPayments({ onNavigate }) {
                       onChange={handleInputChange}
                       onWheel={(e) => e.target.blur()}
                       placeholder="0.0"
+                      onFocus={(e) => e.target.select()}
                     />
                   </td>
                 </tr>
