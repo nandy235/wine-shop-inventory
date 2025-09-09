@@ -17,6 +17,8 @@ CREATE TABLE received_stock_records (
     shop_id BIGINT NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
     master_brand_id BIGINT NOT NULL REFERENCES master_brands(id) ON DELETE RESTRICT,
     record_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    -- Supplier code identifying source: 'TGBCL' or 7-digit retailer code
+    supplier_code VARCHAR(10),
     
     -- Stock source tracking (quantities in bottles)
     invoice_quantity INTEGER DEFAULT 0,           -- From confirmed invoices
@@ -45,6 +47,9 @@ CREATE TABLE received_stock_records (
         -- At least one quantity type must be non-zero
         (invoice_quantity != 0 OR manual_quantity != 0 OR transfer_quantity != 0)
     ),
+    CONSTRAINT chk_supplier_code_valid CHECK (
+        supplier_code IS NULL OR supplier_code ~ '^(TGBCL|\\d{7})$'
+    ),
     
     -- Unique constraint to prevent duplicate entries for same shop/brand/date/source
     UNIQUE(shop_id, master_brand_id, record_date, invoice_id) DEFERRABLE INITIALLY DEFERRED
@@ -62,6 +67,7 @@ CREATE INDEX idx_received_stock_brand ON received_stock_records(master_brand_id)
 CREATE INDEX idx_received_stock_invoice ON received_stock_records(invoice_id) WHERE invoice_id IS NOT NULL;
 CREATE INDEX idx_received_stock_transfers ON received_stock_records(shop_id, record_date) WHERE transfer_quantity != 0;
 CREATE INDEX idx_received_stock_created_by ON received_stock_records(created_by, created_at);
+CREATE INDEX idx_received_stock_supplier_code ON received_stock_records(supplier_code);
 
 
 
@@ -241,6 +247,7 @@ ORDER BY rs.record_date DESC, rs.created_at DESC;
 -- ===============================================
 
 COMMENT ON TABLE received_stock_records IS 'Granular tracking of all stock received from different sources including transfers';
+COMMENT ON COLUMN received_stock_records.supplier_code IS 'Supplier identifier: TGBCL or 7-digit retailer code for peer shop';
 
 COMMENT ON COLUMN received_stock_records.invoice_quantity IS 'Stock received from confirmed invoices (bottles)';
 COMMENT ON COLUMN received_stock_records.manual_quantity IS 'Manually added stock during onboarding (bottles)';

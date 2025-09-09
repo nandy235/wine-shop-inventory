@@ -791,29 +791,32 @@ class DatabaseService {
                 SET invoice_quantity = invoice_quantity + $1,
                     mrp_price = COALESCE($2, mrp_price),
                     notes = COALESCE($3, notes),
+                    supplier_code = COALESCE($4, supplier_code),
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $4
+                WHERE id = $5
               `;
               
               await client.query(receivedStockQuery, [
                 item.totalQuantity,
                 item.mrp || null,
                 `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
+                'TGBCL',
                 existingRecord.rows[0].id
               ]);
             } else {
               // Insert new record
               const receivedStockQuery = `
                 INSERT INTO received_stock_records 
-                (shop_id, master_brand_id, record_date, invoice_quantity, 
+                (shop_id, master_brand_id, record_date, supplier_code, invoice_quantity, 
                  mrp_price, invoice_id, notes, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
               `;
               
               await client.query(receivedStockQuery, [
                 shopId,
                 item.masterBrandId,
                 recordDate,
+                'TGBCL',
                 item.totalQuantity,
                 item.mrp || 0,
                 invoiceId,
@@ -1465,20 +1468,20 @@ class DatabaseService {
     const {
       shopId, masterBrandId, recordDate, invoiceQuantity = 0, 
       manualQuantity = 0, transferQuantity = 0, invoiceId = null,
-      transferReference = null, notes = null, createdBy = null
+      transferReference = null, notes = null, createdBy = null, supplierCode = null
     } = stockData;
     
     const query = `
       INSERT INTO received_stock_records (
-        shop_id, master_brand_id, record_date, invoice_quantity, 
+        shop_id, master_brand_id, record_date, supplier_code, invoice_quantity, 
         manual_quantity, transfer_quantity, invoice_id, 
         transfer_reference, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
     
     const values = [
-      shopId, masterBrandId, recordDate, invoiceQuantity,
+      shopId, masterBrandId, recordDate, supplierCode, invoiceQuantity,
       manualQuantity, transferQuantity, invoiceId,
       transferReference, notes, createdBy
     ];
@@ -1536,7 +1539,7 @@ class DatabaseService {
   async updateReceivedStock(id, updates) {
     const {
       invoiceQuantity, manualQuantity, transferQuantity,
-      transferReference, notes
+      transferReference, notes, supplierCode
     } = updates;
     
     const query = `
@@ -1547,12 +1550,13 @@ class DatabaseService {
         transfer_quantity = COALESCE($4, transfer_quantity),
         transfer_reference = COALESCE($5, transfer_reference),
         notes = COALESCE($6, notes),
+        supplier_code = COALESCE($7, supplier_code),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `;
     
-    const values = [id, invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes];
+    const values = [id, invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes, supplierCode];
     
     try {
       const result = await pool.query(query, values);
@@ -1912,6 +1916,114 @@ class DatabaseService {
       return result.rows;
     } catch (error) {
       throw new Error(`Error searching master brands: ${error.message}`);
+    }
+  }
+
+  // Stock Shift Methods
+  async getReceivedStockRecord(shopId, masterBrandId, recordDate) {
+    const query = `
+      SELECT * FROM received_stock 
+      WHERE shop_id = $1 AND master_brand_id = $2 AND record_date = $3
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, masterBrandId, recordDate]);
+      return result.rows[0] || null;
+    } catch (error) {
+      throw new Error(`Error getting received stock record: ${error.message}`);
+    }
+  }
+
+  async createReceivedStockRecord(data) {
+    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy } = data;
+    
+    const query = `
+      INSERT INTO received_stock (
+        shop_id, master_brand_id, record_date, 
+        invoice_quantity, manual_quantity, shift_transfer_quantity, 
+        created_by, created_at
+      ) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+      RETURNING *
+    `;
+    
+    try {
+      const result = await pool.query(query, [
+        shopId, masterBrandId, recordDate, 
+        invoiceQuantity, manualQuantity, shiftTransferQuantity, 
+        createdBy
+      ]);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error creating received stock record: ${error.message}`);
+    }
+  }
+
+  async updateReceivedStockQuantities(recordId, quantities) {
+    const { shiftTransferQuantity, invoiceQuantity } = quantities;
+    
+    let query = 'UPDATE received_stock SET ';
+    const values = [];
+    const updates = [];
+    let paramCount = 1;
+
+    if (shiftTransferQuantity !== undefined) {
+      updates.push(`shift_transfer_quantity = $${paramCount}`);
+      values.push(shiftTransferQuantity);
+      paramCount++;
+    }
+
+    if (invoiceQuantity !== undefined) {
+      updates.push(`invoice_quantity = $${paramCount}`);
+      values.push(invoiceQuantity);
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      throw new Error('No quantities to update');
+    }
+
+    query += updates.join(', ');
+    query += `, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramCount} RETURNING *`;
+    values.push(recordId);
+    
+    try {
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Error updating received stock quantities: ${error.message}`);
+    }
+  }
+
+  async logStockShift(data) {
+    const { shopId, masterBrandId, quantity, shiftType, supplierName, isFromTGBCL, recordDate, createdBy } = data;
+    
+    // Create a log entry in stock_movements or similar table
+    const query = `
+      INSERT INTO stock_movements (
+        shop_id, master_brand_id, movement_type, quantity, 
+        reference_type, reference_data, record_date, created_by, created_at
+      ) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+      RETURNING *
+    `;
+    
+    const referenceData = JSON.stringify({
+      shiftType,
+      supplierName,
+      isFromTGBCL
+    });
+    
+    try {
+      const result = await pool.query(query, [
+        shopId, masterBrandId, `SHIFT_${shiftType.toUpperCase()}`, quantity,
+        'STOCK_SHIFT', referenceData, recordDate, createdBy
+      ]);
+      return result.rows[0];
+    } catch (error) {
+      // If stock_movements table doesn't exist, we can skip logging for now
+      console.warn('Stock movement logging skipped:', error.message);
+      return null;
     }
   }
 
