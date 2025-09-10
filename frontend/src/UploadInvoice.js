@@ -373,17 +373,17 @@ function UploadInvoice({ onNavigate }) {
 
               <div className="action-buttons">
                 <button 
+                  className="cancel-btn"
+                  onClick={handleCancel}
+                >
+                  Cancel
+                </button>
+                <button 
                   className="confirm-btn"
                   onClick={handleConfirmAndAdd}
                   disabled={processing}
                 >
                   {processing ? 'Processing...' : 'Confirm & Add to Stock'}
-                </button>
-                <button 
-                  className="cancel-btn"
-                  onClick={handleCancel}
-                >
-                  Cancel
                 </button>
               </div>
             </div>

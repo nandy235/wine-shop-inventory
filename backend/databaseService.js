@@ -273,6 +273,40 @@ class DatabaseService {
     }
   }
 
+  // Get available stock using the same logic as frontend: closing_stock → total_stock → current_quantity
+  async getAvailableStock(shopId, masterBrandId, date = null) {
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    
+    const query = `
+      SELECT 
+        si.current_quantity,
+        dsr.closing_stock,
+        COALESCE(dsr.total_stock, COALESCE(dsr.opening_stock, 0) + COALESCE(dsr.received_stock, 0)) as total_stock,
+        -- Use the same fallback logic as frontend
+        COALESCE(
+          dsr.closing_stock,
+          COALESCE(dsr.total_stock, COALESCE(dsr.opening_stock, 0) + COALESCE(dsr.received_stock, 0)),
+          si.current_quantity
+        ) as available_stock
+      FROM shop_inventory si
+      LEFT JOIN daily_stock_records dsr ON si.id = dsr.shop_inventory_id 
+        AND dsr.stock_date = $3
+      WHERE si.shop_id = $1 AND si.master_brand_id = $2 AND si.is_active = true
+    `;
+    
+    try {
+      const result = await pool.query(query, [shopId, masterBrandId, targetDate]);
+      if (result.rows.length === 0) {
+        return 0; // No inventory record found
+      }
+      
+      const row = result.rows[0];
+      return parseInt(row.available_stock || 0);
+    } catch (error) {
+      throw new Error(`Error getting available stock: ${error.message}`);
+    }
+  }
+
   async getShopProducts(shopId, date = null) {
     const targetDate = date || new Date().toISOString().split('T')[0];
     
@@ -1922,20 +1956,22 @@ class DatabaseService {
   }
 
   // Stock Shift Methods
-  async getReceivedStockRecord(shopId, masterBrandId, recordDate, supplierCode = null, sourceShopId = null, supplierShopId = null) {
+  async getReceivedStockRecord(shopId, masterBrandId, recordDate, supplierCode = null, supplierShopId = null) {
+    // Use both supplierCode and supplierShopId for lookup to ensure proper accumulation
     const query = `
       SELECT * FROM received_stock_records
       WHERE shop_id = $1
         AND master_brand_id = $2
         AND record_date = $3
         AND supplier_code IS NOT DISTINCT FROM $4
-        AND source_shop_id IS NOT DISTINCT FROM $5
-        AND supplier_shop_id IS NOT DISTINCT FROM $6
+        AND supplier_shop_id IS NOT DISTINCT FROM $5
       LIMIT 1
     `;
     
     try {
-      const result = await pool.query(query, [shopId, masterBrandId, recordDate, supplierCode, sourceShopId, supplierShopId]);
+      const params = [shopId, masterBrandId, recordDate, supplierCode, supplierShopId];
+        
+      const result = await pool.query(query, params);
       return result.rows[0] || null;
     } catch (error) {
       throw new Error(`Error getting received stock record: ${error.message}`);
@@ -1943,22 +1979,22 @@ class DatabaseService {
   }
 
   async createReceivedStockRecord(data) {
-    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy, supplierCode = null, supplierShopId = null, sourceShopId = null } = data;
+    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy, supplierCode = null, supplierShopId = null } = data;
     
     const query = `
       INSERT INTO received_stock_records (
         shop_id, master_brand_id, record_date,
-        supplier_code, source_shop_id, supplier_shop_id,
+        supplier_code, supplier_shop_id,
         invoice_quantity, manual_quantity, transfer_quantity,
         created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
     
     try {
       const result = await pool.query(query, [
         shopId, masterBrandId, recordDate,
-        supplierCode, sourceShopId, supplierShopId,
+        supplierCode, supplierShopId,
         invoiceQuantity, manualQuantity, shiftTransferQuantity,
         createdBy
       ]);
@@ -1968,7 +2004,14 @@ class DatabaseService {
     }
   }
 
-  async updateReceivedStockQuantities(recordId, quantities) {
+  async updateReceivedStockQuantities(recordId, quantities, accumulate = true) {
+    const requestId = Date.now() + Math.random();
+    console.log(`🔄 [${requestId}] DatabaseService - updateReceivedStockQuantities called:`, {
+      recordId: recordId,
+      quantities: quantities,
+      accumulate: accumulate
+    });
+    
     const { shiftTransferQuantity, invoiceQuantity } = quantities;
     
     let query = 'UPDATE received_stock_records SET ';
@@ -1977,13 +2020,21 @@ class DatabaseService {
     let paramCount = 1;
 
     if (shiftTransferQuantity !== undefined) {
-      updates.push(`transfer_quantity = $${paramCount}`);
+      if (accumulate) {
+        updates.push(`transfer_quantity = transfer_quantity + $${paramCount}`);
+      } else {
+        updates.push(`transfer_quantity = $${paramCount}`);
+      }
       values.push(shiftTransferQuantity);
       paramCount++;
     }
 
     if (invoiceQuantity !== undefined) {
-      updates.push(`invoice_quantity = $${paramCount}`);
+      if (accumulate) {
+        updates.push(`invoice_quantity = invoice_quantity + $${paramCount}`);
+      } else {
+        updates.push(`invoice_quantity = $${paramCount}`);
+      }
       values.push(invoiceQuantity);
       paramCount++;
     }
@@ -1996,10 +2047,15 @@ class DatabaseService {
     query += `, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramCount} RETURNING *`;
     values.push(recordId);
     
+    console.log(`🔄 [${requestId}] DatabaseService - Executing query:`, query);
+    console.log(`🔄 [${requestId}] DatabaseService - With values:`, values);
+    
     try {
       const result = await pool.query(query, values);
+      console.log(`✅ [${requestId}] DatabaseService - Query executed successfully:`, result.rows[0]);
       return result.rows[0];
     } catch (error) {
+      console.log(`❌ [${requestId}] DatabaseService - Query failed:`, error.message);
       throw new Error(`Error updating received stock quantities: ${error.message}`);
     }
   }

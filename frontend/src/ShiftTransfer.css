@@ -235,6 +235,19 @@
   color: #c53030;
 }
 
+.available-bottles-display {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #dc2626;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1;
+  height: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .row-error {
   outline: 2px solid rgba(229, 62, 62, 0.35);
   outline-offset: 2px;
@@ -317,6 +330,23 @@
 .products-table td:nth-child(5),
 .products-table th:nth-child(5) {
   text-align: center;
+}
+
+/* Ensure quantity input columns have consistent height */
+.products-table td:nth-child(4),
+.products-table td:nth-child(5) {
+  vertical-align: top;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+/* S.No, Size, and MRP columns slightly lower than inputs */
+.products-table td:nth-child(1),
+.products-table td:nth-child(3),
+.products-table td:nth-child(6) {
+  vertical-align: top;
+  padding-top: 1.25rem;
+  padding-bottom: 0.75rem;
 }
 
 /* Ensure consistent vertical alignment */
@@ -981,4 +1011,19 @@
   .action-title {
     font-size: 1.3rem;
   }
+}
+
+/* Transfer info message */
+.transfer-info-message {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 4px;
+  color: #856404;
+}
+
+.transfer-info-message small {
+  font-size: 0.85rem;
+  font-style: italic;
 }

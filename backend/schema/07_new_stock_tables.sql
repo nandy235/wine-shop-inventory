@@ -46,10 +46,6 @@ CREATE TABLE received_stock_records (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     
     -- Constraints
-    CONSTRAINT chk_received_stock_valid CHECK (
-        -- At least one quantity type must be non-zero
-        (invoice_quantity != 0 OR manual_quantity != 0 OR transfer_quantity != 0)
-    ),
     CONSTRAINT chk_supplier_code_valid CHECK (
         supplier_code IS NULL OR supplier_code ~ '^(TGBCL|\\d{7})$'
     ),

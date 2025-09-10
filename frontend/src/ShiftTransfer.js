@@ -4,6 +4,7 @@ import API_BASE_URL from './config';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
 
 function ShiftTransfer({ onNavigate }) {
+  console.log('🔍 ShiftTransfer - Component rendering');
   // Match IndentEstimate search behavior
   const SEARCH_DEBOUNCE_DELAY = 150;
   const MIN_SEARCH_LENGTH = 2;
@@ -44,8 +45,10 @@ function ShiftTransfer({ onNavigate }) {
   };
   // Prefetch shop inventory brands when shifting out
   useEffect(() => {
+    console.log('🔍 ShiftTransfer - loadShopProducts useEffect triggered', { shiftType, shopProductsCacheLength: shopProductsCache.length });
     const loadShopProducts = async () => {
       try {
+        console.log('🔍 ShiftTransfer - loadShopProducts called');
         const token = localStorage.getItem('token');
         const resp = await fetch(`${API_BASE_URL}/api/shop/products`, {
           headers: {
@@ -53,9 +56,11 @@ function ShiftTransfer({ onNavigate }) {
             'Content-Type': 'application/json'
           }
         });
+        console.log('🔍 ShiftTransfer - loadShopProducts response status:', resp.status);
         if (resp.ok) {
           const data = await resp.json();
           const items = Array.isArray(data) ? data : (data.products || data || []);
+          console.log('🔍 ShiftTransfer - loadShopProducts items loaded:', items.length);
           setShopProductsCache(items);
         }
       } catch (e) {
@@ -78,34 +83,25 @@ function ShiftTransfer({ onNavigate }) {
     }
   }, [success]);
 
-  // Fetch suppliers on component mount
-  useEffect(() => {
-    fetchSuppliers();
-  }, []);
-
-  const fetchSuppliers = async () => {
+  const fetchSuppliers = useCallback(async () => {
     try {
+      console.log('🔍 ShiftTransfer - fetchSuppliers called');
       const token = localStorage.getItem('token');
+      console.log('🔍 ShiftTransfer - token exists:', !!token);
+      console.log('🔍 ShiftTransfer - API_BASE_URL:', API_BASE_URL);
       
-      // Fetch both user's own shops and manually added suppliers
-      const [userShopsResponse, supplierShopsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/user-shops`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-        fetch(`${API_BASE_URL}/api/supplier-shops`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-      ]);
+      // Fetch suppliers from supplier_shops table
+      const response = await fetch(`${API_BASE_URL}/api/supplier-shops`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log('🔍 ShiftTransfer - fetchSuppliers response status:', response.status);
 
       let allSuppliers = [];
 
-      // Add TGBCL as default supplier
+      // Add TGBCL as default supplier (only for shift in)
       allSuppliers.push({
         id: 'tgbcl',
         shop_name: 'TGBCL',
@@ -113,40 +109,20 @@ function ShiftTransfer({ onNavigate }) {
         source: 'default'
       });
 
-      // Add user's own shops as suppliers (excluding current shop)
-      if (userShopsResponse.ok) {
-        const userShopsData = await userShopsResponse.json();
-        const currentShop = getCurrentShopFromJWT();
+      if (response.ok) {
+        const data = await response.json();
+        const suppliersData = data.shops || data || [];
         
-        const userShopsAsSuppliers = (userShopsData.shops || [])
-          .filter(shop => {
-            if (currentShop.shopId && shop.id) {
-              return shop.id !== currentShop.shopId;
-            }
-            if (currentShop.retailerCode && shop.retailer_code) {
-              return shop.retailer_code !== currentShop.retailerCode;
-            }
-            return shop.shop_name !== shopName;
-          })
-          .map(shop => ({
-            id: `user_shop_${shop.id}`,
-            shop_name: shop.shop_name,
-            retailer_code: shop.retailer_code,
-            source: 'user_shop'
-          }));
-        
-        allSuppliers.push(...userShopsAsSuppliers);
-      }
-
-      // Add manually added suppliers
-      if (supplierShopsResponse.ok) {
-        const supplierShopsData = await supplierShopsResponse.json();
-        // API returns { shops: [...] }
-        const manualSuppliers = (supplierShopsData.shops || []).map(supplier => ({
-          ...supplier,
-          source: 'manual'
+        // Map supplier_shops table data to expected format
+        const suppliersFromTable = suppliersData.map(supplier => ({
+          id: `supplier_${supplier.id}`,
+          shop_name: supplier.shop_name,
+          retailer_code: supplier.retailer_code,
+          contact: supplier.contact,
+          source: 'supplier_shops'
         }));
-        allSuppliers.push(...manualSuppliers);
+        
+        allSuppliers.push(...suppliersFromTable);
       }
 
       setSuppliers(allSuppliers);
@@ -154,7 +130,12 @@ function ShiftTransfer({ onNavigate }) {
       console.error('Error fetching suppliers:', error);
       setError('Failed to load suppliers');
     }
-  };
+  }, []);
+
+  // Fetch suppliers on component mount
+  useEffect(() => {
+    fetchSuppliers();
+  }, [fetchSuppliers]);
 
   // Product search identical to IndentEstimate (debounced + abortable)
   const handleSearch = useCallback(async (term) => {
@@ -165,77 +146,254 @@ function ShiftTransfer({ onNavigate }) {
       return;
     }
     if (shiftType === 'out') {
-      // Filter shop inventory on client side and normalize fields
-      const q = searchQuery.toLowerCase();
-      const filtered = shopProductsCache
-        .filter(p => {
-          const name = (p.brand_name || p.name || '').toLowerCase();
-          const num = String(p.brand_number || p.brandNumber || '');
-          return name.includes(q) || num.includes(q);
-        })
-        .slice(0, 20)
-        .map(r => ({
-          id: r.id,
-          name: (r.brand_name || r.name || '').trim(),
-          brandNumber: r.brand_number || r.brandNumber,
-          packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-          sizeMl: Number(r.size_ml || r.size || 0),
-          mrp: r.standard_mrp ?? r.mrp ?? 0,
-          packType: r.pack_type || r.packType || '',
-          available: Number(
-            // Prefer daily closing for the business date, else total stock, else raw quantity
-            (r.closingStock ?? r.closing_stock) ??
-            (r.totalStock ?? r.total_stock) ??
-            (r.quantity ?? r.current_quantity) ?? 0
-          )
-        }));
-      setSearchResults(filtered);
-      setShowSearchResults(true);
+      // Shift Out: Search current shop inventory via API
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_BASE_URL}/api/shop/products?search=${encodeURIComponent(searchQuery)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: abortControllerRef.current.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const results = Array.isArray(data) ? data : (data.products || []);
+          const normalized = results.map(r => ({
+            id: r.id,
+            name: (r.brand_name || r.name || '').trim(),
+            brandNumber: r.brand_number || r.brandNumber,
+            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+            sizeMl: Number(r.size_ml || r.size || 0),
+            mrp: r.standard_mrp ?? r.mrp ?? 0,
+            packType: r.pack_type || r.packType || '',
+            available: Number(
+              // Prefer daily closing for the business date, else total stock, else raw quantity
+              (r.closingStock ?? r.closing_stock) ??
+              (r.totalStock ?? r.total_stock) ??
+              (r.quantity ?? r.current_quantity) ?? 0
+            )
+          }));
+          setSearchResults(normalized);
+          setShowSearchResults(true);
+        } else {
+          console.error('Search failed:', response.status);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('Search error:', error);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      }
       return;
     }
 
-    // Shift In → search master brands via API
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    // Shift In: Search based on supplier type
+    if (!selectedSupplier) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
     }
-    abortControllerRef.current = new AbortController();
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        signal: abortControllerRef.current.signal
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const results = Array.isArray(data) ? data : (data.brands || []);
-        const normalized = results.map(r => ({
-          id: r.id,
-          name: (r.brand_name || r.name || '').trim(),
-          brandNumber: r.brand_number || r.brandNumber,
-          packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-          sizeMl: Number(r.size_ml || r.size || 0),
-          mrp: r.standard_mrp ?? r.mrp ?? 0,
-          packType: r.pack_type || r.packType || ''
-        }));
-        setSearchResults(normalized);
-        setShowSearchResults(true);
-      } else {
-        setSearchResults([]);
-        setShowSearchResults(false);
+    
+    // Check supplier type first
+    if (selectedSupplier === 'tgbcl') {
+      // TGBCL: Always external, search all master brands
+      console.log('🔍 Searching master brands for TGBCL');
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.error('Error searching brands:', error);
-        setSearchResults([]);
-        setShowSearchResults(false);
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: abortControllerRef.current.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const results = Array.isArray(data) ? data : (data.brands || []);
+          const normalized = results.map(r => ({
+            id: r.id,
+            name: (r.brand_name || r.name || '').trim(),
+            brandNumber: r.brand_number || r.brandNumber,
+            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+            sizeMl: Number(r.size_ml || r.size || 0),
+            mrp: r.standard_mrp ?? r.mrp ?? 0,
+            packType: r.pack_type || r.packType || ''
+          }));
+          setSearchResults(normalized);
+          setShowSearchResults(true);
+        } else {
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('Error searching brands:', error);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      }
+    } else if (selectedSupplier?.startsWith('supplier_')) {
+      // Check if supplier is internal or external
+      const supplierId = selectedSupplier.replace('supplier_', '');
+      console.log('🔍 Checking supplier type for supplier ID:', supplierId);
+      
+      try {
+        const token = localStorage.getItem('token');
+        const typeResponse = await fetch(`${API_BASE_URL}/api/check-supplier-type?supplierId=${supplierId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (typeResponse.ok) {
+          const typeData = await typeResponse.json();
+          console.log('🔍 Supplier type result:', typeData);
+          
+          if (typeData.isInternal) {
+            // Internal supplier: Search that shop's inventory
+            console.log('🔍 Searching internal shop inventory for shop ID:', typeData.shopInfo.id);
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+            }
+            abortControllerRef.current = new AbortController();
+
+            const searchResponse = await fetch(`${API_BASE_URL}/api/shop/products?shopId=${typeData.shopInfo.id}&search=${encodeURIComponent(searchQuery)}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              signal: abortControllerRef.current.signal
+            });
+
+            if (searchResponse.ok) {
+              const data = await searchResponse.json();
+              const results = Array.isArray(data) ? data : (data.products || []);
+              const normalized = results.map(r => ({
+                id: r.id,
+                name: (r.brand_name || r.name || '').trim(),
+                brandNumber: r.brand_number || r.brandNumber,
+                packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+                sizeMl: Number(r.size_ml || r.size || 0),
+                mrp: r.standard_mrp ?? r.mrp ?? 0,
+                packType: r.pack_type || r.packType || '',
+                available: Number(r.current_quantity || r.quantity || 0)
+              }));
+              setSearchResults(normalized);
+              setShowSearchResults(true);
+            } else {
+              console.error('Search failed:', searchResponse.status);
+              setSearchResults([]);
+              setShowSearchResults(false);
+            }
+          } else {
+            // External supplier: Search all master brands
+            console.log('🔍 Searching master brands for external supplier:', typeData.supplierName);
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+            }
+            abortControllerRef.current = new AbortController();
+
+            const searchResponse = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              signal: abortControllerRef.current.signal
+            });
+
+            if (searchResponse.ok) {
+              const data = await searchResponse.json();
+              const results = Array.isArray(data) ? data : (data.brands || []);
+              const normalized = results.map(r => ({
+                id: r.id,
+                name: (r.brand_name || r.name || '').trim(),
+                brandNumber: r.brand_number || r.brandNumber,
+                packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+                sizeMl: Number(r.size_ml || r.size || 0),
+                mrp: r.standard_mrp ?? r.mrp ?? 0,
+                packType: r.pack_type || r.packType || ''
+              }));
+              setSearchResults(normalized);
+              setShowSearchResults(true);
+            } else {
+              setSearchResults([]);
+              setShowSearchResults(false);
+            }
+          }
+        } else {
+          console.error('Failed to check supplier type:', typeResponse.status);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('Error checking supplier type:', error);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      }
+    } else {
+      // Fallback: External supplier, search all master brands
+      console.log('🔍 Searching master brands for external supplier (fallback):', selectedSupplier);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          signal: abortControllerRef.current.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const results = Array.isArray(data) ? data : (data.brands || []);
+          const normalized = results.map(r => ({
+            id: r.id,
+            name: (r.brand_name || r.name || '').trim(),
+            brandNumber: r.brand_number || r.brandNumber,
+            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+            sizeMl: Number(r.size_ml || r.size || 0),
+            mrp: r.standard_mrp ?? r.mrp ?? 0,
+            packType: r.pack_type || r.packType || ''
+          }));
+          setSearchResults(normalized);
+          setShowSearchResults(true);
+        } else {
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('Error searching brands:', error);
+          setSearchResults([]);
+          setShowSearchResults(false);
+        }
       }
     }
-  }, [searchTerm, shiftType, shopProductsCache]);
+  }, [searchTerm, shiftType, selectedSupplier]);
 
   const handleInputChange = useCallback((e) => {
     const value = e.target.value.slice(0, 100);
@@ -275,6 +433,8 @@ function ShiftTransfer({ onNavigate }) {
   }, []);
 
   const handleBrandSelect = (brand) => {
+    console.log('🔍 Frontend - Brand selected from search:', brand);
+    
     // Normalize fields; include pack quantity and size ml
     const normalized = {
       id: brand.id,
@@ -283,8 +443,11 @@ function ShiftTransfer({ onNavigate }) {
       packQuantity: Number(brand.pack_quantity || brand.packQuantity || 12),
       sizeMl: Number(brand.sizeMl ?? brand.size_ml ?? brand.size ?? 0),
       mrp: Number(brand.standard_mrp ?? brand.mrp ?? 0),
-      packType: brand.packType || brand.pack_type || ''
+      packType: brand.packType || brand.pack_type || '',
+      available: Number(brand.available || 0) // Include available quantity
     };
+    
+    console.log('🔍 Frontend - Normalized product:', normalized);
 
     const isAlreadySelected = selectedProducts.some(p => p.id === normalized.id);
     if (isAlreadySelected) {
@@ -305,12 +468,22 @@ function ShiftTransfer({ onNavigate }) {
 
   const handleCasesChange = (productId, value) => {
     const num = Math.max(0, parseInt(value) || 0);
-    setSelectedProducts(prev => prev.map(p => p.id === productId ? { ...p, cases: num } : p));
+    console.log('🔍 Frontend - handleCasesChange:', { productId, value, num });
+    setSelectedProducts(prev => {
+      const updated = prev.map(p => p.id === productId ? { ...p, cases: num } : p);
+      console.log('🔍 Frontend - Updated selectedProducts after cases change:', updated);
+      return updated;
+    });
   };
 
   const handleBottlesChange = (productId, value) => {
     const num = Math.max(0, parseInt(value) || 0);
-    setSelectedProducts(prev => prev.map(p => p.id === productId ? { ...p, bottles: num } : p));
+    console.log('🔍 Frontend - handleBottlesChange:', { productId, value, num });
+    setSelectedProducts(prev => {
+      const updated = prev.map(p => p.id === productId ? { ...p, bottles: num } : p);
+      console.log('🔍 Frontend - Updated selectedProducts after bottles change:', updated);
+      return updated;
+    });
   };
 
   const validateAndMark = useCallback((productId) => {
@@ -361,44 +534,149 @@ function ShiftTransfer({ onNavigate }) {
   };
 
   const handleConfirmShift = async () => {
+    const requestId = Date.now() + Math.random();
+    console.log(`\n🚀 [${requestId}] ===== SHIFT TRANSFER OPERATION STARTED =====`);
+    console.log(`🔍 [${requestId}] Frontend - handleConfirmShift called with state:`, {
+      selectedSupplier,
+      selectedProducts: selectedProducts.length,
+      shiftType,
+      loading,
+      shopName: getShopNameForDisplay(),
+      currentShop: getCurrentShopFromJWT()
+    });
+    console.log(`📋 [${requestId}] Selected Products Details:`, selectedProducts.map(p => ({
+      id: p.id,
+      name: p.name,
+      brandNumber: p.brandNumber,
+      cases: p.cases,
+      bottles: p.bottles,
+      totalQuantity: (p.cases * p.packQuantity) + p.bottles,
+      available: p.available,
+      mrp: p.mrp
+    })));
+    
     try {
+      console.log(`\n🔍 [${requestId}] ===== VALIDATION PHASE =====`);
+      
       // Validation
       if (!selectedSupplier) {
+        console.log(`❌ [${requestId}] Validation failed: No supplier selected`);
         setError('Please select a supplier');
         return;
       }
+      console.log(`✅ [${requestId}] Supplier validation passed:`, selectedSupplier);
 
       if (selectedProducts.length === 0) {
+        console.log(`❌ [${requestId}] Validation failed: No products selected`);
         setError('Please add at least one product');
         return;
       }
+      console.log(`✅ [${requestId}] Products validation passed: ${selectedProducts.length} products selected`);
+
+      // Business rules temporarily disabled - allow all operations
 
       const productsWithQuantity = selectedProducts.filter(p => (p.cases > 0 || p.bottles > 0));
       if (productsWithQuantity.length === 0) {
+        console.log(`❌ [${requestId}] Validation failed: No quantities entered`);
         setError('Please enter quantities for the products');
         return;
       }
+      console.log(`✅ [${requestId}] Quantity validation passed: ${productsWithQuantity.length} products with quantities`);
 
+      // Debug: Log the selectedProducts state
+      console.log(`📊 [${requestId}] Frontend - selectedProducts state:`, selectedProducts);
+      console.log(`📊 [${requestId}] Frontend - productsWithQuantity:`, productsWithQuantity);
+      
+      // Additional validation for shift out
+      if (shiftType === 'out') {
+        console.log(`🔍 [${requestId}] Shift Out validation - checking stock availability`);
+        const stockErrors = Object.keys(rowErrors);
+        if (stockErrors.length > 0) {
+          console.log(`❌ [${requestId}] Stock validation failed:`, rowErrors);
+          setError('Insufficient stock for some products');
+          return;
+        }
+        console.log(`✅ [${requestId}] Stock validation passed: All products have sufficient stock`);
+      }
+
+      console.log(`\n🔄 [${requestId}] ===== PROCESSING PHASE =====`);
       setLoading(true);
       setError('');
 
       const token = localStorage.getItem('token');
       const currentShop = getCurrentShopFromJWT();
+      
+      console.log(`🔑 [${requestId}] Authentication details:`, {
+        tokenExists: !!token,
+        currentShop: currentShop,
+        shopName: getShopNameForDisplay()
+      });
+
+      console.log(`📦 [${requestId}] Processing ${productsWithQuantity.length} products for ${shiftType.toUpperCase()} operation`);
 
       // Process each product
       for (const product of productsWithQuantity) {
         const totalQuantity = (product.cases * product.packQuantity) + product.bottles;
+        
+        console.log(`\n🔍 [${requestId}] ===== PROCESSING PRODUCT ${productsWithQuantity.indexOf(product) + 1}/${productsWithQuantity.length} =====`);
+        console.log(`📋 [${requestId}] Product Details:`, {
+          id: product.id,
+          name: product.name,
+          brandNumber: product.brandNumber,
+          shiftType: shiftType,
+          totalQuantity: totalQuantity,
+          cases: product.cases,
+          bottles: product.bottles,
+          packQuantity: product.packQuantity,
+          available: product.available,
+          mrp: product.mrp
+        });
+        
+        // Determine if this is an internal shop transfer
+        const isInternalTransfer = selectedSupplier?.startsWith('supplier_');
+        const supplierInfo = suppliers.find(s => s.id === selectedSupplier);
+        
+        console.log(`🔍 [${requestId}] Transfer Type Analysis:`, {
+          selectedSupplier: selectedSupplier,
+          isInternalTransfer: isInternalTransfer,
+          supplierInfo: supplierInfo,
+          isFromTGBCL: selectedSupplier === 'tgbcl'
+        });
+        
         const shiftData = {
-          masterBrandId: product.id,
+          ...(shiftType === 'out' 
+            ? { shopInventoryId: product.id } 
+            : (isInternalTransfer 
+              ? { shopInventoryId: product.id }  // Internal shop: product.id is shopInventoryId
+              : { masterBrandId: product.id }    // External/TGBCL: product.id is masterBrandId
+            )
+          ),
           quantity: shiftType === 'out' ? -totalQuantity : totalQuantity,
-          supplierName: suppliers.find(s => s.id === selectedSupplier)?.shop_name || 'Unknown',
+          supplierName: supplierInfo?.shop_name || 'Unknown',
           isFromTGBCL: selectedSupplier === 'tgbcl',
-          supplierCode: selectedSupplier === 'tgbcl' ? 'TGBCL' : (suppliers.find(s => s.id === selectedSupplier)?.retailer_code || null),
-          sourceShopId: selectedSupplier?.startsWith('user_shop_') ? parseInt(selectedSupplier.replace('user_shop_','')) : null,
-          supplierShopId: selectedSupplier?.startsWith('user_shop_') ? null : (selectedSupplier !== 'tgbcl' ? selectedSupplier : null),
+          supplierCode: selectedSupplier === 'tgbcl' ? 'TGBCL' : (supplierInfo?.retailer_code || null),
+          supplierShopId: selectedSupplier?.startsWith('supplier_') ? parseInt(selectedSupplier.replace('supplier_','')) : null,
           shiftType: shiftType
         };
+        
+        console.log(`📤 [${requestId}] Frontend - Prepared shift data:`, {
+          ...shiftData,
+          quantitySign: shiftType === 'out' ? 'NEGATIVE (outgoing)' : 'POSITIVE (incoming)',
+          productIdentifier: shiftType === 'out' ? 'shopInventoryId' : (isInternalTransfer ? 'shopInventoryId' : 'masterBrandId'),
+          transferDirection: shiftType === 'out' ? 'FROM current shop TO destination' : 'FROM source TO current shop'
+        });
 
+        console.log(`🌐 [${requestId}] Frontend - Making API call to /api/stock-shift`);
+        console.log(`📡 [${requestId}] API Request Details:`, {
+          url: `${API_BASE_URL}/api/stock-shift`,
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token ? token.substring(0, 20) + '...' : 'NO_TOKEN'}`,
+            'Content-Type': 'application/json'
+          },
+          body: shiftData
+        });
+        
         const response = await fetch(`${API_BASE_URL}/api/stock-shift`, {
           method: 'POST',
           headers: {
@@ -408,23 +686,53 @@ function ShiftTransfer({ onNavigate }) {
           body: JSON.stringify(shiftData)
         });
 
+        console.log(`📡 [${requestId}] Frontend - API response received:`, {
+          status: response.status,
+          statusText: response.statusText,
+          ok: response.ok,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+        
         if (!response.ok) {
           const errorData = await response.json();
+          console.log(`❌ [${requestId}] Frontend - API error response:`, {
+            status: response.status,
+            errorData: errorData,
+            productId: product.id,
+            productName: product.name
+          });
           throw new Error(errorData.message || 'Failed to process shift');
         }
+
+        const result = await response.json();
+        console.log(`✅ [${requestId}] Frontend - Shift successful for product:`, {
+          productId: product.id,
+          productName: product.name,
+          result: result
+        });
       }
 
+      console.log(`\n🎉 [${requestId}] ===== SHIFT TRANSFER COMPLETED SUCCESSFULLY =====`);
+      console.log(`✅ [${requestId}] All ${productsWithQuantity.length} products processed successfully`);
       setSuccess('Stock successfully shifted.');
       
       // Reset form
+      console.log(`🔄 [${requestId}] Resetting form state`);
       setSelectedProducts([]);
       setSelectedSupplier('');
       setSearchTerm('');
       
     } catch (error) {
-      console.error('Error confirming shift:', error);
+      console.log(`\n❌ [${requestId}] ===== SHIFT TRANSFER FAILED =====`);
+      console.error(`💥 [${requestId}] Error confirming shift:`, {
+        error: error,
+        message: error.message,
+        stack: error.stack,
+        requestId: requestId
+      });
       setError(error.message || 'Failed to process shift');
     } finally {
+      console.log(`🏁 [${requestId}] ===== SHIFT TRANSFER OPERATION ENDED =====`);
       setLoading(false);
     }
   };
@@ -502,11 +810,26 @@ function ShiftTransfer({ onNavigate }) {
               onChange={(e) => setSelectedSupplier(e.target.value)}
             >
               <option value="">Choose a supplier...</option>
-              {(shiftType === 'out' ? suppliers.filter(s => s.id !== 'tgbcl') : suppliers).map(supplier => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.shop_name} {supplier.retailer_code !== supplier.shop_name ? `(${supplier.retailer_code})` : ''}
-                </option>
-              ))}
+              {(() => {
+                // Business rules for supplier selection
+                if (shiftType === 'out') {
+                  // Shift Out: Can transfer TO internal and external shops (exclude TGBCL)
+                  return suppliers.filter(s => s.id !== 'tgbcl').map(supplier => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.shop_name} {supplier.retailer_code !== supplier.shop_name ? `(${supplier.retailer_code})` : ''}
+                    </option>
+                  ));
+                } else {
+                  // Shift In: Can receive FROM both external and internal shops
+                  // External shops: You can raise the request
+                  // Internal shops: You can see them but cannot raise request (other shop must initiate Shift Out)
+                  return suppliers.map(supplier => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.shop_name} {supplier.retailer_code !== supplier.shop_name ? `(${supplier.retailer_code})` : ''}
+                    </option>
+                  ));
+                }
+              })()}
             </select>
           </div>
 
@@ -622,19 +945,41 @@ function ShiftTransfer({ onNavigate }) {
                             onBlur={() => validateAndMark(product.id)}
                             onChange={(e) => handleBottlesChange(product.id, e.target.value)}
                           />
-                          {shiftType === 'out' && (
-                            <div className="available-hint">available: {(() => {
-                              const match = shopProductsCache.find(sp => {
-                                const bn = sp.brand_number || sp.brandNumber;
-                                const bnP = product.brandNumber;
-                                const sz = Number(sp.size_ml || sp.size || 0);
-                                const szP = Number(product.sizeMl || 0);
-                                return bn && bnP && String(bn) === String(bnP) && sz === szP;
-                              });
-                              const avail = Number((product.available || 0) || ((match && ((match.closingStock ?? match.closing_stock) ?? (match.totalStock ?? match.total_stock) ?? (match.quantity ?? match.current_quantity))) || 0));
-                              return isNaN(avail) ? 0 : avail;
-                            })()}</div>
-                          )}
+                          <div className="available-bottles-display">
+                            Available: {(() => {
+                              // Get available quantity for this product
+                              let available = 0;
+                              
+                              if (shiftType === 'out') {
+                                // For shift out, get from current shop's inventory
+                                const match = shopProductsCache.find(sp => {
+                                  const bn = sp.brand_number || sp.brandNumber;
+                                  const bnP = product.brandNumber;
+                                  const sz = Number(sp.size_ml || sp.size || 0);
+                                  const szP = Number(product.sizeMl || 0);
+                                  return bn && bnP && String(bn) === String(bnP) && sz === szP;
+                                });
+                                available = Number((product.available || 0) || ((match && ((match.closingStock ?? match.closing_stock) ?? (match.totalStock ?? match.total_stock) ?? (match.quantity ?? match.current_quantity))) || 0));
+                                console.log('🔍 Shift Out - Available calculation:', {
+                                  productId: product.id,
+                                  productAvailable: product.available,
+                                  matchFound: !!match,
+                                  matchAvailable: match ? (match.closingStock ?? match.closing_stock) ?? (match.totalStock ?? match.total_stock) ?? (match.quantity ?? match.current_quantity) : null,
+                                  finalAvailable: available
+                                });
+                              } else {
+                                // For shift in, get from selected supplier's inventory
+                                available = Number(product.available || 0);
+                                console.log('🔍 Shift In - Available calculation:', {
+                                  productId: product.id,
+                                  productAvailable: product.available,
+                                  finalAvailable: available
+                                });
+                              }
+                              
+                              return isNaN(available) ? 0 : available;
+                            })()}
+                          </div>
                         </td>
                         <td>{formatINR(product.mrp)}</td>
                       </tr>
@@ -656,6 +1001,16 @@ function ShiftTransfer({ onNavigate }) {
 
           {/* Actions */}
           <div className="actions-row">
+            <button
+              type="button"
+              className="btn-cancel"
+              onClick={() => {
+                setSelectedProducts([]);
+                setSearchTerm('');
+              }}
+            >
+              Cancel
+            </button>
             {/** compute enablement based on quantities and shift type */}
             <button
               className="btn-confirm"
@@ -669,16 +1024,6 @@ function ShiftTransfer({ onNavigate }) {
               }
             >
               {loading ? 'Processing...' : 'Confirm Stock Transfer'}
-            </button>
-            <button
-              type="button"
-              className="btn-cancel"
-              onClick={() => {
-                setSelectedProducts([]);
-                setSearchTerm('');
-              }}
-            >
-              Cancel
             </button>
           </div>
         </div>
