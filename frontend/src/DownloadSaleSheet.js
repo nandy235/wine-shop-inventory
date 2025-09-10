@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useReducer, useMemo, useCallback } from 'react';
 import './DownloadSaleSheet.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Constants
 const BUSINESS_CONFIG = {
@@ -199,7 +200,7 @@ const LoadingDisplay = () => (
   </div>
 );
 
-function DownloadSaleSheet({ onNavigate }) {
+function DownloadSaleSheet({ onNavigate, onLogout }) {
   // Use business date hook
   const businessDate = useBusinessDate();
   
@@ -208,6 +209,7 @@ function DownloadSaleSheet({ onNavigate }) {
   const [selectedDate, setSelectedDate] = useState(businessDate);
   const [startDate, setStartDate] = useState(businessDate);
   const [endDate, setEndDate] = useState(businessDate);
+  
 
   // Update form dates when business date changes
   useEffect(() => {
@@ -438,6 +440,7 @@ function DownloadSaleSheet({ onNavigate }) {
     }
   }, [getCurrentDate, token]);
 
+
   // Main fetch function that calls all individual fetch functions
   const fetchAllData = useCallback(async () => {
     dispatch({ type: 'FETCH_START' });
@@ -476,6 +479,7 @@ function DownloadSaleSheet({ onNavigate }) {
       fetchAllData();
     }
   }, [fetchAllData, dateMode, selectedDate, startDate, endDate]);
+
 
   const calculateTotalSales = useCallback(() => {
     return state.stockData.reduce((total, item) => total + (item.salesValue || 0), 0);
@@ -795,6 +799,7 @@ function DownloadSaleSheet({ onNavigate }) {
     `;
   };
 
+
   const handleDateModeChange = useCallback((mode) => {
     setDateMode(mode);
     if (mode === 'single') {
@@ -831,7 +836,7 @@ function DownloadSaleSheet({ onNavigate }) {
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn active" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 
@@ -842,68 +847,74 @@ function DownloadSaleSheet({ onNavigate }) {
         </div>
 
         <div className="controls-section">
-          <div className="date-controls">
-            <div className="date-mode-selector">
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="dateMode"
-                  value="single"
-                  checked={dateMode === 'single'}
-                  onChange={(e) => handleDateModeChange(e.target.value)}
-                />
-                <span>Single Date</span>
-              </label>
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="dateMode"
-                  value="range"
-                  checked={dateMode === 'range'}
-                  onChange={(e) => handleDateModeChange(e.target.value)}
-                />
-                <span>Date Range</span>
-              </label>
-            </div>
-
-            {dateMode === 'single' ? (
-              <div className="single-date-input">
-                <label>Date:</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                />
-              </div>
-            ) : (
-              <div className="date-range-inputs">
-                <div className="date-input-group">
-                  <label>Start Date:</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
+              <div className="date-controls">
+                {/* Date Mode Selector */}
+                <div className="date-mode-selector">
+                  <label className="radio-label">
+                    <input
+                      type="radio"
+                      name="dateMode"
+                      value="single"
+                      checked={dateMode === 'single'}
+                      onChange={(e) => handleDateModeChange(e.target.value)}
+                    />
+                    <span>Single Date</span>
+                  </label>
+                  <label className="radio-label">
+                    <input
+                      type="radio"
+                      name="dateMode"
+                      value="range"
+                      checked={dateMode === 'range'}
+                      onChange={(e) => handleDateModeChange(e.target.value)}
+                    />
+                    <span>Date Range</span>
+                  </label>
                 </div>
-                <div className="date-input-group">
-                  <label>End Date:</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    min={startDate}
-                  />
+
+                {/* Date Input Box - Below Radio Buttons */}
+                {dateMode === 'single' ? (
+                  <div className="single-date-input">
+                    <label className="date-label">Date:</label>
+                    <div className="date-input-wrapper">
+                      <input
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="date-range-inputs">
+                    <div className="date-inputs-row">
+                      <div className="date-input-group">
+                        <label>Start Date:</label>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="date-input-group">
+                        <label>End Date:</label>
+                        <input
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          min={startDate}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="validation-status">
+                <div className={`status-indicator ${state.closingStockStatus?.isFullySaved ? 'valid' : 'warning'}`}>
+                  {getValidationMessage()}
                 </div>
               </div>
-            )}
-          </div>
-
-          <div className="validation-status">
-            <div className={`status-indicator ${state.closingStockStatus?.isFullySaved ? 'valid' : 'warning'}`}>
-              {getValidationMessage()}
             </div>
-          </div>
-        </div>
 
         <div className="preview-section">
           <div className="data-summary">
@@ -964,28 +975,28 @@ function DownloadSaleSheet({ onNavigate }) {
           </div>
         </div>
 
-        <div className="info-section">
-          <div className="info-card">
-            <h4>📋 Report Contents</h4>
-            <ul>
-              <li>Complete stock movement (Opening, Received, Total, Closing, Sales)</li>
-              <li>Sales values and pricing information</li>
-              <li>Financial summary with opening/closing balances</li>
-              <li>Payment collections (Cash, UPI, Card)</li>
-              <li>Income and expense details</li>
-            </ul>
-          </div>
-          
-          <div className="info-card">
-            <h4>📅 Date Logic</h4>
-            <ul>
-              <li><strong>Single Date:</strong> Shows complete stock data for selected date</li>
-              <li><strong>Date Range:</strong> Opening stock from start date, closing stock from end date</li>
-              <li>Business day starts at 11:30 AM IST</li>
-              <li>All financial data uses the end date for calculations</li>
-            </ul>
-          </div>
-        </div>
+            <div className="info-section">
+              <div className="info-card">
+                <h4>📋 Report Contents</h4>
+                <ul>
+                  <li>Complete stock movement (Opening, Received, Total, Closing, Sales)</li>
+                  <li>Sales values and pricing information</li>
+                  <li>Financial summary with opening/closing balances</li>
+                  <li>Payment collections (Cash, UPI, Card)</li>
+                  <li>Income and expense details</li>
+                </ul>
+              </div>
+              
+              <div className="info-card">
+                <h4>📅 Date Logic</h4>
+                <ul>
+                  <li><strong>Single Date:</strong> Shows complete stock data for selected date</li>
+                  <li><strong>Date Range:</strong> Opening stock from start date, closing stock from end date</li>
+                  <li>Business day starts at 11:30 AM IST</li>
+                  <li>All financial data uses the end date for calculations</li>
+                </ul>
+              </div>
+            </div>
       </main>
     </div>
   );

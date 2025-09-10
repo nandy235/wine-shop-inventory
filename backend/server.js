@@ -2905,6 +2905,150 @@ app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== STOCK TRANSFER HISTORY ENDPOINTS =====
+
+// Get stock shifted in (received from other shops)
+app.get('/api/stock-transfers/shifted-in', authenticateToken, async (req, res) => {
+  try {
+    const { date } = req.query;
+    const shopId = parseInt(req.user.shopId);
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+
+    console.log(`📥 Fetching stock shifted in for shop ${shopId}, date: ${date || 'all'}`);
+
+    let query = `
+      SELECT 
+        rsr.id,
+        rsr.created_at,
+        rsr.record_date,
+        rsr.transfer_quantity as quantity,
+        rsr.supplier_code,
+        rsr.supplier_shop_id,
+        mb.brand_name,
+        mb.brand_number,
+        mb.size_code,
+        mb.size_ml,
+        mb.pack_quantity,
+        mb.standard_mrp as final_price,
+        ss.shop_name as supplier_name,
+        ss.retailer_code as supplier_retailer_code
+      FROM received_stock_records rsr
+      JOIN master_brands mb ON rsr.master_brand_id = mb.id
+      LEFT JOIN supplier_shops ss ON rsr.supplier_shop_id = ss.id
+      WHERE rsr.shop_id = $1 AND rsr.transfer_quantity > 0
+    `;
+    
+    const params = [shopId];
+    
+    if (date) {
+      query += ` AND (DATE(rsr.record_date) = $2 OR DATE(rsr.created_at) = $2)`;
+      params.push(date);
+    }
+    
+    query += ` ORDER BY rsr.created_at DESC`;
+
+    console.log(`🔍 Query: ${query}`);
+    console.log(`🔍 Params:`, params);
+
+    const result = await pool.query(query, params);
+    
+    console.log(`📊 Found ${result.rows.length} transfer records`);
+    
+    const transfers = result.rows.map((row, index) => ({
+      serialNo: index + 1,
+      brandName: row.brand_name,
+      brandNumber: row.brand_number,
+      sizeCode: row.size_code,
+      sizeMl: row.size_ml,
+      packQuantity: row.pack_quantity,
+      quantity: row.quantity,
+      price: row.final_price,
+      supplierName: row.supplier_name || 'Unknown',
+      supplierCode: row.supplier_retailer_code || 'N/A',
+      transferDate: row.record_date || row.created_at
+    }));
+
+    res.json({ transfers });
+  } catch (error) {
+    console.error('Error fetching stock shifted in:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get stock shifted out (sent to other shops)
+app.get('/api/stock-transfers/shifted-out', authenticateToken, async (req, res) => {
+  try {
+    const { date } = req.query;
+    const shopId = parseInt(req.user.shopId);
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+
+    console.log(`📤 Fetching stock shifted out for shop ${shopId}, date: ${date || 'all'}`);
+
+    let query = `
+      SELECT 
+        rsr.id,
+        rsr.created_at,
+        rsr.record_date,
+        rsr.transfer_quantity as quantity,
+        rsr.supplier_code,
+        rsr.supplier_shop_id,
+        mb.brand_name,
+        mb.brand_number,
+        mb.size_code,
+        mb.size_ml,
+        mb.pack_quantity,
+        mb.standard_mrp as final_price,
+        ss.shop_name as supplier_name,
+        ss.retailer_code as supplier_retailer_code
+      FROM received_stock_records rsr
+      JOIN master_brands mb ON rsr.master_brand_id = mb.id
+      LEFT JOIN supplier_shops ss ON rsr.supplier_shop_id = ss.id
+      WHERE rsr.shop_id = $1 AND rsr.transfer_quantity < 0
+    `;
+    
+    const params = [shopId];
+    
+    if (date) {
+      query += ` AND (DATE(rsr.record_date) = $2 OR DATE(rsr.created_at) = $2)`;
+      params.push(date);
+    }
+    
+    query += ` ORDER BY rsr.created_at DESC`;
+
+    console.log(`🔍 Query: ${query}`);
+    console.log(`🔍 Params:`, params);
+
+    const result = await pool.query(query, params);
+    
+    console.log(`📊 Found ${result.rows.length} transfer records`);
+    
+    const transfers = result.rows.map((row, index) => ({
+      serialNo: index + 1,
+      brandName: row.brand_name,
+      brandNumber: row.brand_number,
+      sizeCode: row.size_code,
+      sizeMl: row.size_ml,
+      packQuantity: row.pack_quantity,
+      quantity: Math.abs(row.quantity), // Make positive for display
+      price: row.final_price,
+      supplierName: row.supplier_name || 'Unknown',
+      supplierCode: row.supplier_retailer_code || 'N/A',
+      transferDate: row.record_date || row.created_at
+    }));
+
+    res.json({ transfers });
+  } catch (error) {
+    console.error('Error fetching stock shifted out:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Basic route
 app.get('/', (req, res) => {
  res.json({ message: 'Wine Shop Inventory API is running!' });

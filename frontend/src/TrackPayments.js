@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './TrackPayments.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -52,7 +53,7 @@ function getCurrentCalendarDate() {
   return istTime.toLocaleDateString('en-CA');
 }
 
-function TrackPayments({ onNavigate }) {
+function TrackPayments({ onNavigate, onLogout }) {
   const [selectedDate, setSelectedDate] = useState(getBusinessDate());
   const [currentBusinessDate, setCurrentBusinessDate] = useState(getBusinessDate());
   
@@ -272,7 +273,7 @@ function TrackPayments({ onNavigate }) {
           <button className="track-payments-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
 
           <button className="track-payments-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="track-payments-nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
 import './IndentEstimate.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Constants
 const SEARCH_DEBOUNCE_DELAY = 150;
@@ -82,7 +83,7 @@ function stateReducer(state, action) {
   }
 }
 
-function IndentEstimate({ onNavigate, onBack }) {
+function IndentEstimate({ onNavigate, onBack, onLogout }) {
   const [state, dispatch] = useReducer(stateReducer, initialState);
   const searchContainerRef = useRef(null);
   const summaryRef = useRef(null);
@@ -527,7 +528,7 @@ function IndentEstimate({ onNavigate, onBack }) {
           <button className="indent-estimate-nav-btn indent-estimate-nav-btn-active" onClick={onBack}>Manage Stock</button>
           <button className="indent-estimate-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="indent-estimate-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="indent-estimate-nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

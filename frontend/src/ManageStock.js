@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import './ManageStock.css';
 import IndentEstimate from './IndentEstimate';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
-function ManageStock({ onNavigate }) {
+function ManageStock({ onNavigate, onLogout }) {
   const [currentView, setCurrentView] = useState('main');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const shopName = user.shopName || 'Liquor Ledger';
 
   if (currentView === 'indentEstimate') {
-    return <IndentEstimate onNavigate={onNavigate} onBack={() => setCurrentView('main')} />;
+    return <IndentEstimate onNavigate={onNavigate} onBack={() => setCurrentView('main')} onLogout={onLogout} />;
   }
 
   return (
@@ -25,7 +26,7 @@ function ManageStock({ onNavigate }) {
           <button className="nav-btn active">Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

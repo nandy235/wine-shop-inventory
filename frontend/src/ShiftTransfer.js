@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ShiftTransfer.css';
 import API_BASE_URL from './config';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
+import SettingsDropdown from './SettingsDropdown';
 
-function ShiftTransfer({ onNavigate }) {
+function ShiftTransfer({ onNavigate, onLogout }) {
   console.log('🔍 ShiftTransfer - Component rendering');
   // Match IndentEstimate search behavior
   const SEARCH_DEBOUNCE_DELAY = 150;
@@ -750,7 +751,7 @@ function ShiftTransfer({ onNavigate }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

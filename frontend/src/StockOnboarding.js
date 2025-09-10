@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import './StockOnboarding.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
-function StockOnboarding({ onNavigate }) {
+function StockOnboarding({ onNavigate, onLogout }) {
   const [masterBrands, setMasterBrands] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,7 +149,7 @@ function StockOnboarding({ onNavigate }) {
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
       

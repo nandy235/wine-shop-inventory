@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './ViewCurrentStock.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -31,7 +32,7 @@ function getBusinessDate() {
   }
 }
 
-function ViewCurrentStock({ onNavigate }) {
+function ViewCurrentStock({ onNavigate, onLogout }) {
  const [inventory, setInventory] = useState([]);
  const [loading, setLoading] = useState(true);
  const [editingRow, setEditingRow] = useState(null);
@@ -289,7 +290,7 @@ Object.keys(groupedInventory).forEach(baseName => {
          <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
                    <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <button className="nav-btn">Settings</button>
+         <SettingsDropdown onLogout={onLogout} />
        </nav>
      </header>
 

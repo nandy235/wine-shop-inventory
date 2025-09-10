@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import './UploadInvoice.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -31,7 +32,7 @@ function getBusinessDate() {
   }
 }
 
-function UploadInvoice({ onNavigate }) {
+function UploadInvoice({ onNavigate, onLogout }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [parsedData, setParsedData] = useState(null);
@@ -242,7 +243,7 @@ function UploadInvoice({ onNavigate }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

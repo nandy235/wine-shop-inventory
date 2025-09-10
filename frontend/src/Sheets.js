@@ -1,7 +1,8 @@
 import React from 'react';
 import './Sheets.css';
+import SettingsDropdown from './SettingsDropdown';
 
-function Sheets({ onNavigate }) {
+function Sheets({ onNavigate, onLogout }) {
  const user = JSON.parse(localStorage.getItem('user') || '{}');
  const shopName = user.shopName || 'Liquor Ledger';
 
@@ -19,7 +20,7 @@ function Sheets({ onNavigate }) {
          <button className="sheets-nav-btn sheets-nav-btn-active">Sheets</button>
  
          <button className="sheets-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <button className="sheets-nav-btn">Settings</button>
+         <SettingsDropdown onLogout={onLogout} />
        </nav>
      </header>
 

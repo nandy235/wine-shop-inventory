@@ -1,7 +1,8 @@
 import React from 'react';
 import './Reports.css';
+import SettingsDropdown from './SettingsDropdown';
 
-function Reports({ onNavigate }) {
+function Reports({ onNavigate, onLogout }) {
  const user = JSON.parse(localStorage.getItem('user') || '{}');
  const shopName = user.shopName || 'Liquor Ledger';
 
@@ -18,7 +19,7 @@ function Reports({ onNavigate }) {
          <button className="reports-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
          <button className="reports-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
          <button className="reports-nav-btn reports-nav-btn-active">Reports</button>
-         <button className="reports-nav-btn">Settings</button>
+         <SettingsDropdown onLogout={onLogout} />
        </nav>
      </header>
 
@@ -73,6 +74,18 @@ function Reports({ onNavigate }) {
             <div className="reports-card-content">
               <h3 className="reports-card-title">Sales Report</h3>
               <p className="reports-card-description">Sales analysis by brand with performance metrics</p>
+            </div>
+            <div className="reports-card-arrow">→</div>
+          </div>
+
+          <div 
+            className="reports-action-card reports-action-card-teal"
+            onClick={() => onNavigate('stockTransferReport')}
+          >
+            <div className="reports-card-icon">🔄</div>
+            <div className="reports-card-content">
+              <h3 className="reports-card-title">Stock Transfer Report</h3>
+              <p className="reports-card-description">View and download stock transfer reports by date</p>
             </div>
             <div className="reports-card-arrow">→</div>
           </div>

@@ -143,6 +143,14 @@
   border-color: #dd6b20;
 }
 
+.reports-action-card-teal {
+  border-left: 4px solid #319795;
+}
+
+.reports-action-card-teal:hover {
+  border-color: #319795;
+}
+
 .reports-card-icon {
   font-size: 2.5rem;
   width: 60px;

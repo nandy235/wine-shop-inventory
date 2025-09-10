@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './IncomeExpensesReport.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to calculate business date
 const calculateBusinessDate = () => {
@@ -80,7 +81,7 @@ const getMonthsInYear = (year) => {
   return months;
 };
 
-function IncomeExpensesReport({ onNavigate }) {
+function IncomeExpensesReport({ onNavigate, onLogout }) {
   const businessDate = calculateBusinessDate();
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
@@ -516,7 +517,7 @@ function IncomeExpensesReport({ onNavigate }) {
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn active" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

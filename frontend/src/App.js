@@ -17,6 +17,7 @@ import StockLifted from './StockLifted';
 import SalesReport from './SalesReport';
 import AddSupplier from './AddSupplier';
 import ShiftTransfer from './ShiftTransfer';
+import StockTransferReport from './StockTransferReport';
 import './App.css';
 import API_BASE_URL from './config';
 
@@ -74,6 +75,13 @@ function App() {
     setCurrentView(view);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setIsAuthenticated(false);
+    setCurrentView('login');
+  };
+
   if (loading) {
     return <div>Loading...</div>;
   }
@@ -99,52 +107,55 @@ function App() {
   return (
     <div className="App">
       {currentView === 'dashboard' && (
-        <Dashboard onNavigate={handleNavigate} />
+        <Dashboard onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'stockOnboarding' && (
-        <StockOnboarding onNavigate={handleNavigate} />
+        <StockOnboarding onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'viewCurrentStock' && (
-        <ViewCurrentStock onNavigate={handleNavigate} />
+        <ViewCurrentStock onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'manageStock' && (
-        <ManageStock onNavigate={handleNavigate} />
+        <ManageStock onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'uploadInvoice' && (
-        <UploadInvoice onNavigate={handleNavigate} />
+        <UploadInvoice onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'sheets' && (
-        <Sheets onNavigate={handleNavigate} />
+        <Sheets onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'updateClosingStock' && (
-        <UpdateClosingStock onNavigate={handleNavigate} />
+        <UpdateClosingStock onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'incomeExpenses' && (
-        <IncomeExpenses onNavigate={handleNavigate} />
+        <IncomeExpenses onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'incomeExpensesReport' && (
-        <IncomeExpensesReport onNavigate={handleNavigate} />
+        <IncomeExpensesReport onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'trackPayments' && (
-        <TrackPayments onNavigate={handleNavigate} />
+        <TrackPayments onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'downloadSaleSheet' && (
-        <DownloadSaleSheet onNavigate={handleNavigate} />
+        <DownloadSaleSheet onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'reports' && (
-        <Reports onNavigate={handleNavigate} />
+        <Reports onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'stockLifted' && (
-        <StockLifted onNavigate={handleNavigate} />
+        <StockLifted onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'brandWiseSales' && (
-        <SalesReport onNavigate={handleNavigate} />
+        <SalesReport onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'addSupplier' && (
-        <AddSupplier onNavigate={handleNavigate} />
+        <AddSupplier onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'shiftTransfer' && (
-        <ShiftTransfer onNavigate={handleNavigate} />
+        <ShiftTransfer onNavigate={handleNavigate} onLogout={handleLogout} />
+      )}
+      {currentView === 'stockTransferReport' && (
+        <StockTransferReport onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
     </div>
   );

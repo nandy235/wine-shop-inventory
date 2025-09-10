@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import './AddSupplier.css';
 import API_BASE_URL from './config';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
+import SettingsDropdown from './SettingsDropdown';
 
-function AddSupplier({ onNavigate }) {
+function AddSupplier({ onNavigate, onLogout }) {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -282,7 +283,7 @@ function AddSupplier({ onNavigate }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './UpdateClosingStock.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -23,7 +24,7 @@ function getBusinessDate() {
 
 
 
-function UpdateClosingStock({ onNavigate }) {
+function UpdateClosingStock({ onNavigate, onLogout }) {
  const [stockData, setStockData] = useState([]);
  const [filteredData, setFilteredData] = useState([]);
  const [loading, setLoading] = useState(true);
@@ -263,7 +264,7 @@ function UpdateClosingStock({ onNavigate }) {
          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
                    <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <button className="update-closing-stock-nav-btn">Settings</button>
+         <SettingsDropdown onLogout={onLogout} />
        </nav>
      </header>
 

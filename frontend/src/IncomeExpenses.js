@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './IncomeExpenses.css';
 import API_BASE_URL from './config';
+import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -31,7 +32,7 @@ function getBusinessDate() {
   }
 }
 
-function IncomeExpenses({ onNavigate }) {
+function IncomeExpenses({ onNavigate, onLogout }) {
   const [date, setDate] = useState(getBusinessDate());
   const [incomeData, setIncomeData] = useState([]);
   const [expensesData, setExpensesData] = useState([]);
@@ -385,7 +386,7 @@ function IncomeExpenses({ onNavigate }) {
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="income-expenses-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="income-expenses-nav-btn">Settings</button>
+          <SettingsDropdown onLogout={onLogout} />
         </nav>
       </header>
 
