@@ -211,14 +211,13 @@ class DatabaseService {
   async addShopProduct(productData) {
     const { masterBrandId, shopId, markupPrice, finalPrice, currentQuantity } = productData;
     
-    // Use UPSERT to handle potential race conditions
+    // Use UPSERT but let triggers handle quantity updates (no manual addition)
     const query = `
       INSERT INTO shop_inventory 
       (master_brand_id, shop_id, markup_price, final_price, current_quantity, is_active, last_updated)
-      VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, 0, true, CURRENT_TIMESTAMP)
       ON CONFLICT (shop_id, master_brand_id) 
       DO UPDATE SET
-        current_quantity = shop_inventory.current_quantity + EXCLUDED.current_quantity,
         markup_price = EXCLUDED.markup_price,
         final_price = EXCLUDED.final_price,
         is_active = true,
@@ -227,10 +226,21 @@ class DatabaseService {
         CASE WHEN xmax = 0 THEN 'inserted' ELSE 'updated' END as action
     `;
     
-    const values = [masterBrandId, shopId, markupPrice, finalPrice, currentQuantity];
+    const values = [masterBrandId, shopId, markupPrice, finalPrice];
     
     try {
       const result = await pool.query(query, values);
+      
+      // If currentQuantity is provided, add it via received_stock_records (let triggers handle it)
+      if (currentQuantity && currentQuantity > 0) {
+        const today = new Date().toISOString().split('T')[0];
+        await pool.query(`
+          INSERT INTO received_stock_records 
+          (shop_id, master_brand_id, record_date, manual_quantity, created_at)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        `, [shopId, masterBrandId, today, currentQuantity]);
+      }
+      
       return result.rows[0];
     } catch (error) {
       throw new Error(`Error adding shop product: ${error.message}`);
@@ -238,21 +248,43 @@ class DatabaseService {
   }
 
   async updateShopProductQuantity(shopId, masterBrandId, additionalQuantity, newMarkupPrice = null, newFinalPrice = null) {
+    // Update prices only, let triggers handle quantity changes via received_stock_records
     const query = `
       UPDATE shop_inventory 
       SET 
-        current_quantity = current_quantity + $3,
-        markup_price = COALESCE($4, markup_price),
-        final_price = COALESCE($5, final_price),
+        markup_price = COALESCE($3, markup_price),
+        final_price = COALESCE($4, final_price),
         last_updated = CURRENT_TIMESTAMP
       WHERE shop_id = $1 AND master_brand_id = $2
       RETURNING *
     `;
     
-    const values = [shopId, masterBrandId, additionalQuantity, newMarkupPrice, newFinalPrice];
+    const values = [shopId, masterBrandId, newMarkupPrice, newFinalPrice];
     
     try {
       const result = await pool.query(query, values);
+      
+      // If quantity change is needed, add it via received_stock_records (let triggers handle it)
+      if (additionalQuantity && additionalQuantity !== 0) {
+        const today = new Date().toISOString().split('T')[0];
+        
+        if (additionalQuantity > 0) {
+          // Positive quantity - add to manual_quantity
+          await pool.query(`
+            INSERT INTO received_stock_records 
+            (shop_id, master_brand_id, record_date, manual_quantity, created_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          `, [shopId, masterBrandId, today, additionalQuantity]);
+        } else {
+          // Negative quantity - add to shift_out (outgoing)
+          await pool.query(`
+            INSERT INTO received_stock_records 
+            (shop_id, master_brand_id, record_date, shift_out, created_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          `, [shopId, masterBrandId, today, additionalQuantity]);
+        }
+      }
+      
       return result.rows[0];
     } catch (error) {
       throw new Error(`Error updating shop product quantity: ${error.message}`);
@@ -600,14 +632,12 @@ class DatabaseService {
         ) record_count ON record_count.shop_inventory_id = si.id
         WHERE si.shop_id = $1 
           AND si.is_active = true
-        ON CONFLICT (shop_inventory_id, stock_date) 
-        DO UPDATE SET 
-          opening_stock = EXCLUDED.opening_stock,
-          -- Only reset received_stock to 0 if it's currently NULL
-          received_stock = CASE 
-            WHEN daily_stock_records.received_stock IS NULL THEN 0
-            ELSE daily_stock_records.received_stock 
-          END
+          -- Only insert records that don't already exist for this date
+          AND NOT EXISTS (
+            SELECT 1 FROM daily_stock_records dsr 
+            WHERE dsr.shop_inventory_id = si.id 
+            AND dsr.stock_date = $2
+          )
       `;
       
       const result = await pool.query(query, [shopId, date]);
@@ -724,16 +754,16 @@ class DatabaseService {
       
       // 1. Save invoice record
       const {
-        userId, invoiceNumber, date, originalInvoiceDate, totalValue,
+        userId, shopId, invoiceNumber, date, originalInvoiceDate, totalValue,
         netInvoiceValue, mrpRoundingOff, retailExciseTurnoverTax, specialExciseCess, tcs
       } = invoiceData;
       
-      // Get shop_id from user_id
-      const shopQuery = await client.query('SELECT id as shop_id FROM shops WHERE user_id = $1', [userId]);
-      if (shopQuery.rows.length === 0) {
-        throw new Error('Shop not found for user');
+      // Use the provided shopId directly
+      if (!shopId) {
+        throw new Error('Shop ID is required');
       }
-      const shopId = shopQuery.rows[0].shop_id;
+      
+      console.log(`🔍 saveInvoiceWithItems - Using shopId: ${shopId}, userId: ${userId}`);
       
       // Check if invoice already exists
       const existingInvoiceQuery = `
@@ -764,39 +794,36 @@ class DatabaseService {
       
       console.log(`💾 Invoice saved with ID: ${invoiceId}`);
       
-      // 2. Process shop_inventory records for all matched items
+      // 2. Ensure shop_inventory records exist for all matched items (quantities will be updated by triggers)
       if (items && items.length > 0) {
         for (const item of items) {
           if (item.masterBrandId) {
             // Check if shop_inventory record exists for this product
             const inventoryCheck = await client.query(`
-              SELECT id, current_quantity FROM shop_inventory 
+              SELECT id FROM shop_inventory 
               WHERE shop_id = $1 AND master_brand_id = $2
             `, [shopId, item.masterBrandId]);
             
             if (inventoryCheck.rows.length === 0) {
-              // Create shop_inventory record for new product
+              // Create shop_inventory record for new product (quantity will be set by triggers)
               await client.query(`
                 INSERT INTO shop_inventory 
                 (shop_id, master_brand_id, current_quantity, markup_price, final_price, is_active, last_updated)
-                VALUES ($1, $2, $3, 0, $4, true, CURRENT_TIMESTAMP)
-              `, [shopId, item.masterBrandId, item.totalQuantity, item.mrp || 0]);
+                VALUES ($1, $2, 0, 0, $3, true, CURRENT_TIMESTAMP)
+              `, [shopId, item.masterBrandId, item.mrp || 0]);
               
-              console.log(`📦 Created shop_inventory record for ${item.brandNumber} ${item.size} with quantity: ${item.totalQuantity}`);
+              console.log(`📦 Created shop_inventory record for ${item.brandNumber} ${item.size} (quantity will be updated by triggers)`);
             } else {
-              // Update existing shop_inventory record - add the new stock
-              const currentQty = inventoryCheck.rows[0].current_quantity || 0;
-              const newQty = currentQty + item.totalQuantity;
+              // Update final_price if provided
+              if (item.mrp) {
+                await client.query(`
+                  UPDATE shop_inventory 
+                  SET final_price = $1, last_updated = CURRENT_TIMESTAMP
+                  WHERE shop_id = $2 AND master_brand_id = $3
+                `, [item.mrp, shopId, item.masterBrandId]);
+              }
               
-              await client.query(`
-                UPDATE shop_inventory 
-                SET current_quantity = $1, 
-                    final_price = COALESCE($2, final_price),
-                    last_updated = CURRENT_TIMESTAMP
-                WHERE shop_id = $3 AND master_brand_id = $4
-              `, [newQty, item.mrp || null, shopId, item.masterBrandId]);
-              
-              console.log(`📦 Updated shop_inventory for ${item.brandNumber} ${item.size}: ${currentQty} + ${item.totalQuantity} = ${newQty}`);
+              console.log(`📦 Updated final_price for ${item.brandNumber} ${item.size} (quantity will be updated by triggers)`);
             }
           }
         }
@@ -826,7 +853,7 @@ class DatabaseService {
                 SET invoice_quantity = invoice_quantity + $1,
                     mrp_price = COALESCE($2, mrp_price),
                     notes = COALESCE($3, notes),
-                    supplier_code = COALESCE($4, supplier_code),
+                    store_code = COALESCE($4, store_code),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $5
               `;
@@ -842,9 +869,9 @@ class DatabaseService {
               // Insert new record
               const receivedStockQuery = `
                 INSERT INTO received_stock_records 
-                (shop_id, master_brand_id, record_date, supplier_code, invoice_quantity, 
-                 mrp_price, invoice_id, notes, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (shop_id, master_brand_id, record_date, store_code, invoice_quantity, 
+                 mrp_price, invoice_id, notes, created_by, shift_in, shift_out)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
               `;
               
               await client.query(receivedStockQuery, [
@@ -856,7 +883,9 @@ class DatabaseService {
                 item.mrp || 0,
                 invoiceId,
                 `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
-                userId
+                userId,
+                0, // shift_in = 0 for invoice uploads
+                0  // shift_out = 0 for invoice uploads
               ]);
             }
             
@@ -1502,23 +1531,25 @@ class DatabaseService {
   async addReceivedStock(stockData) {
     const {
       shopId, masterBrandId, recordDate, invoiceQuantity = 0, 
-      manualQuantity = 0, transferQuantity = 0, invoiceId = null,
-      transferReference = null, notes = null, createdBy = null, supplierCode = null,
-      supplierShopId = null, sourceShopId = null
+      shiftIn = 0, shiftOut = 0, invoiceId = null,
+      transferReference = null, notes = null, createdBy = null, 
+      sourceStoreCode = null, destinationStoreCode = null
     } = stockData;
     
     const query = `
       INSERT INTO received_stock_records (
-        shop_id, master_brand_id, record_date, supplier_code, source_shop_id, supplier_shop_id,
-        invoice_quantity, manual_quantity, transfer_quantity, invoice_id, 
+        shop_id, master_brand_id, record_date,
+        source_store_code, destination_store_code,
+        invoice_quantity, shift_in, shift_out, invoice_id, 
         transfer_reference, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *
     `;
     
     const values = [
-      shopId, masterBrandId, recordDate, supplierCode, sourceShopId, supplierShopId,
-      invoiceQuantity, manualQuantity, transferQuantity, invoiceId,
+      shopId, masterBrandId, recordDate,
+      sourceStoreCode, destinationStoreCode,
+      invoiceQuantity, shiftIn, shiftOut, invoiceId,
       transferReference, notes, createdBy
     ];
     
@@ -1574,25 +1605,27 @@ class DatabaseService {
 
   async updateReceivedStock(id, updates) {
     const {
-      invoiceQuantity, manualQuantity, transferQuantity,
-      transferReference, notes, supplierCode
+      invoiceQuantity, shiftIn, shiftOut,
+      transferReference, notes,
+      sourceStoreCode, destinationStoreCode
     } = updates;
     
     const query = `
       UPDATE received_stock_records 
       SET 
         invoice_quantity = COALESCE($2, invoice_quantity),
-        manual_quantity = COALESCE($3, manual_quantity),
-        transfer_quantity = COALESCE($4, transfer_quantity),
+        shift_in = COALESCE($3, shift_in),
+        shift_out = COALESCE($4, shift_out),
         transfer_reference = COALESCE($5, transfer_reference),
         notes = COALESCE($6, notes),
-        supplier_code = COALESCE($7, supplier_code),
+        source_store_code = COALESCE($7, source_store_code),
+        destination_store_code = COALESCE($8, destination_store_code),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `;
     
-    const values = [id, invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes, supplierCode];
+    const values = [id, invoiceQuantity, shiftIn, shiftOut, transferReference, notes, sourceStoreCode, destinationStoreCode];
     
     try {
       const result = await pool.query(query, values);
@@ -1634,7 +1667,7 @@ class DatabaseService {
       // Create outgoing transfer record (negative quantity)
       const outgoingQuery = `
         INSERT INTO received_stock_records (
-          shop_id, master_brand_id, record_date, transfer_quantity,
+          shop_id, master_brand_id, record_date, shift_out,
           transfer_reference, notes, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
@@ -1648,7 +1681,7 @@ class DatabaseService {
       // Create incoming transfer record (positive quantity)
       const incomingQuery = `
         INSERT INTO received_stock_records (
-          shop_id, master_brand_id, record_date, transfer_quantity,
+          shop_id, master_brand_id, record_date, shift_in,
           transfer_reference, notes, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
@@ -1686,14 +1719,23 @@ class DatabaseService {
         mb.size_code,
         u.name as created_by_name,
         CASE 
-          WHEN rs.transfer_quantity > 0 THEN 'RECEIVED'
-          WHEN rs.transfer_quantity < 0 THEN 'TRANSFERRED_OUT'
+          WHEN rs.shift_in > 0 AND rs.shift_out > 0 THEN 'BOTH'
+          WHEN rs.shift_in > 0 THEN 'RECEIVED'
+          WHEN rs.shift_out > 0 THEN 'TRANSFERRED_OUT'
           ELSE 'NO_TRANSFER'
-        END as transfer_type
+        END as transfer_type,
+        COALESCE(ss.shop_name, s.shop_name, 'Unknown') as source_name,
+        COALESCE(ss.retailer_code, s.retailer_code, rs.source_store_code) as source_retailer_code,
+        COALESCE(ds.shop_name, ds2.shop_name, 'Unknown') as destination_name,
+        COALESCE(ds.retailer_code, ds2.retailer_code, rs.destination_store_code) as destination_retailer_code
       FROM received_stock_records rs
       JOIN master_brands mb ON rs.master_brand_id = mb.id
       LEFT JOIN users u ON rs.created_by = u.id
-      WHERE rs.shop_id = $1 AND rs.transfer_quantity != 0
+      LEFT JOIN external_stores ss ON rs.source_store_code = ss.retailer_code
+      LEFT JOIN shops s ON rs.source_store_code = s.retailer_code
+      LEFT JOIN external_stores ds ON rs.destination_store_code = ds.retailer_code
+      LEFT JOIN shops ds2 ON rs.destination_store_code = ds2.retailer_code
+      WHERE rs.shop_id = $1 AND (rs.shift_in > 0 OR rs.shift_out > 0)
       ${date ? 'AND rs.record_date = $2' : ''}
       ORDER BY rs.record_date DESC, rs.created_at DESC
     `;
@@ -1956,20 +1998,20 @@ class DatabaseService {
   }
 
   // Stock Shift Methods
-  async getReceivedStockRecord(shopId, masterBrandId, recordDate, supplierCode = null, supplierShopId = null) {
-    // Use both supplierCode and supplierShopId for lookup to ensure proper accumulation
+  async getReceivedStockRecord(shopId, masterBrandId, recordDate, sourceStoreCode = null, destinationStoreCode = null) {
+    // Use source/destination store codes for lookup to ensure proper accumulation
     const query = `
       SELECT * FROM received_stock_records
       WHERE shop_id = $1
         AND master_brand_id = $2
         AND record_date = $3
-        AND supplier_code IS NOT DISTINCT FROM $4
-        AND supplier_shop_id IS NOT DISTINCT FROM $5
+        AND source_store_code IS NOT DISTINCT FROM $4
+        AND destination_store_code IS NOT DISTINCT FROM $5
       LIMIT 1
     `;
     
     try {
-      const params = [shopId, masterBrandId, recordDate, supplierCode, supplierShopId];
+      const params = [shopId, masterBrandId, recordDate, sourceStoreCode, destinationStoreCode];
         
       const result = await pool.query(query, params);
       return result.rows[0] || null;
@@ -1979,13 +2021,16 @@ class DatabaseService {
   }
 
   async createReceivedStockRecord(data) {
-    const { shopId, masterBrandId, recordDate, invoiceQuantity, manualQuantity, shiftTransferQuantity, createdBy, supplierCode = null, supplierShopId = null } = data;
+    const { 
+      shopId, masterBrandId, recordDate, invoiceQuantity, shiftIn, shiftOut, createdBy, 
+      sourceStoreCode = null, destinationStoreCode = null 
+    } = data;
     
     const query = `
       INSERT INTO received_stock_records (
         shop_id, master_brand_id, record_date,
-        supplier_code, supplier_shop_id,
-        invoice_quantity, manual_quantity, transfer_quantity,
+        source_store_code, destination_store_code,
+        invoice_quantity, shift_in, shift_out,
         created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
@@ -1994,8 +2039,8 @@ class DatabaseService {
     try {
       const result = await pool.query(query, [
         shopId, masterBrandId, recordDate,
-        supplierCode, supplierShopId,
-        invoiceQuantity, manualQuantity, shiftTransferQuantity,
+        sourceStoreCode, destinationStoreCode,
+        invoiceQuantity, shiftIn, shiftOut,
         createdBy
       ]);
       return result.rows[0];
@@ -2012,20 +2057,30 @@ class DatabaseService {
       accumulate: accumulate
     });
     
-    const { shiftTransferQuantity, invoiceQuantity } = quantities;
+    const { shiftIn, shiftOut, invoiceQuantity, sourceStoreCode, destinationStoreCode } = quantities;
     
     let query = 'UPDATE received_stock_records SET ';
     const values = [];
     const updates = [];
     let paramCount = 1;
 
-    if (shiftTransferQuantity !== undefined) {
+    if (shiftIn !== undefined) {
       if (accumulate) {
-        updates.push(`transfer_quantity = transfer_quantity + $${paramCount}`);
+        updates.push(`shift_in = shift_in + $${paramCount}`);
       } else {
-        updates.push(`transfer_quantity = $${paramCount}`);
+        updates.push(`shift_in = $${paramCount}`);
       }
-      values.push(shiftTransferQuantity);
+      values.push(shiftIn);
+      paramCount++;
+    }
+
+    if (shiftOut !== undefined) {
+      if (accumulate) {
+        updates.push(`shift_out = shift_out + $${paramCount}`);
+      } else {
+        updates.push(`shift_out = $${paramCount}`);
+      }
+      values.push(shiftOut);
       paramCount++;
     }
 
@@ -2036,6 +2091,18 @@ class DatabaseService {
         updates.push(`invoice_quantity = $${paramCount}`);
       }
       values.push(invoiceQuantity);
+      paramCount++;
+    }
+
+    if (sourceStoreCode !== undefined) {
+      updates.push(`source_store_code = $${paramCount}`);
+      values.push(sourceStoreCode);
+      paramCount++;
+    }
+
+    if (destinationStoreCode !== undefined) {
+      updates.push(`destination_store_code = $${paramCount}`);
+      values.push(destinationStoreCode);
       paramCount++;
     }
 

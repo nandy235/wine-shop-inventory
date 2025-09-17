@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './UpdateClosingStock.css';
 import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -47,6 +46,44 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
    const year = date.getFullYear();
    return `${day}-${month}-${year}`;
  };
+
+ // Group inventory items by brand name for rowspan display
+ const getGroupedInventoryForDisplay = () => {
+   const groups = {};
+   const result = [];
+   
+   // First, group items by brand name
+   filteredData.forEach((item, originalIndex) => {
+     const brandName = item.brandName;
+     if (!groups[brandName]) {
+       groups[brandName] = [];
+     }
+     groups[brandName].push({
+       ...item,
+       originalIndex
+     });
+   });
+   
+   // Convert to display format with rowspan info
+   let serialNumber = 1;
+   Object.keys(groups).forEach(brandName => {
+     const variants = groups[brandName];
+     variants.forEach((variant, variantIndex) => {
+       result.push({
+         ...variant,
+         brandName,
+         isFirstVariant: variantIndex === 0,
+         isLastVariant: variantIndex === variants.length - 1,
+         variantCount: variants.length,
+         serialNumber: variantIndex === 0 ? serialNumber : null
+       });
+     });
+     serialNumber++;
+   });
+   
+   return result;
+ };
+
 
  useEffect(() => {
    fetchTodayStock();
@@ -264,7 +301,7 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
                    <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <SettingsDropdown onLogout={onLogout} />
+         <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
        </nav>
      </header>
 
@@ -319,14 +356,41 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
            </thead>
            <tbody>
              {filteredData.length > 0 ? (
-               filteredData.map((item) => (
+               getGroupedInventoryForDisplay().map((item) => (
                  <tr key={item.id}>
-                   <td>{item.serialNo}</td>
-                   <td className="update-closing-stock-brand-name">{item.brandName}</td>
+                   {/* Serial Number - only show for first variant of each brand */}
+                   {item.isFirstVariant && (
+                     <td 
+                       className="grouped-serial" 
+                       rowSpan={item.variantCount}
+                     >
+                       {item.serialNumber}
+                     </td>
+                   )}
+                   
+                   {/* Brand Name - only show for first variant of each brand */}
+                   {item.isFirstVariant && (
+                     <td 
+                       className="update-closing-stock-brand-name grouped-brand-cell" 
+                       rowSpan={item.variantCount}
+                     >
+                       {item.brandName}
+                     </td>
+                   )}
+                   
+                   {/* Size - individual for each variant */}
                    <td>{item.size}</td>
+                   
+                   {/* Opening Stock - individual for each variant */}
                    <td>{item.openingStock}</td>
+                   
+                   {/* Received - individual for each variant */}
                    <td>{item.received}</td>
+                   
+                   {/* Total - individual for each variant */}
                    <td>{item.total}</td>
+                   
+                   {/* Closing Stock Input - individual for each variant */}
                    <td>
                      <input
                        type="number"
@@ -340,6 +404,8 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
                        placeholder={!item.isClosingStockSet ? `${item.total} (auto)` : '0'}
                      />
                    </td>
+                   
+                   {/* Sales - individual for each variant */}
                    <td className="update-closing-stock-sales">{item.sales}</td>
                  </tr>
                ))

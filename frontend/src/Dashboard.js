@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './Dashboard.css';
 import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -186,7 +185,7 @@ function Dashboard({ onNavigate, onLogout }) {
           <button className="nav-button" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-button" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-button" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-button logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
       

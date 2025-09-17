@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './SalesReport.css';
 import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
 
 // Business date helper (11:30 AM IST boundary)
 const calculateBusinessDate = () => {
@@ -778,7 +777,7 @@ function SalesReport({ onNavigate, onLogout }) {
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn active" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 

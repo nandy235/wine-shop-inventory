@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import './ManageStock.css';
 import IndentEstimate from './IndentEstimate';
-import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
+import StockReceived from './StockReceived';
 
 function ManageStock({ onNavigate, onLogout }) {
   const [currentView, setCurrentView] = useState('main');
@@ -12,6 +11,12 @@ function ManageStock({ onNavigate, onLogout }) {
   if (currentView === 'indentEstimate') {
     return <IndentEstimate onNavigate={onNavigate} onBack={() => setCurrentView('main')} onLogout={onLogout} />;
   }
+
+  if (currentView === 'stockReceived') {
+    return <StockReceived onNavigate={onNavigate} onBack={() => setCurrentView('main')} onLogout={onLogout} />;
+  }
+
+
 
   return (
     <div className="manage-stock-container">
@@ -26,7 +31,7 @@ function ManageStock({ onNavigate, onLogout }) {
           <button className="nav-btn active">Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 
@@ -37,6 +42,7 @@ function ManageStock({ onNavigate, onLogout }) {
         </div>
 
         <div className="stock-actions-grid">
+
           <div className="stock-action-card" onClick={() => onNavigate('uploadInvoice')}>
             <div className="action-icon invoice">📤</div>
             <div className="action-content">
@@ -61,11 +67,19 @@ function ManageStock({ onNavigate, onLogout }) {
             </div>
           </div>
 
-          <div className="stock-action-card" onClick={() => onNavigate('addSupplier')}>
-            <div className="action-icon supplier">👥</div>
+          <div className="stock-action-card" onClick={() => onNavigate('addStore')}>
+            <div className="action-icon supplier">🏪</div>
             <div className="action-content">
-              <h3 className="action-title">Add Supplier</h3>
-              <p className="action-description">Add and manage supplier information</p>
+              <h3 className="action-title">Add Store</h3>
+              <p className="action-description">Add and manage store information</p>
+            </div>
+          </div>
+
+          <div className="stock-action-card" onClick={() => setCurrentView('stockReceived')}>
+            <div className="action-icon received">📦</div>
+            <div className="action-content">
+              <h3 className="action-title">Stock Received</h3>
+              <p className="action-description">View all received stock records with source tracking</p>
             </div>
           </div>
         </div>

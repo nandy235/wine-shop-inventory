@@ -60,7 +60,7 @@ CREATE TABLE master_brands (
     brand_kind VARCHAR(50), -- Product sub-category (WHISKY, WINE, BEER, etc.)
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(brand_number, size_ml),
+    UNIQUE(brand_number, size_ml, pack_quantity, pack_type),
     CONSTRAINT chk_pack_qty_pos CHECK (pack_quantity > 0)
 );
 

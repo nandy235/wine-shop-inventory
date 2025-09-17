@@ -109,8 +109,9 @@ async function loadMasterBrandsFromDB(packTypeFilter = null, applyStockOnboardin
         const pTypes = group.filter(brand => brand.packType === 'P');
         
         if (gTypes.length > 0 && pTypes.length > 0) {
-          // Both G and P exist - prefer G
+          // Both G and P exist - return both
           filteredData.push(...gTypes);
+          filteredData.push(...pTypes);
         } else if (gTypes.length > 0) {
           // Only G exists
           filteredData.push(...gTypes);
@@ -303,18 +304,23 @@ setInterval(cleanupExpiredInvoices, 10 * 60 * 1000);
 // ===== STOCK SHIFT ENDPOINT =====
 app.post('/api/stock-shift', authenticateToken, async (req, res) => {
   const requestId = Date.now() + Math.random();
+  
+  // Declare variables outside try block so they're accessible in catch block
+  let masterBrandId, shopInventoryId, quantity, storeName, isFromTGBCL, storeCode, storeShopId, shiftType;
+  let userId, shopId;
+  
   try {
     console.log(`\n🔄 [${requestId}] ===== STOCK SHIFT OPERATION STARTED =====`);
     console.log(`📅 [${requestId}] Timestamp: ${new Date().toISOString()}`);
 
-    const {
+    ({
       masterBrandId, shopInventoryId, quantity,
-      supplierName, isFromTGBCL, supplierCode, supplierShopId,
+      storeName, isFromTGBCL, storeCode, storeShopId,
       shiftType
-    } = req.body;
+    } = req.body);
 
-    const userId = parseInt(req.user.userId);
-    const shopId = parseInt(req.user.shopId);
+    userId = parseInt(req.user.userId);
+    shopId = parseInt(req.user.shopId);
 
     console.log(`🔍 [${requestId}] Request Body:`, JSON.stringify(req.body, null, 2));
     console.log(`👤 [${requestId}] User Details:`, {
@@ -328,6 +334,8 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
 
     let actualMasterBrandId;
     let actualSourceShopId = null;
+    let sourceStoreCode = null;
+    let destinationStoreCode = null;
 
     // SHIFT OUT → convert shopInventoryId → master_brand_id
     if (shiftType === 'out') {
@@ -354,10 +362,27 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
       }
       
       actualMasterBrandId = convertResult.rows[0].master_brand_id;
+      
+      // For shift-out, determine the destination store code
+      if (storeShopId) {
+        // Internal transfer - get retailer_code from shops table
+        const shopInfo = await pool.query(
+          'SELECT retailer_code FROM shops WHERE id = $1',
+          [storeShopId]
+        );
+        if (shopInfo.rows.length > 0) {
+          destinationStoreCode = shopInfo.rows[0].retailer_code;
+        }
+      } else if (storeCode) {
+        // External transfer - use the provided store code
+        destinationStoreCode = storeCode;
+      }
+      
       console.log(`✅ [${requestId}] Successfully converted shop_inventory_id → master_brand_id:`, {
         shopInventoryId: shopInventoryId,
         masterBrandId: actualMasterBrandId,
-        shopId: shopId
+        shopId: shopId,
+        destinationStoreCode: destinationStoreCode
       });
     }
     // SHIFT IN
@@ -370,40 +395,35 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
         return res.status(400).json({ message: 'Product identifier required for shift in' });
       }
 
-      const internalTransfer = supplierShopId !== null;
+      const internalTransfer = storeShopId !== null;
       console.log(`🔍 [${requestId}] Transfer Analysis:`, {
         internalTransfer: internalTransfer,
-        supplierShopId: supplierShopId,
+        storeShopId: storeShopId,
         masterBrandId: masterBrandId,
         shopInventoryId: shopInventoryId,
         isFromTGBCL: isFromTGBCL
       });
 
       if (internalTransfer && shopInventoryId) {
-        console.log(`🏪 [${requestId}] Processing INTERNAL transfer from supplier shop: ${supplierShopId}`);
+        console.log(`🏪 [${requestId}] Processing INTERNAL transfer from supplier shop: ${storeShopId}`);
         
-        // Resolve supplier retailer_code → actual source shop id
-        console.log(`🔍 [${requestId}] Looking up supplier info for supplierShopId: ${supplierShopId}`);
-        const supplierInfo = await pool.query(
-          'SELECT retailer_code FROM supplier_shops WHERE id = $1',
-          [supplierShopId]
+        // For internal transfers, storeShopId is actually the shop ID
+        console.log(`🔍 [${requestId}] Processing internal transfer from shop ID: ${storeShopId}`);
+        actualSourceShopId = storeShopId;
+        
+        // Get the retailer_code for this shop
+        const shopInfo = await pool.query(
+          'SELECT retailer_code FROM shops WHERE id = $1',
+          [storeShopId]
         );
-        if (!supplierInfo.rows.length) {
-          console.log(`❌ [${requestId}] Invalid supplier shop ID: ${supplierShopId}`);
-          return res.status(400).json({ message: 'Invalid supplier shop ID' });
+        if (!shopInfo.rows.length) {
+          console.log(`❌ [${requestId}] Invalid shop ID: ${storeShopId}`);
+          return res.status(400).json({ message: 'Invalid shop ID' });
         }
 
-        const retailerCode = supplierInfo.rows[0].retailer_code;
-        console.log(`🔍 [${requestId}] Found supplier retailer_code: ${retailerCode}, looking up source shop`);
-        
-        const shopRes = await pool.query('SELECT id FROM shops WHERE retailer_code = $1', [retailerCode]);
-        if (!shopRes.rows.length) {
-          console.log(`❌ [${requestId}] No shop found for retailer_code: ${retailerCode}`);
-          return res.status(400).json({ message: 'No shop found for supplier retailer code' });
-        }
-
-        actualSourceShopId = shopRes.rows[0].id;
-        console.log(`✅ [${requestId}] Found source shop ID: ${actualSourceShopId} for retailer_code: ${retailerCode}`);
+        const retailerCode = shopInfo.rows[0].retailer_code;
+        sourceStoreCode = retailerCode; // For internal transfers, use the shop's retailer_code
+        console.log(`✅ [${requestId}] Found source shop ID: ${actualSourceShopId} with retailer_code: ${retailerCode}`);
 
         console.log(`🔍 [${requestId}] Looking up master_brand_id for shopInventoryId: ${shopInventoryId} in source shop: ${actualSourceShopId}`);
         const convertRes = await pool.query(
@@ -424,9 +444,19 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
           sourceShopId: actualSourceShopId
         });
       } else if (!internalTransfer && masterBrandId) {
-        console.log(`🏭 [${requestId}] Processing EXTERNAL transfer (TGBCL) with masterBrandId: ${masterBrandId}`);
+        console.log(`🏭 [${requestId}] Processing EXTERNAL transfer with masterBrandId: ${masterBrandId}`);
         
-        // External (TGBCL) IN
+        // External transfer - determine if it's TGBCL or external store
+        if (isFromTGBCL) {
+          console.log(`🏭 [${requestId}] Processing TGBCL transfer - no store code needed`);
+          sourceStoreCode = null; // TGBCL doesn't need store code
+        } else {
+          console.log(`🏭 [${requestId}] Processing external store transfer`);
+          // For external stores, storeCode should already be the 7-digit retailer code
+          sourceStoreCode = storeCode;
+        }
+        
+        // External (TGBCL or External Store) IN
         console.log(`🔍 [${requestId}] Verifying master brand exists: ${masterBrandId}`);
         const verify = await pool.query('SELECT id FROM master_brands WHERE id = $1', [masterBrandId]);
         if (!verify.rows.length) {
@@ -434,7 +464,7 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
           return res.status(400).json({ message: 'Product not found in master brands' });
         }
         actualMasterBrandId = masterBrandId;
-        console.log(`✅ [${requestId}] External IN: using masterBrandId: ${actualMasterBrandId}`);
+        console.log(`✅ [${requestId}] External IN: using masterBrandId: ${actualMasterBrandId}, sourceStoreCode: ${sourceStoreCode}`);
       } else {
         console.log(`❌ [${requestId}] Invalid request configuration:`, {
           internalTransfer: internalTransfer,
@@ -463,17 +493,17 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
     });
 
     // Enforce supplier selection
-    if (!isFromTGBCL && (!supplierName || supplierName === 'Unknown')) {
+    if (!isFromTGBCL && (!storeName || storeName === 'Unknown')) {
       console.log(`❌ [${requestId}] Supplier validation failed:`, {
         isFromTGBCL: isFromTGBCL,
-        supplierName: supplierName
+        storeName: storeName
       });
       return res.status(400).json({ message: 'Supplier is required for stock shift' });
     }
     console.log(`✅ [${requestId}] Supplier validation passed:`, {
-      supplierName: supplierName,
+      storeName: storeName,
       isFromTGBCL: isFromTGBCL,
-      supplierCode: supplierCode
+      storeCode: storeCode
     });
 
     const targetDate = getBusinessDate();
@@ -522,43 +552,53 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
       console.log(`✅ [${requestId}] Stock availability check passed`);
     }
 
-    // Get or create received stock record (supplier_code for TGBCL, supplier_shop_id for internal)
-    const internalTransferFlag = supplierShopId !== null;
+    // Get or create received stock record (store_code for TGBCL and external stores)
+    const internalTransferFlag = storeShopId !== null;
     let receivedStockRecord = await dbService.getReceivedStockRecord(
       shopId,
       actualMasterBrandId,
       targetDate,
-      supplierCode || (isFromTGBCL ? 'TGBCL' : null),
-      supplierShopId || null
+      sourceStoreCode,
+      destinationStoreCode
     );
 
     if (!receivedStockRecord) {
       const isTgbclInvoiceIn = isFromTGBCL && shiftType === 'in';
       const initialInvoiceQty = isTgbclInvoiceIn ? Math.abs(parseInt(quantity)) : 0;
-      const initialTransferQty = 0;
 
       receivedStockRecord = await dbService.createReceivedStockRecord({
         shopId,
         masterBrandId: actualMasterBrandId,
         recordDate: targetDate,
         invoiceQuantity: initialInvoiceQty,
-        manualQuantity: 0,
-        shiftTransferQuantity: initialTransferQty,
+        shiftIn: isFromTGBCL ? 0 : (shiftType === 'in' ? Math.abs(parseInt(quantity)) : 0),
+        shiftOut: isFromTGBCL ? 0 : (shiftType === 'out' ? -Math.abs(parseInt(quantity)) : 0),
         createdBy: userId,
-        supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null),
-        supplierShopId: supplierShopId || null
+        sourceStoreCode: shiftType === 'in' ? sourceStoreCode : null,
+        destinationStoreCode: shiftType === 'out' ? destinationStoreCode : null
       });
     }
 
-    const currentShiftQuantity = receivedStockRecord.transfer_quantity || 0;
+    const currentShiftIn = receivedStockRecord.shift_in || 0;
+    const currentShiftOut = receivedStockRecord.shift_out || 0;
     const currentInvoiceQuantity = receivedStockRecord.invoice_quantity || 0;
     const isTgbclInvoiceIn = isFromTGBCL && shiftType === 'in';
 
     const updates = {};
-    if (isTgbclInvoiceIn) {
+    if (isFromTGBCL) {
+      // TGBCL transfers only update invoice quantities
       updates.invoiceQuantity = currentInvoiceQuantity + Math.abs(parseInt(quantity));
     } else {
-      updates.shiftTransferQuantity = currentShiftQuantity + parseInt(quantity);
+      // Non-TGBCL transfers update shift quantities
+      if (shiftType === 'in') {
+        updates.shiftIn = currentShiftIn + Math.abs(parseInt(quantity));
+        updates.sourceStoreCode = sourceStoreCode;
+        updates.destinationStoreCode = null; // Shift-in has no destination
+      } else {
+        updates.shiftOut = currentShiftOut - Math.abs(parseInt(quantity));
+        updates.destinationStoreCode = destinationStoreCode;
+        updates.sourceStoreCode = null; // Shift-out has no source
+      }
     }
 
     // ===== DESTINATION SHOP UPDATE (FIRST) =====
@@ -567,15 +607,15 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
       try {
         let destShopId = null;
         console.log(`🔍 [${requestId}] Checking if destination is internal shop:`, {
-          supplierShopId: supplierShopId,
-          supplierName: supplierName
+          storeShopId: storeShopId,
+          storeName: storeName
         });
         
-        if (supplierShopId) {
-          console.log(`🔍 [${requestId}] Looking up destination shop for supplierShopId: ${supplierShopId}`);
+        if (storeShopId) {
+          console.log(`🔍 [${requestId}] Looking up destination shop for storeShopId: ${storeShopId}`);
           const supplierResult = await pool.query(
-            'SELECT shop_name, retailer_code FROM supplier_shops WHERE id = $1',
-            [parseInt(supplierShopId)]
+            'SELECT shop_name, retailer_code FROM external_stores WHERE id = $1',
+            [parseInt(storeShopId)]
           );
           if (supplierResult.rows.length > 0) {
             const { shop_name, retailer_code } = supplierResult.rows[0];
@@ -595,7 +635,7 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
               console.log(`❌ [${requestId}] No shop found for supplier: ${shop_name} (${retailer_code})`);
             }
           } else {
-            console.log(`❌ [${requestId}] No supplier found for ID: ${supplierShopId}`);
+            console.log(`❌ [${requestId}] No supplier found for ID: ${storeShopId}`);
           }
         }
 
@@ -637,8 +677,8 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
             destShopId,
             actualMasterBrandId,
             targetDate,
-            null,
-            shopId // source shop id as supplier_shop_id
+            req.user.retailerCode, // source shop retailer code as source_store_code
+            null // no destination for shift-in
           );
 
           if (!destRecord) {
@@ -647,14 +687,18 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
               masterBrandId: actualMasterBrandId,
               recordDate: targetDate,
               invoiceQuantity: 0,
-              manualQuantity: 0,
-              shiftTransferQuantity: absQty,
+              shiftIn: absQty,
+              shiftOut: 0,
               createdBy: userId,
-              supplierCode: req.user.retailerCode,
-              supplierShopId: shopId
+              sourceStoreCode: req.user.retailerCode,
+              destinationStoreCode: null // Shift-in has no destination
             });
           } else {
-            await dbService.updateReceivedStockQuantities(destRecord.id, { shiftTransferQuantity: absQty }, true);
+            await dbService.updateReceivedStockQuantities(destRecord.id, { 
+              shiftIn: absQty, 
+              sourceStoreCode: req.user.retailerCode,
+              destinationStoreCode: null // Shift-in has no destination
+            }, true);
           }
 
           // Update destination inventory
@@ -693,10 +737,10 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
     // ===== SHIFT IN → deduct from source if internal =====
     if (shiftType === 'in') {
       console.log(`\n🔍 [${requestId}] ===== SHIFT IN PROCESSING =====`);
-      const internalTransfer = supplierShopId !== null;
+      const internalTransfer = storeShopId !== null;
       console.log(`🔍 [${requestId}] Shift IN analysis:`, {
         internalTransfer: internalTransfer,
-        supplierShopId: supplierShopId,
+        storeShopId: storeShopId,
         actualSourceShopId: actualSourceShopId,
         quantity: quantity
       });
@@ -749,8 +793,7 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
             actualSourceShopId,
             actualMasterBrandId,
             targetDate,
-            null,
-            shopId // destination shop id
+            req.user.retailerCode // destination shop retailer code as store_code
           );
 
           if (!sourceRecord) {
@@ -758,16 +801,15 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
               shopId: actualSourceShopId,
               masterBrandId: actualMasterBrandId,
               recordDate: targetDate,
-              supplierCode: req.user.retailerCode,
-              supplierShopId: shopId,
+              storeCode: req.user.retailerCode,
               invoiceQuantity: 0,
-              manualQuantity: 0,
-              shiftTransferQuantity: -requestedQty,
+              shiftIn: 0,
+              shiftOut: requestedQty,
               createdBy: userId
             });
           } else {
-            const newQty = (sourceRecord.transfer_quantity || 0) - requestedQty;
-            await dbService.updateReceivedStockQuantities(sourceRecord.id, { shiftTransferQuantity: newQty }, false);
+            const newQty = (sourceRecord.shift_out || 0) + requestedQty;
+            await dbService.updateReceivedStockQuantities(sourceRecord.id, { shiftOut: newQty }, false);
           }
         } catch (e) {
           console.error('❌ Failed to process Shift IN from internal supplier:', e.message);
@@ -801,8 +843,8 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
     console.log(`✅ [${requestId}] Final result:`, {
       shiftType: shiftType,
       quantity: parseInt(quantity),
-      supplierName: supplierName,
-      supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null),
+      storeName: storeName,
+      storeCode: storeCode || (isFromTGBCL ? 'TGBCL' : null),
       actualMasterBrandId: actualMasterBrandId
     });
     
@@ -810,8 +852,8 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
       message: 'Stock shift completed successfully',
       shiftType,
       quantity: parseInt(quantity),
-      supplierName,
-      supplierCode: supplierCode || (isFromTGBCL ? 'TGBCL' : null)
+      storeName,
+      storeCode: storeCode || (isFromTGBCL ? 'TGBCL' : null)
     });
   } catch (error) {
     console.log(`\n❌ [${requestId}] ===== SHIFT OPERATION FAILED =====`);
@@ -822,7 +864,7 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
       requestId: requestId,
       shiftType: shiftType,
       quantity: quantity,
-      supplierName: supplierName
+      storeName: storeName
     });
     res.status(500).json({ message: 'Server error during stock shift', error: error.message });
   }
@@ -1163,6 +1205,11 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
     
     console.log('📅 Received businessDate:', businessDate);
     console.log('🆔 TempId:', tempId);
+    console.log('👤 User ID from token:', userId);
+    console.log('🏪 Shop ID from token:', shopId);
+    console.log('🔍 Raw req.user:', JSON.stringify(req.user, null, 2));
+    console.log('🔍 req.user.shopId type:', typeof req.user.shopId);
+    console.log('🔍 req.user.userId type:', typeof req.user.userId);
     
     if (!tempId) {
       return res.status(400).json({ message: 'Temporary ID is required' });
@@ -1214,6 +1261,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
     // Save invoice using the database service
     const savedInvoice = await dbService.saveInvoiceWithItems({
       userId,
+      shopId,
       invoiceNumber: invoiceData.invoiceNumber,
       date: finalBusinessDate, // Use business date for received_stock_records
       originalInvoiceDate: invoiceRecord.invoice_date, // Original invoice date for invoices table
@@ -1375,10 +1423,13 @@ app.post('/api/login', async (req, res) => {
      return res.status(400).json({ message: 'Retailer code must be exactly 7 digits' });
    }
    
-   const user = await dbService.findUserByRetailerCode(retailerCode);
-   if (!user) {
-     return res.status(400).json({ message: 'Invalid retailer code or password' });
-   }
+  const user = await dbService.findUserByRetailerCode(retailerCode);
+  if (!user) {
+    return res.status(400).json({ message: 'Invalid retailer code or password' });
+  }
+  
+  console.log(`🔍 Login attempt with retailer code: ${retailerCode}`);
+  console.log(`🔍 Found user: ${user.name}, Shop ID: ${user.shop_id}, Shop Name: ${user.shop_name}`);
    
    const isValidPassword = await bcrypt.compare(password, user.password);
    if (!isValidPassword) {
@@ -1456,6 +1507,9 @@ app.post('/api/register', async (req, res) => {
       address: address?.trim() || null,
       licenseNumber: licenseNumber?.trim() || null
     });
+
+    // Automatically create internal supplier relationships
+    await createInternalSuppliers(newUser.id, newUser.shopId);
     
     res.status(201).json({ 
       message: 'User registered successfully',
@@ -1492,6 +1546,110 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   }
 });
 
+// Stock onboarding save endpoint
+app.post('/api/stock-onboarding/save', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { products, businessDate } = req.body;
+    const userId = req.user.id;
+    const shopId = req.user.shopId;
+
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ message: 'No products provided for onboarding' });
+    }
+
+    console.log(`📦 Stock onboarding: ${products.length} products for shop ${shopId}`);
+
+    await client.query('BEGIN');
+
+    const results = {
+      inventoryUpdated: 0,
+      openingStockUpdated: 0,
+      errors: []
+    };
+
+    for (const product of products) {
+      try {
+        // Validate required fields
+        if (!product.id || !product.quantity || product.quantity <= 0) {
+          results.errors.push(`Invalid product data: ${product.name || 'Unknown'}`);
+          continue;
+        }
+
+        const masterBrandId = product.id;
+        const quantity = parseInt(product.quantity);
+        const markup = parseFloat(product.markup) || 0;
+        const mrp = parseFloat(product.mrp) || 0;
+        const finalPrice = mrp + markup;
+
+        // 1. Check if product already exists in shop inventory
+        const existingProductQuery = `
+          SELECT id FROM shop_inventory 
+          WHERE shop_id = $1 AND master_brand_id = $2
+        `;
+        const existingProduct = await client.query(existingProductQuery, [shopId, masterBrandId]);
+
+        if (existingProduct.rows.length > 0) {
+          // Product already exists - skip and add to errors
+          results.errors.push(`Product already exists in inventory: ${product.name} - Admin access needed to update existing products`);
+          continue;
+        }
+
+        // 2. Insert new product into shop_inventory
+        const inventoryQuery = `
+          INSERT INTO shop_inventory (shop_id, master_brand_id, markup_price, final_price, current_quantity)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+        `;
+
+        const inventoryResult = await client.query(inventoryQuery, [shopId, masterBrandId, markup, finalPrice, quantity]);
+        const shopInventoryId = inventoryResult.rows[0].id;
+        results.inventoryUpdated++;
+
+        // 3. Insert opening stock (O.S) record for the business date
+        const openingStockQuery = `
+          INSERT INTO daily_stock_records (shop_inventory_id, stock_date, opening_stock, closing_stock, received_stock)
+          VALUES ($1, $2, $3, NULL, 0)
+          ON CONFLICT (shop_inventory_id, stock_date)
+          DO UPDATE SET
+            opening_stock = EXCLUDED.opening_stock,
+            closing_stock = NULL
+        `;
+
+        await client.query(openingStockQuery, [shopInventoryId, businessDate, quantity]);
+        results.openingStockUpdated++;
+
+        console.log(`✅ Onboarded: ${product.name} - Qty: ${quantity}, Markup: ${markup}`);
+
+      } catch (productError) {
+        console.error(`❌ Error processing product ${product.name}:`, productError);
+        results.errors.push(`Failed to process ${product.name}: ${productError.message}`);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`📊 Stock onboarding completed: ${results.inventoryUpdated} inventory, ${results.openingStockUpdated} opening stock`);
+
+    res.json({
+      success: true,
+      message: `Successfully onboarded ${results.inventoryUpdated} products`,
+      results
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Stock onboarding error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to save stock onboarding',
+      error: error.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Master brands endpoint - always get fresh data from database
 app.get('/api/master-brands', authenticateToken, async (req, res) => {
   try {
@@ -1509,6 +1667,18 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
     } else {
       // Get all master brands
       const freshMasterBrands = await loadMasterBrandsFromDB();
+      console.log('API: Returning all master brands, count:', freshMasterBrands.length);
+      // Debug: Log mansion house brands
+      const mansionHouseBrands = freshMasterBrands.filter(b => 
+        b.name.toLowerCase().includes('mansion') || 
+        b.brandNumber.toLowerCase().includes('mansion')
+      );
+      console.log('API: Mansion House brands found:', mansionHouseBrands.map(b => ({
+        name: b.name,
+        brandNumber: b.brandNumber,
+        packType: b.packType,
+        size: b.size
+      })));
       res.json(freshMasterBrands);
     }
   } catch (error) {
@@ -1617,8 +1787,8 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
     masterBrandId: parseInt(masterBrandId),
     recordDate: today,
     invoiceQuantity: 0,
-    manualQuantity: receivedQuantity, // Add to manual column
-    transferQuantity: 0,
+    shiftIn: 0,
+    shiftOut: 0,
     invoiceId: null,
     transferReference: null,
     notes: `Manual stock addition - ${wasUpdated ? 'Updated existing' : 'New product'}`,
@@ -1664,6 +1834,38 @@ app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
   }
 });
 
+// Debug endpoint to check sort order values
+app.get('/api/debug/sort-order', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    
+    const query = `
+      SELECT 
+        si.id,
+        mb.brand_name,
+        mb.brand_number,
+        COALESCE(si.sort_order, 999) as sort_order,
+        si.is_active
+      FROM shop_inventory si
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      WHERE si.shop_id = $1
+      ORDER BY COALESCE(si.sort_order, 999), mb.brand_name
+      LIMIT 10
+    `;
+    
+    const result = await pool.query(query, [shopId]);
+    
+    res.json({
+      message: 'Debug: Sort order values',
+      shopId: shopId,
+      products: result.rows
+    });
+  } catch (error) {
+    console.error('Error in debug endpoint:', error);
+    res.status(500).json({ message: 'Debug error', error: error.message });
+  }
+});
+
 app.get('/api/shop/products', authenticateToken, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
@@ -1697,15 +1899,16 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
         receivedQuantitiesMap.set(key, {
           totalReceived: 0,
           invoiceQuantity: 0,
-          manualQuantity: 0,
-          transferQuantity: 0
+          shiftIn: 0,
+          shiftOut: 0
         });
       }
       const existing = receivedQuantitiesMap.get(key);
       existing.totalReceived += record.total_received || 0;
       existing.invoiceQuantity += record.invoice_quantity || 0;
-      existing.manualQuantity += record.manual_quantity || 0;
-      existing.transferQuantity += record.transfer_quantity || 0;
+      // manual_quantity column was removed
+      existing.shiftIn += record.shift_in || 0;
+      existing.shiftOut += record.shift_out || 0;
     });
     
     // Add received quantities to products
@@ -1714,8 +1917,8 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
       // Add received quantities (rec column for ViewCurrentStock)
       totalReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.totalReceived || 0,
       invoiceReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.invoiceQuantity || 0,
-      manualReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.manualQuantity || 0,
-      transferReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.transferQuantity || 0
+      shiftInReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.shiftIn || 0,
+      shiftOutReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.shiftOut || 0
     }));
     
     // Aggregate products by brandNumber + sizeCode (combine pack types)
@@ -2208,8 +2411,8 @@ app.post('/api/received-stock', authenticateToken, async (req, res) => {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
     const {
-      masterBrandId, recordDate, invoiceQuantity, manualQuantity, 
-      transferQuantity, invoiceId, transferReference, notes
+      masterBrandId, recordDate, invoiceQuantity, shiftIn, shiftOut, 
+      invoiceId, transferReference, notes
     } = req.body;
     
     if (!masterBrandId) {
@@ -2225,8 +2428,8 @@ app.post('/api/received-stock', authenticateToken, async (req, res) => {
       masterBrandId,
       recordDate: targetDate,
       invoiceQuantity: invoiceQuantity || 0,
-      manualQuantity: manualQuantity || 0,
-      transferQuantity: transferQuantity || 0,
+      shiftIn: shiftIn || 0,
+      shiftOut: shiftOut || 0,
       invoiceId,
       transferReference,
       notes,
@@ -2267,14 +2470,14 @@ app.get('/api/received-stock', authenticateToken, async (req, res) => {
 app.put('/api/received-stock/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { invoiceQuantity, manualQuantity, transferQuantity, transferReference, notes } = req.body;
+    const { invoiceQuantity, shiftIn, shiftOut, transferReference, notes } = req.body;
     
     console.log(`📝 Updating received stock record ${id}`);
     
     const result = await dbService.updateReceivedStock(id, {
       invoiceQuantity,
-      manualQuantity,
-      transferQuantity,
+      shiftIn,
+      shiftOut,
       transferReference,
       notes
     });
@@ -2559,126 +2762,83 @@ app.get('/api/debug/time', (req, res) => {
 // USER SHOPS ENDPOINT (for multi-shop suppliers)
 // ===============================================
 
-// Get all shops belonging to the current user
-app.get('/api/user-shops', authenticateToken, async (req, res) => {
-  try {
-    const userId = parseInt(req.user.userId);
-    
-    if (!userId) {
-      return res.status(400).json({ message: 'User ID not found in token' });
-    }
-    
-    console.log(`📋 Getting all shops for user ${userId}`);
-    
-    const result = await pool.query(`
-      SELECT 
-        id,
-        shop_name,
-        retailer_code,
-        address,
-        license_number,
-        created_at
-      FROM shops 
-      WHERE user_id = $1 
-      ORDER BY shop_name ASC
-    `, [userId]);
-    
-    console.log(`📊 Found ${result.rows.length} shops for user ${userId}:`, result.rows.map(shop => ({
-      id: shop.id,
-      shop_name: shop.shop_name,
-      retailer_code: shop.retailer_code
-    })));
-    
-    res.json({
-      shops: result.rows,
-      totalCount: result.rows.length
-    });
-    
-  } catch (error) {
-    console.error('Error getting user shops:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
 
-// Debug endpoint to check user shops data
-app.get('/api/debug/user-shops', authenticateToken, async (req, res) => {
-  try {
-    const userId = parseInt(req.user.userId);
-    const shopId = parseInt(req.user.shopId);
-    
-    console.log(`🔍 Debug - User ID: ${userId}, Current Shop ID: ${shopId}`);
-    
-    const result = await pool.query(`
-      SELECT 
-        id,
-        user_id,
-        shop_name,
-        retailer_code,
-        address,
-        license_number,
-        created_at
-      FROM shops 
-      WHERE user_id = $1 
-      ORDER BY shop_name ASC
-    `, [userId]);
-    
-    res.json({
-      userId: userId,
-      currentShopId: shopId,
-      allUserShops: result.rows,
-      otherShops: result.rows.filter(shop => shop.id !== shopId)
-    });
-    
-  } catch (error) {
-    console.error('Error in debug endpoint:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
 
 // ===============================================
-// SUPPLIER SHOPS MANAGEMENT ENDPOINTS
+// STORES MANAGEMENT ENDPOINTS
 // ===============================================
 
-// Get all supplier shops for a shop
-app.get('/api/supplier-shops', authenticateToken, async (req, res) => {
+// Get stores for a shop (filtered by operation type)
+app.get('/api/stores', authenticateToken, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
+    const userId = parseInt(req.user.userId);
+    const operationType = req.query.operation; // 'shift-in', 'shift-out', or undefined (all)
     
     if (!shopId) {
       return res.status(400).json({ message: 'Shop ID not found in token' });
     }
     
-    console.log(`📋 Getting supplier shops for shop ${shopId}`);
+    console.log(`📋 Getting stores for shop ${shopId} (user ${userId}), operation: ${operationType || 'all'}`);
     
-    const result = await pool.query(`
+    let allStores = [];
+    
+    // Always include TGBCL for shift-in operations
+    if (operationType === 'shift-in' || !operationType) {
+      allStores.push({
+        id: 'tgbcl',
+        shop_name: 'TGBCL',
+        retailer_code: 'TGBCL',
+        contact: 'Default Store',
+        store_type: 'default'
+      });
+    }
+    
+    // Get external stores (always included)
+    const externalStoresQuery = `
       SELECT 
         id,
         shop_name,
         retailer_code,
         contact,
-        created_at
-      FROM supplier_shops 
-      WHERE shop_id = $1 
+        created_at,
+        'external' as store_type
+      FROM external_stores 
       ORDER BY shop_name ASC
-    `, [shopId]);
+    `;
     
-    res.json({
-      shops: result.rows,
-      totalCount: result.rows.length
-    });
+    const externalResult = await pool.query(externalStoresQuery);
+    allStores.push(...externalResult.rows);
+    
+    // Get internal stores only for shift-out operations (or when no operation specified)
+    if (operationType === 'shift-out' || !operationType) {
+      const internalStoresQuery = `
+        SELECT 
+          id,
+          shop_name,
+          retailer_code,
+          address as contact,
+          created_at,
+          'internal' as store_type
+        FROM shops 
+        WHERE user_id = $1 AND id != $2
+        ORDER BY shop_name ASC
+      `;
+      
+      const internalResult = await pool.query(internalStoresQuery, [userId, shopId]);
+      allStores.push(...internalResult.rows);
+    }
+    
+    res.json(allStores);
     
   } catch (error) {
-    console.error('Error getting supplier shops:', error);
-    // Return empty array if table doesn't exist yet
-    res.json({
-      shops: [],
-      totalCount: 0
-    });
+    console.error('Error getting stores:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Add new supplier shop
-app.post('/api/supplier-shops', authenticateToken, async (req, res) => {
+// Add new external store
+app.post('/api/stores', authenticateToken, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { shopName, retailerCode, contact } = req.body;
@@ -2705,53 +2865,39 @@ app.post('/api/supplier-shops', authenticateToken, async (req, res) => {
       });
     }
     
-    console.log(`➕ Adding supplier shop for shop ${shopId}: ${shopName}`);
+    console.log(`➕ Adding external store for shop ${shopId}: ${shopName}`);
     
-    // Create supplier_shops table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS supplier_shops (
-        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-        shop_id BIGINT NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
-        shop_name VARCHAR(255) NOT NULL,
-        retailer_code VARCHAR(7) NOT NULL CHECK (retailer_code ~ '^\\d{7}$'),
-        contact VARCHAR(10) NOT NULL CHECK (contact ~ '^\\d{10}$'),
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(shop_id, shop_name),
-        UNIQUE(shop_id, retailer_code)
-      )
-    `);
-    
-    // Check if supplier shop name already exists for this shop
-    const existingShop = await pool.query(
-      'SELECT id FROM supplier_shops WHERE shop_id = $1 AND (shop_name = $2 OR retailer_code = $3)',
+    // Check if external store name already exists for this shop
+    const existingStore = await pool.query(
+      'SELECT id FROM external_stores WHERE shop_id = $1 AND (shop_name = $2 OR retailer_code = $3)',
       [shopId, shopName.trim(), retailerCode]
     );
     
-    if (existingShop.rows.length > 0) {
+    if (existingStore.rows.length > 0) {
       return res.status(400).json({ 
-        message: 'A supplier shop with this name or retailer code already exists' 
+        message: 'An external store with this name or retailer code already exists' 
       });
     }
     
     const result = await pool.query(`
-      INSERT INTO supplier_shops (shop_id, shop_name, retailer_code, contact)
+      INSERT INTO external_stores (shop_id, shop_name, retailer_code, contact)
       VALUES ($1, $2, $3, $4)
       RETURNING *
     `, [shopId, shopName.trim(), retailerCode, contact]);
     
-    console.log(`✅ Supplier shop added successfully: ${result.rows[0].shop_name}`);
+    console.log(`✅ External store added successfully: ${result.rows[0].shop_name}`);
     
     res.status(201).json({
-      message: 'Supplier shop added successfully',
+      message: 'External store added successfully',
       shop: result.rows[0]
     });
     
   } catch (error) {
-    console.error('Error adding supplier shop:', error);
+    console.error('Error adding external store:', error);
     
     if (error.code === '23505') { // Unique constraint violation
       return res.status(400).json({ 
-        message: 'A supplier shop with this name or retailer code already exists' 
+        message: 'An external store with this name or retailer code already exists' 
       });
     }
     
@@ -2759,8 +2905,8 @@ app.post('/api/supplier-shops', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete supplier shop
-app.delete('/api/supplier-shops/:id', authenticateToken, async (req, res) => {
+// Delete external store
+app.delete('/api/stores/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const shopId = parseInt(req.user.shopId);
@@ -2772,7 +2918,7 @@ app.delete('/api/supplier-shops/:id', authenticateToken, async (req, res) => {
     console.log(`🗑️ Deleting supplier shop ${id} for shop ${shopId}`);
     
     const result = await pool.query(`
-      DELETE FROM supplier_shops 
+      DELETE FROM external_stores 
       WHERE id = $1 AND shop_id = $2
       RETURNING shop_name
     `, [id, shopId]);
@@ -2796,52 +2942,6 @@ app.delete('/api/supplier-shops/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get suppliers from suppliers table
-app.get('/api/suppliers', authenticateToken, async (req, res) => {
-  try {
-    const shopId = parseInt(req.user.shopId);
-    
-    if (!shopId) {
-      return res.status(400).json({ message: 'Shop ID not found in token' });
-    }
-    
-    console.log(`📋 Getting suppliers for shop ${shopId}`);
-    
-    const result = await pool.query(`
-      SELECT 
-        id,
-        name,
-        contact_person,
-        phone,
-        email,
-        address,
-        license_number,
-        gst_number,
-        supplier_type,
-        is_active,
-        notes,
-        created_at,
-        updated_at
-      FROM suppliers 
-      WHERE shop_id = $1 AND is_active = true
-      ORDER BY name ASC
-    `, [shopId]);
-    
-    res.json({
-      suppliers: result.rows,
-      totalCount: result.rows.length
-    });
-    
-  } catch (error) {
-    console.error('Error getting suppliers:', error);
-    // Return empty array if table doesn't exist yet
-    res.json({
-      suppliers: [],
-      totalCount: 0
-    });
-  }
-});
-
 // Check if a supplier is internal or external
 app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
   try {
@@ -2858,14 +2958,14 @@ app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
     
     console.log(`🔍 Checking supplier type for supplier ID: ${supplierId}, user ID: ${userId}`);
     
-    // Get supplier details from supplier_shops table
+    // Get supplier details from external_stores table
     const supplierResult = await pool.query(`
       SELECT 
         id,
         shop_name,
         retailer_code,
         shop_id
-      FROM supplier_shops 
+      FROM external_stores 
       WHERE id = $1
     `, [supplierId]);
     
@@ -2893,7 +2993,7 @@ app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
     
     res.json({
       supplierId: parseInt(supplierId),
-      supplierName: supplier.shop_name,
+      storeName: supplier.shop_name,
       retailerCode: supplier.retailer_code,
       isInternal: isInternal,
       shopInfo: shopInfo
@@ -2924,21 +3024,23 @@ app.get('/api/stock-transfers/shifted-in', authenticateToken, async (req, res) =
         rsr.id,
         rsr.created_at,
         rsr.record_date,
-        rsr.transfer_quantity as quantity,
-        rsr.supplier_code,
-        rsr.supplier_shop_id,
+        rsr.shift_in,
+        rsr.shift_out,
+        rsr.source_store_code,
+        rsr.destination_store_code,
         mb.brand_name,
         mb.brand_number,
         mb.size_code,
         mb.size_ml,
         mb.pack_quantity,
         mb.standard_mrp as final_price,
-        ss.shop_name as supplier_name,
-        ss.retailer_code as supplier_retailer_code
+        COALESCE(ss.shop_name, s.shop_name, 'Unknown') as supplier_name,
+        COALESCE(ss.retailer_code, s.retailer_code, rsr.source_store_code) as supplier_retailer_code
       FROM received_stock_records rsr
       JOIN master_brands mb ON rsr.master_brand_id = mb.id
-      LEFT JOIN supplier_shops ss ON rsr.supplier_shop_id = ss.id
-      WHERE rsr.shop_id = $1 AND rsr.transfer_quantity > 0
+      LEFT JOIN external_stores ss ON rsr.source_store_code = ss.retailer_code
+      LEFT JOIN shops s ON rsr.source_store_code = s.retailer_code
+      WHERE rsr.shop_id = $1 AND rsr.shift_in > 0
     `;
     
     const params = [shopId];
@@ -2964,10 +3066,10 @@ app.get('/api/stock-transfers/shifted-in', authenticateToken, async (req, res) =
       sizeCode: row.size_code,
       sizeMl: row.size_ml,
       packQuantity: row.pack_quantity,
-      quantity: row.quantity,
+      quantity: row.shift_in,
       price: row.final_price,
-      supplierName: row.supplier_name || 'Unknown',
-      supplierCode: row.supplier_retailer_code || 'N/A',
+      storeName: row.supplier_name || 'Unknown',
+      storeCode: row.supplier_retailer_code || 'N/A',
       transferDate: row.record_date || row.created_at
     }));
 
@@ -2995,21 +3097,23 @@ app.get('/api/stock-transfers/shifted-out', authenticateToken, async (req, res) 
         rsr.id,
         rsr.created_at,
         rsr.record_date,
-        rsr.transfer_quantity as quantity,
-        rsr.supplier_code,
-        rsr.supplier_shop_id,
+        rsr.shift_in,
+        rsr.shift_out,
+        rsr.source_store_code,
+        rsr.destination_store_code,
         mb.brand_name,
         mb.brand_number,
         mb.size_code,
         mb.size_ml,
         mb.pack_quantity,
         mb.standard_mrp as final_price,
-        ss.shop_name as supplier_name,
-        ss.retailer_code as supplier_retailer_code
+        COALESCE(ss.shop_name, s.shop_name, 'Unknown') as supplier_name,
+        COALESCE(ss.retailer_code, s.retailer_code, rsr.destination_store_code) as supplier_retailer_code
       FROM received_stock_records rsr
       JOIN master_brands mb ON rsr.master_brand_id = mb.id
-      LEFT JOIN supplier_shops ss ON rsr.supplier_shop_id = ss.id
-      WHERE rsr.shop_id = $1 AND rsr.transfer_quantity < 0
+      LEFT JOIN external_stores ss ON rsr.destination_store_code = ss.retailer_code
+      LEFT JOIN shops s ON rsr.destination_store_code = s.retailer_code
+      WHERE rsr.shop_id = $1 AND rsr.shift_out > 0
     `;
     
     const params = [shopId];
@@ -3035,16 +3139,315 @@ app.get('/api/stock-transfers/shifted-out', authenticateToken, async (req, res) 
       sizeCode: row.size_code,
       sizeMl: row.size_ml,
       packQuantity: row.pack_quantity,
-      quantity: Math.abs(row.quantity), // Make positive for display
+      quantity: row.shift_out, // shift_out is already positive
       price: row.final_price,
-      supplierName: row.supplier_name || 'Unknown',
-      supplierCode: row.supplier_retailer_code || 'N/A',
+      storeName: row.supplier_name || 'Unknown',
+      storeCode: row.supplier_retailer_code || 'N/A',
       transferDate: row.record_date || row.created_at
     }));
 
     res.json({ transfers });
   } catch (error) {
     console.error('Error fetching stock shifted out:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Function to automatically create internal supplier relationships
+async function createInternalSuppliers(userId, newShopId) {
+  try {
+    console.log(`🔄 Creating internal suppliers for new shop ${newShopId} (user ${userId})`);
+    
+    // Get all shops for this user (excluding the new shop)
+    const existingShops = await pool.query(`
+      SELECT id, shop_name, retailer_code, address
+      FROM shops 
+      WHERE user_id = $1 AND id != $2
+      ORDER BY shop_name
+    `, [userId, newShopId]);
+    
+    console.log(`📋 Found ${existingShops.rows.length} existing shops for user ${userId}`);
+    
+    // Get the new shop details
+    const newShop = await pool.query(`
+      SELECT id, shop_name, retailer_code, address
+      FROM shops 
+      WHERE id = $1
+    `, [newShopId]);
+    
+    if (newShop.rows.length === 0) {
+      console.log(`❌ New shop ${newShopId} not found`);
+      return;
+    }
+    
+    const newShopData = newShop.rows[0];
+    console.log(`🏪 New shop: ${newShopData.shop_name} (${newShopData.retailer_code})`);
+    
+    // Create bidirectional supplier relationships
+    for (const existingShop of existingShops.rows) {
+      console.log(`🔗 Creating supplier relationship: ${existingShop.shop_name} ↔ ${newShopData.shop_name}`);
+      
+      // Add existing shop as supplier for new shop
+      await pool.query(`
+        INSERT INTO external_stores (shop_id, shop_name, retailer_code, contact)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (shop_id, retailer_code) DO NOTHING
+      `, [newShopId, existingShop.shop_name, existingShop.retailer_code, '0000000000']);
+      
+      // Add new shop as supplier for existing shop
+      await pool.query(`
+        INSERT INTO external_stores (shop_id, shop_name, retailer_code, contact)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (shop_id, retailer_code) DO NOTHING
+      `, [existingShop.id, newShopData.shop_name, newShopData.retailer_code, '0000000000']);
+    }
+    
+    console.log(`✅ Internal supplier relationships created successfully`);
+  } catch (error) {
+    console.error('❌ Error creating internal suppliers:', error);
+    throw error;
+  }
+}
+
+// Function to fix missing internal supplier relationships for existing shops
+async function fixMissingInternalSuppliers() {
+  try {
+    console.log(`🔧 Fixing missing internal supplier relationships...`);
+    
+    // Get all users with multiple shops
+    const usersWithMultipleShops = await pool.query(`
+      SELECT user_id, COUNT(*) as shop_count
+      FROM shops 
+      GROUP BY user_id 
+      HAVING COUNT(*) > 1
+      ORDER BY user_id
+    `);
+    
+    console.log(`📊 Found ${usersWithMultipleShops.rows.length} users with multiple shops`);
+    
+    for (const user of usersWithMultipleShops.rows) {
+      const userId = user.user_id;
+      console.log(`\n👤 Processing user ${userId} (${user.shop_count} shops)`);
+      
+      // Get all shops for this user
+      const userShops = await pool.query(`
+        SELECT id, shop_name, retailer_code, address
+        FROM shops 
+        WHERE user_id = $1
+        ORDER BY id
+      `, [userId]);
+      
+      // Create bidirectional relationships between all shops
+      for (let i = 0; i < userShops.rows.length; i++) {
+        for (let j = 0; j < userShops.rows.length; j++) {
+          if (i !== j) {
+            const shopA = userShops.rows[i];
+            const shopB = userShops.rows[j];
+            
+            // Check if shopB is already a supplier for shopA
+            const existingSupplier = await pool.query(`
+              SELECT id FROM external_stores 
+              WHERE shop_id = $1 AND retailer_code = $2
+            `, [shopA.id, shopB.retailer_code]);
+            
+            if (existingSupplier.rows.length === 0) {
+              console.log(`  ➕ Adding ${shopB.shop_name} as supplier for ${shopA.shop_name}`);
+              await pool.query(`
+                INSERT INTO external_stores (shop_id, shop_name, retailer_code, contact)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (shop_id, retailer_code) DO NOTHING
+              `, [shopA.id, shopB.shop_name, shopB.retailer_code, '0000000000']);
+            } else {
+              console.log(`  ✅ ${shopB.shop_name} already supplier for ${shopA.shop_name}`);
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`✅ Missing internal supplier relationships fixed`);
+  } catch (error) {
+    console.error('❌ Error fixing missing internal suppliers:', error);
+    throw error;
+  }
+}
+
+
+// Keep the old suppliers endpoint for backward compatibility
+app.get('/api/suppliers', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const userId = parseInt(req.user.userId);
+    
+    // Get shops belonging to the same user (excluding current shop)
+    const query = `
+      SELECT 
+        id,
+        shop_name,
+        retailer_code,
+        address as contact
+      FROM shops 
+      WHERE user_id = $1 AND id != $2
+      ORDER BY shop_name
+    `;
+    
+    const result = await pool.query(query, [userId, shopId]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching suppliers:', error);
+    res.status(500).json({ error: 'Failed to fetch suppliers' });
+  }
+});
+
+// Fix missing internal supplier relationships (admin endpoint)
+app.post('/api/fix-internal-suppliers', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔧 Admin requested to fix missing internal supplier relationships');
+    await fixMissingInternalSuppliers();
+    res.json({ message: 'Internal supplier relationships fixed successfully' });
+  } catch (error) {
+    console.error('Error fixing internal suppliers:', error);
+    res.status(500).json({ error: 'Failed to fix internal suppliers' });
+  }
+});
+
+// Stock Received Report Endpoint
+app.get('/api/stock-received', authenticateToken, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    const { startDate, endDate, storeFilter } = req.query;
+    
+    console.log(`📊 Getting stock received report for shop ${shopId} from ${startDate} to ${endDate}, storeFilter: ${storeFilter}`);
+    
+    // Extract retailer code from storeFilter if it contains parentheses
+    let retailerCode = null;
+    if (storeFilter && storeFilter.includes('(') && storeFilter.includes(')')) {
+      const match = storeFilter.match(/\((\d+)\)/);
+      if (match) {
+        retailerCode = match[1];
+        console.log(`Extracted retailer code: ${retailerCode}`);
+      }
+    }
+    
+    // Validate date parameters
+    if (!startDate) {
+      return res.status(400).json({ 
+        message: 'Start date is required' 
+      });
+    }
+    
+    // Use startDate as the target date for single-day view
+    const targetDate = startDate;
+    
+    const query = `
+      SELECT 
+        MIN(COALESCE(rsr.id, 0)) as id,
+        $2::date as "recordDate",
+        mb.brand_number as "brandNumber",
+        mb.brand_name as "brandName",
+        mb.size_code as "sizeCode",
+        mb.size_ml as "size",
+        CASE 
+          -- If there are invoices and no shifts, it's TGBCL
+          WHEN SUM(COALESCE(rsr.invoice_quantity, 0)) > 0 AND SUM(COALESCE(rsr.shift_in, 0)) = 0 AND SUM(COALESCE(rsr.shift_out, 0)) = 0 THEN 'TGBCL'
+          -- If there are no invoices but there are shifts, determine store based on shift direction
+          WHEN SUM(COALESCE(rsr.invoice_quantity, 0)) = 0 AND (SUM(COALESCE(rsr.shift_in, 0)) != 0 OR SUM(COALESCE(rsr.shift_out, 0)) != 0) THEN
+            CASE 
+              WHEN SUM(COALESCE(rsr.shift_in, 0)) > 0 THEN COALESCE(MAX(source_shop.shop_name), 'Shop ' || MAX(rsr.source_store_code))
+              WHEN SUM(COALESCE(rsr.shift_out, 0)) != 0 THEN COALESCE(MAX(dest_shop.shop_name), 'Shop ' || MAX(rsr.destination_store_code))
+              ELSE 'UNKNOWN'
+            END
+          -- If there are both invoices and shifts, it's MIXED
+          ELSE 'MIXED'
+        END as "storeCode",
+        CASE 
+          -- If there are invoices and no shifts, it's TGBCL
+          WHEN SUM(COALESCE(rsr.invoice_quantity, 0)) > 0 AND SUM(COALESCE(rsr.shift_in, 0)) = 0 AND SUM(COALESCE(rsr.shift_out, 0)) = 0 THEN 'TGBCL'
+          -- If there are no invoices but there are shifts, determine store based on shift direction
+          WHEN SUM(COALESCE(rsr.invoice_quantity, 0)) = 0 AND (SUM(COALESCE(rsr.shift_in, 0)) != 0 OR SUM(COALESCE(rsr.shift_out, 0)) != 0) THEN
+            CASE 
+              WHEN SUM(COALESCE(rsr.shift_in, 0)) > 0 THEN COALESCE(MAX(source_shop.shop_name), 'Shop ' || MAX(rsr.source_store_code))
+              WHEN SUM(COALESCE(rsr.shift_out, 0)) != 0 THEN COALESCE(MAX(dest_shop.shop_name), 'Shop ' || MAX(rsr.destination_store_code))
+              ELSE 'UNKNOWN'
+            END
+          -- If there are both invoices and shifts, it's MIXED
+          ELSE 'MIXED'
+        END as "storeName",
+        CASE 
+          WHEN $3 = 'TGBCL' THEN SUM(COALESCE(rsr.invoice_quantity, 0))
+          WHEN $3 = 'ALL' THEN SUM(COALESCE(rsr.invoice_quantity, 0))
+          ELSE 0
+        END as "invoiceQuantity",
+        CASE 
+          WHEN $3 = 'ALL' THEN SUM(COALESCE(rsr.shift_in, 0))
+          WHEN $3 != 'TGBCL' AND $3 != 'ALL' THEN 
+            SUM(CASE WHEN rsr.source_store_code = $4 THEN COALESCE(rsr.shift_in, 0) ELSE 0 END)
+          ELSE 0
+        END as "shiftIn",
+        CASE 
+          WHEN $3 = 'ALL' THEN SUM(COALESCE(rsr.shift_out, 0))
+          WHEN $3 != 'TGBCL' AND $3 != 'ALL' THEN 
+            SUM(CASE WHEN rsr.destination_store_code = $4 THEN COALESCE(rsr.shift_out, 0) ELSE 0 END)
+          ELSE 0
+        END as "shiftOut",
+        CASE 
+          WHEN $3 = 'TGBCL' THEN SUM(COALESCE(rsr.invoice_quantity, 0))
+          WHEN $3 = 'ALL' THEN SUM(COALESCE(rsr.invoice_quantity, 0)) + SUM(COALESCE(rsr.shift_in, 0)) + SUM(COALESCE(rsr.shift_out, 0))
+          WHEN $3 != 'TGBCL' AND $3 != 'ALL' THEN 
+            SUM(CASE WHEN rsr.source_store_code = $4 THEN COALESCE(rsr.shift_in, 0) ELSE 0 END) +
+            SUM(CASE WHEN rsr.destination_store_code = $4 THEN COALESCE(rsr.shift_out, 0) ELSE 0 END)
+          ELSE 0
+        END as "totalReceived",
+        COUNT(DISTINCT i.icdc_number) as "invoiceNumber",
+        STRING_AGG(DISTINCT rsr.notes, '; ') FILTER (WHERE rsr.notes IS NOT NULL) as "notes",
+        MIN(COALESCE(rsr.created_at, CURRENT_TIMESTAMP)) as "createdAt",
+        'System' as "createdByName",
+        MIN(si.id) as "shopInventoryId",
+        MIN(COALESCE(si.sort_order, 999)) as "sortOrder"
+      FROM shop_inventory si
+      JOIN master_brands mb ON si.master_brand_id = mb.id
+      LEFT JOIN received_stock_records rsr ON (
+        rsr.shop_id = si.shop_id 
+        AND rsr.master_brand_id = si.master_brand_id 
+        AND DATE(rsr.record_date) = $2::date
+      )
+      LEFT JOIN invoices i ON rsr.invoice_id = i.id
+      LEFT JOIN shops source_shop ON rsr.source_store_code = source_shop.retailer_code
+      LEFT JOIN shops dest_shop ON rsr.destination_store_code = dest_shop.retailer_code
+      LEFT JOIN external_stores source_ext ON rsr.source_store_code = source_ext.retailer_code
+      LEFT JOIN external_stores dest_ext ON rsr.destination_store_code = dest_ext.retailer_code
+      WHERE si.shop_id = $1
+        AND si.is_active = true
+      GROUP BY mb.brand_number, mb.brand_name, mb.size_code, mb.size_ml
+      HAVING 
+        CASE 
+          WHEN $3 = 'TGBCL' THEN SUM(COALESCE(rsr.invoice_quantity, 0)) > 0
+          WHEN $3 = 'ALL' THEN (SUM(COALESCE(rsr.invoice_quantity, 0)) != 0 OR SUM(COALESCE(rsr.shift_in, 0)) != 0 OR SUM(COALESCE(rsr.shift_out, 0)) != 0)
+          ELSE (
+            SUM(CASE WHEN rsr.source_store_code = $4 THEN COALESCE(rsr.shift_in, 0) ELSE 0 END) != 0 OR
+            SUM(CASE WHEN rsr.destination_store_code = $4 THEN COALESCE(rsr.shift_out, 0) ELSE 0 END) != 0
+          )
+        END
+      ORDER BY MIN(COALESCE(si.sort_order, 999)), mb.brand_name, mb.size_code
+    `;
+    
+    const result = await pool.query(query, [shopId, targetDate, storeFilter || 'ALL', retailerCode]);
+    
+    console.log(`📊 Stock received query returned ${result.rows.length} records`);
+    if (result.rows.length > 0) {
+      console.log('📋 First few records with sort order:');
+      result.rows.slice(0, 3).forEach((row, index) => {
+        console.log(`  ${index + 1}. ${row.brandName} - Sort Order: ${row.sortOrder}`);
+      });
+    }
+    
+    res.json({
+      records: result.rows,
+      totalRecords: result.rows.length
+    });
+    
+  } catch (error) {
+    console.error('Error getting stock received report:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

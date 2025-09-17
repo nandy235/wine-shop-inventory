@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ShiftTransfer.css';
 import API_BASE_URL from './config';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
-import SettingsDropdown from './SettingsDropdown';
 
 function ShiftTransfer({ onNavigate, onLogout }) {
   console.log('🔍 ShiftTransfer - Component rendering');
@@ -15,8 +14,8 @@ function ShiftTransfer({ onNavigate, onLogout }) {
   
   // Form state
   const [shiftType, setShiftType] = useState('in'); // 'in' or 'out'
-  const [selectedSupplier, setSelectedSupplier] = useState('');
-  const [suppliers, setSuppliers] = useState([]);
+  const [selectedStore, setSelectedStore] = useState('');
+  const [stores, setStores] = useState([]);
   
   // Product search state
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,12 +33,16 @@ function ShiftTransfer({ onNavigate, onLogout }) {
   const abortControllerRef = useRef(null);
   
   const shopName = getShopNameForDisplay();
-  // If switching to Shift Out while TGBCL selected, clear supplier
+  // Clear store selection when switching shift types if incompatible
   useEffect(() => {
-    if (shiftType === 'out' && selectedSupplier === 'tgbcl') {
-      setSelectedSupplier('');
+    if (shiftType === 'out' && selectedStore === 'tgbcl') {
+      // Clear TGBCL when switching to Shift Out
+      setSelectedStore('');
+    } else if (shiftType === 'in' && selectedStore && selectedStore.startsWith('store_')) {
+      // Clear internal stores when switching to Shift In
+      setSelectedStore('');
     }
-  }, [shiftType, selectedSupplier]);
+  }, [shiftType, selectedStore]);
   const formatINR = (amount) => {
     const num = parseFloat(amount || 0);
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -84,59 +87,61 @@ function ShiftTransfer({ onNavigate, onLogout }) {
     }
   }, [success]);
 
-  const fetchSuppliers = useCallback(async () => {
+  const fetchStores = useCallback(async () => {
     try {
-      console.log('🔍 ShiftTransfer - fetchSuppliers called');
+      console.log('🔍 ShiftTransfer - fetchStores called, shiftType:', shiftType);
       const token = localStorage.getItem('token');
       console.log('🔍 ShiftTransfer - token exists:', !!token);
       console.log('🔍 ShiftTransfer - API_BASE_URL:', API_BASE_URL);
       
-      // Fetch suppliers from supplier_shops table
-      const response = await fetch(`${API_BASE_URL}/api/supplier-shops`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      let allStores = [];
+
+      // Get current shop data from JWT token (secure)
+      const currentShop = getCurrentShopFromJWT();
+      console.log('🔍 ShiftTransfer - Current shop from JWT:', currentShop);
+
+      // Fetch stores from the unified stores endpoint with operation type filter
+      try {
+        const operationParam = shiftType === 'in' ? 'shift-in' : 'shift-out';
+        const response = await fetch(`${API_BASE_URL}/api/stores?operation=${operationParam}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('🔍 ShiftTransfer - fetchStores response status:', response.status, 'for operation:', operationParam);
+
+        if (response.ok) {
+          const storesData = await response.json();
+          console.log('🔍 ShiftTransfer - Stores data for', operationParam, ':', storesData);
+          
+          // Map stores data to expected format
+          const storesAsStores = storesData.map(store => ({
+            id: store.id === 'tgbcl' ? 'tgbcl' : `store_${store.id}`,
+            shop_name: store.shop_name,
+            retailer_code: store.retailer_code,
+            contact: store.contact,
+            source: store.store_type || 'store'
+          }));
+          
+          allStores.push(...storesAsStores);
         }
-      });
-      console.log('🔍 ShiftTransfer - fetchSuppliers response status:', response.status);
-
-      let allSuppliers = [];
-
-      // Add TGBCL as default supplier (only for shift in)
-      allSuppliers.push({
-        id: 'tgbcl',
-        shop_name: 'TGBCL',
-        retailer_code: 'TGBCL',
-        source: 'default'
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const suppliersData = data.shops || data || [];
-        
-        // Map supplier_shops table data to expected format
-        const suppliersFromTable = suppliersData.map(supplier => ({
-          id: `supplier_${supplier.id}`,
-          shop_name: supplier.shop_name,
-          retailer_code: supplier.retailer_code,
-          contact: supplier.contact,
-          source: 'supplier_shops'
-        }));
-        
-        allSuppliers.push(...suppliersFromTable);
+      } catch (storesError) {
+        console.error('🔍 ShiftTransfer - Error fetching stores:', storesError);
       }
 
-      setSuppliers(allSuppliers);
+      console.log('🔍 ShiftTransfer - Final stores array for', shiftType, ':', allStores);
+      setStores(allStores);
     } catch (error) {
-      console.error('Error fetching suppliers:', error);
-      setError('Failed to load suppliers');
+      console.error('Error fetching stores:', error);
+      setError('Failed to load stores');
     }
-  }, []);
+  }, [shiftType]);
 
-  // Fetch suppliers on component mount
+  // Fetch stores on component mount
   useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+    fetchStores();
+  }, [fetchStores]);
 
   // Product search identical to IndentEstimate (debounced + abortable)
   const handleSearch = useCallback(async (term) => {
@@ -198,15 +203,15 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       return;
     }
 
-    // Shift In: Search based on supplier type
-    if (!selectedSupplier) {
+    // Shift In: Search based on store type
+    if (!selectedStore) {
       setSearchResults([]);
       setShowSearchResults(false);
       return;
     }
     
-    // Check supplier type first
-    if (selectedSupplier === 'tgbcl') {
+    // Check store type first
+    if (selectedStore === 'tgbcl') {
       // TGBCL: Always external, search all master brands
       console.log('🔍 Searching master brands for TGBCL');
       if (abortControllerRef.current) {
@@ -249,14 +254,14 @@ function ShiftTransfer({ onNavigate, onLogout }) {
           setShowSearchResults(false);
         }
       }
-    } else if (selectedSupplier?.startsWith('supplier_')) {
-      // Check if supplier is internal or external
-      const supplierId = selectedSupplier.replace('supplier_', '');
-      console.log('🔍 Checking supplier type for supplier ID:', supplierId);
+    } else if (selectedStore?.startsWith('store_')) {
+      // Check if store is internal or external
+      const storeId = selectedStore.replace('store_', '');
+      console.log('🔍 Checking store type for store ID:', storeId);
       
       try {
         const token = localStorage.getItem('token');
-        const typeResponse = await fetch(`${API_BASE_URL}/api/check-supplier-type?supplierId=${supplierId}`, {
+        const typeResponse = await fetch(`${API_BASE_URL}/api/check-supplier-type?supplierId=${storeId}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -351,8 +356,8 @@ function ShiftTransfer({ onNavigate, onLogout }) {
         }
       }
     } else {
-      // Fallback: External supplier, search all master brands
-      console.log('🔍 Searching master brands for external supplier (fallback):', selectedSupplier);
+      // Fallback: External store, search all master brands
+      console.log('🔍 Searching master brands for external store (fallback):', selectedStore);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -394,7 +399,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
         }
       }
     }
-  }, [searchTerm, shiftType, selectedSupplier]);
+  }, [searchTerm, shiftType, selectedStore]);
 
   const handleInputChange = useCallback((e) => {
     const value = e.target.value.slice(0, 100);
@@ -538,7 +543,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
     const requestId = Date.now() + Math.random();
     console.log(`\n🚀 [${requestId}] ===== SHIFT TRANSFER OPERATION STARTED =====`);
     console.log(`🔍 [${requestId}] Frontend - handleConfirmShift called with state:`, {
-      selectedSupplier,
+      selectedStore,
       selectedProducts: selectedProducts.length,
       shiftType,
       loading,
@@ -560,12 +565,12 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       console.log(`\n🔍 [${requestId}] ===== VALIDATION PHASE =====`);
       
       // Validation
-      if (!selectedSupplier) {
-        console.log(`❌ [${requestId}] Validation failed: No supplier selected`);
-        setError('Please select a supplier');
+      if (!selectedStore) {
+        console.log(`❌ [${requestId}] Validation failed: No store selected`);
+        setError('Please select a store');
         return;
       }
-      console.log(`✅ [${requestId}] Supplier validation passed:`, selectedSupplier);
+      console.log(`✅ [${requestId}] Store validation passed:`, selectedStore);
 
       if (selectedProducts.length === 0) {
         console.log(`❌ [${requestId}] Validation failed: No products selected`);
@@ -634,14 +639,14 @@ function ShiftTransfer({ onNavigate, onLogout }) {
         });
         
         // Determine if this is an internal shop transfer
-        const isInternalTransfer = selectedSupplier?.startsWith('supplier_');
-        const supplierInfo = suppliers.find(s => s.id === selectedSupplier);
+        const isInternalTransfer = selectedStore?.startsWith('store_');
+        const storeInfo = stores.find(s => s.id === selectedStore);
         
         console.log(`🔍 [${requestId}] Transfer Type Analysis:`, {
-          selectedSupplier: selectedSupplier,
+          selectedStore: selectedStore,
           isInternalTransfer: isInternalTransfer,
-          supplierInfo: supplierInfo,
-          isFromTGBCL: selectedSupplier === 'tgbcl'
+          storeInfo: storeInfo,
+          isFromTGBCL: selectedStore === 'tgbcl'
         });
         
         const shiftData = {
@@ -653,10 +658,10 @@ function ShiftTransfer({ onNavigate, onLogout }) {
             )
           ),
           quantity: shiftType === 'out' ? -totalQuantity : totalQuantity,
-          supplierName: supplierInfo?.shop_name || 'Unknown',
-          isFromTGBCL: selectedSupplier === 'tgbcl',
-          supplierCode: selectedSupplier === 'tgbcl' ? 'TGBCL' : (supplierInfo?.retailer_code || null),
-          supplierShopId: selectedSupplier?.startsWith('supplier_') ? parseInt(selectedSupplier.replace('supplier_','')) : null,
+          storeName: storeInfo?.shop_name || 'Unknown',
+          isFromTGBCL: selectedStore === 'tgbcl',
+          storeCode: selectedStore === 'tgbcl' ? 'TGBCL' : (storeInfo?.retailer_code || null),
+          storeShopId: selectedStore?.startsWith('store_') ? parseInt(selectedStore.replace('store_','')) : null,
           shiftType: shiftType
         };
         
@@ -720,7 +725,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       // Reset form
       console.log(`🔄 [${requestId}] Resetting form state`);
       setSelectedProducts([]);
-      setSelectedSupplier('');
+      setSelectedStore('');
       setSearchTerm('');
       
     } catch (error) {
@@ -751,7 +756,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 
@@ -802,31 +807,30 @@ function ShiftTransfer({ onNavigate, onLogout }) {
             </div>
           </div>
 
-          {/* Select Supplier */}
+          {/* Select Store */}
           <div className="transfer-section">
-            <h3 className="transfer-section-title">Select Supplier</h3>
+            <h3 className="transfer-section-title">Select Store</h3>
             <select
-              className="transfer-supplier-select"
-              value={selectedSupplier}
-              onChange={(e) => setSelectedSupplier(e.target.value)}
+              className="transfer-store-select"
+              value={selectedStore}
+              onChange={(e) => setSelectedStore(e.target.value)}
             >
-              <option value="">Choose a supplier...</option>
+              <option value="">Choose a store...</option>
               {(() => {
-                // Business rules for supplier selection
+                // Business rules for store selection
                 if (shiftType === 'out') {
                   // Shift Out: Can transfer TO internal and external shops (exclude TGBCL)
-                  return suppliers.filter(s => s.id !== 'tgbcl').map(supplier => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.shop_name} {supplier.retailer_code !== supplier.shop_name ? `(${supplier.retailer_code})` : ''}
+                  return stores.filter(s => s.id !== 'tgbcl').map(store => (
+                    <option key={store.id} value={store.id}>
+                      {store.shop_name} {store.retailer_code !== store.shop_name ? `(${store.retailer_code})` : ''}
                     </option>
                   ));
                 } else {
-                  // Shift In: Can receive FROM both external and internal shops
-                  // External shops: You can raise the request
-                  // Internal shops: You can see them but cannot raise request (other shop must initiate Shift Out)
-                  return suppliers.map(supplier => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.shop_name} {supplier.retailer_code !== supplier.shop_name ? `(${supplier.retailer_code})` : ''}
+                  // Shift In: Can only receive FROM external stores and TGBCL
+                  // Internal stores are not shown for shift-in operations
+                  return stores.map(store => (
+                    <option key={store.id} value={store.id}>
+                      {store.shop_name} {store.retailer_code !== store.shop_name ? `(${store.retailer_code})` : ''}
                     </option>
                   ));
                 }
@@ -1018,7 +1022,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
               onClick={handleConfirmShift}
               disabled={
                 loading ||
-                !selectedSupplier ||
+                !selectedStore ||
                 selectedProducts.length === 0 ||
                 !selectedProducts.some(p => (p.cases > 0 || p.bottles > 0)) ||
                 (shiftType === 'out' && Object.keys(rowErrors).length > 0)

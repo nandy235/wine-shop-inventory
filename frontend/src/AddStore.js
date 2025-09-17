@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import './AddSupplier.css';
+import './AddStore.css';
 import API_BASE_URL from './config';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
-import SettingsDropdown from './SettingsDropdown';
 
-function AddSupplier({ onNavigate, onLogout }) {
-  const [suppliers, setSuppliers] = useState([]);
+function AddStore({ onNavigate, onLogout }) {
+  const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -19,7 +18,7 @@ function AddSupplier({ onNavigate, onLogout }) {
   const currentShopName = getShopNameForDisplay();
 
   useEffect(() => {
-    fetchSuppliers();
+    fetchStores();
   }, []);
 
   // Auto-dismiss success message after 4 seconds
@@ -33,101 +32,38 @@ function AddSupplier({ onNavigate, onLogout }) {
     }
   }, [success]);
 
-  const fetchSuppliers = async () => {
+  const fetchStores = async () => {
+    setLoading(true);
+    setError(null);
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setError('No authentication token found');
+      setLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      // Fetch both user's own shops and manually added suppliers
-      const [userShopsResponse, supplierShopsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/user-shops`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-        fetch(`${API_BASE_URL}/api/supplier-shops`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-      ]);
+      // Use the unified /api/stores endpoint
+      const response = await fetch(`${API_BASE_URL}/api/stores`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-      const allSuppliers = [];
-      
-      // Always include TGBCL as the first supplier
-      const tgbclSupplier = {
-        id: 'tgbcl',
-        shop_name: 'TGBCL',
-        retailer_code: 'TGBCL',
-        contact: 'Default Supplier',
-        is_default: true,
-        source: 'default'
-      };
-      allSuppliers.push(tgbclSupplier);
-
-      // Add user's own shops as suppliers (excluding current shop)
-      if (userShopsResponse.ok) {
-        const userShopsData = await userShopsResponse.json();
-        
-        // Get current shop data from JWT token (secure)
-        const currentShop = getCurrentShopFromJWT();
-        console.log('Current shop from JWT:', currentShop);
-        console.log('User shops data:', userShopsData);
-        
-        const userShopsAsSuppliers = (userShopsData.shops || [])
-          .filter(shop => {
-            console.log(`Checking shop: ID=${shop.id}, ShopName=${shop.shop_name}, RetailerCode=${shop.retailer_code}`);
-            console.log(`Current shop: ID=${currentShop.shopId}, RetailerCode=${currentShop.retailerCode}`);
-            
-            // Exclude current shop using secure JWT data
-            // Primary: Filter by shopId (most reliable)
-            if (currentShop.shopId && shop.id) {
-              return shop.id !== currentShop.shopId;
-            }
-            // Fallback: Filter by retailerCode (unique identifier)
-            if (currentShop.retailerCode && shop.retailer_code) {
-              return shop.retailer_code !== currentShop.retailerCode;
-            }
-            // Last resort: Filter by shop name (less reliable but better than nothing)
-            return shop.shop_name !== currentShopName;
-          })
-          .map(shop => ({
-            id: `user_shop_${shop.id}`,
-            shop_name: shop.shop_name,
-            retailer_code: shop.retailer_code,
-            contact: shop.address || 'N/A', // Use address as contact since contact field doesn't exist
-            is_default: false,
-            source: 'user_shop'
-          }));
-        
-        console.log('User shops as suppliers:', userShopsAsSuppliers);
-        allSuppliers.push(...userShopsAsSuppliers);
+      if (!response.ok) {
+        throw new Error('Failed to fetch stores');
       }
 
-      // Add manually added suppliers
-      if (supplierShopsResponse.ok) {
-        const supplierShopsData = await supplierShopsResponse.json();
-        const manualSuppliers = (supplierShopsData.shops || []).map(shop => ({
-          ...shop,
-          source: 'manual'
-        }));
-        allSuppliers.push(...manualSuppliers);
-      }
-
-      setSuppliers(allSuppliers);
+      const storesData = await response.json();
+      console.log('Stores data from API:', storesData);
+      
+      // The API already includes TGBCL, so just use the response directly
+      setStores(storesData);
     } catch (error) {
-      console.error('Error fetching suppliers:', error);
-      // Always show TGBCL even if there's an error
-      setSuppliers([{
-        id: 'tgbcl',
-        shop_name: 'TGBCL',
-        retailer_code: 'TGBCL',
-        contact: 'Default Supplier',
-        is_default: true,
-        source: 'default'
-      }]);
+      console.error('Error fetching stores:', error);
+      setError('Failed to fetch stores');
     } finally {
       setLoading(false);
     }
@@ -191,7 +127,7 @@ function AddSupplier({ onNavigate, onLogout }) {
       setLoading(true);
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`${API_BASE_URL}/api/supplier-shops`, {
+      const response = await fetch(`${API_BASE_URL}/api/stores`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -206,16 +142,16 @@ function AddSupplier({ onNavigate, onLogout }) {
 
       if (response.ok) {
         const data = await response.json();
-        setSuccess('Supplier shop added successfully!');
+        setSuccess('Store added successfully!');
         resetForm();
-        fetchSuppliers();
+        fetchStores();
       } else {
         const errorData = await response.json();
-        setError(errorData.message || 'Failed to add supplier shop');
+        setError(errorData.message || 'Failed to add store');
       }
     } catch (error) {
-      console.error('Error adding supplier shop:', error);
-      setError('Error adding supplier shop');
+      console.error('Error adding store:', error);
+      setError('Error adding store');
     } finally {
       setLoading(false);
     }
@@ -229,25 +165,25 @@ function AddSupplier({ onNavigate, onLogout }) {
     });
   };
 
-  const handleDelete = async (supplierId, supplier) => {
-    if (supplierId === 'tgbcl') {
-      setError('Cannot delete the default TGBCL supplier');
+  const handleDelete = async (storeId, store) => {
+    if (storeId === 'tgbcl') {
+      setError('Cannot delete the default TGBCL store');
       return;
     }
 
-    if (supplier.source === 'user_shop') {
-      setError('Cannot delete your own shops. They are automatically added as suppliers.');
+    if (store.source === 'user_shop' || store.source === 'internal') {
+      setError('Cannot delete internal stores (shops belonging to the same user).');
       return;
     }
 
-    if (!window.confirm('Are you sure you want to delete this supplier shop?')) {
+    if (!window.confirm('Are you sure you want to delete this store?')) {
       return;
     }
 
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/api/supplier-shops/${supplierId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/stores/${storeId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -256,15 +192,15 @@ function AddSupplier({ onNavigate, onLogout }) {
       });
 
       if (response.ok) {
-        setSuccess('Supplier shop deleted successfully!');
-        fetchSuppliers();
+        setSuccess('Store deleted successfully!');
+        fetchStores();
       } else {
         const errorData = await response.json();
-        setError(errorData.message || 'Failed to delete supplier shop');
+        setError(errorData.message || 'Failed to delete store');
       }
     } catch (error) {
-      console.error('Error deleting supplier shop:', error);
-      setError('Error deleting supplier shop');
+      console.error('Error deleting store:', error);
+      setError('Error deleting store');
     } finally {
       setLoading(false);
     }
@@ -275,7 +211,7 @@ function AddSupplier({ onNavigate, onLogout }) {
       <header className="add-supplier-header">
         <div className="logo-section">
           <h1 className="app-title">{currentShopName}</h1>
-          <p className="app-subtitle">Supplier Management</p>
+          <p className="app-subtitle">Store Management</p>
         </div>
         <nav className="navigation">
           <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
@@ -283,14 +219,14 @@ function AddSupplier({ onNavigate, onLogout }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 
       <main className="add-supplier-content">
         <div className="page-title-section">
-          <h2 className="main-title">Add Supplier Shop</h2>
-          <p className="subtitle">Add new supplier shops to your network</p>
+          <h2 className="main-title">Add Store</h2>
+          <p className="subtitle">Add new stores to your network</p>
         </div>
 
         {error && <div className="error-message">{error}</div>}
@@ -353,52 +289,50 @@ function AddSupplier({ onNavigate, onLogout }) {
                 className="btn-primary"
                 disabled={loading}
               >
-                {loading ? 'Adding...' : 'Add Supplier'}
+                {loading ? 'Adding...' : 'Add Store'}
               </button>
             </div>
           </form>
         </div>
 
         <div className="suppliers-list-section">
-          <h3 className="section-title">Existing Suppliers</h3>
-          {loading && suppliers.length === 0 ? (
-            <div className="loading-message">Loading suppliers...</div>
-          ) : suppliers.length === 0 ? (
-            <div className="empty-message">No suppliers found. TGBCL will be added as default.</div>
+          <h3 className="section-title">Existing Stores</h3>
+          {loading && stores.length === 0 ? (
+            <div className="loading-message">Loading stores...</div>
+          ) : stores.length === 0 ? (
+            <div className="empty-message">No stores found. TGBCL will be added as default.</div>
           ) : (
             <div className="suppliers-table-container">
               <table className="suppliers-table">
                 <thead>
                   <tr>
                     <th>S.No</th>
-                    <th>Supplier</th>
+                    <th>Store</th>
                     <th>Retailer Code</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {suppliers.map((supplier, index) => (
-                    <tr key={supplier.id} className={supplier.is_default ? 'default-row' : ''}>
+                  {stores.map((store, index) => (
+                    <tr key={store.id} className={store.is_default ? 'default-row' : ''}>
                       <td>{index + 1}</td>
                       <td>
                         <div className="supplier-name-cell">
-                          <span>{supplier.shop_name}</span>
+                          <span>{store.shop_name}</span>
                         </div>
                       </td>
-                      <td>{supplier.retailer_code}</td>
+                      <td>{store.retailer_code}</td>
                       <td>
-                        {!supplier.is_default && supplier.source !== 'user_shop' ? (
+                        {store.id === 'tgbcl' || store.store_type === 'default' || store.store_type === 'internal' ? (
+                          <span className="default-badge-inline">Default</span>
+                        ) : (
                           <button
                             className="action-btn delete-btn"
-                            onClick={() => handleDelete(supplier.id, supplier)}
-                            title="Delete supplier"
+                            onClick={() => handleDelete(store.id, store)}
+                            title="Delete store"
                           >
                             Delete
                           </button>
-                        ) : supplier.source === 'user_shop' ? (
-                          <span className="auto-text">Auto</span>
-                        ) : (
-                          <span className="default-text">-</span>
                         )}
                       </td>
                     </tr>
@@ -413,4 +347,4 @@ function AddSupplier({ onNavigate, onLogout }) {
   );
 }
 
-export default AddSupplier;
+export default AddStore;

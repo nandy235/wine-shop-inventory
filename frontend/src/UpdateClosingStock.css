@@ -201,7 +201,7 @@
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: white;
   padding: 1rem;
-  text-align: left;
+  text-align: center;
   font-weight: 600;
   font-size: 0.9rem;
   text-transform: uppercase;
@@ -370,9 +370,55 @@
     font-size: 0.8rem;
   }
 
+  .update-closing-stock-table th {
+    text-align: center;
+  }
+}
+
   .update-closing-stock-brand-name {
     max-width: 120px;
   }
+
+/* Table structure with grouping */
+.update-closing-stock-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+.update-closing-stock-table td {
+  border-right: 1px solid #e5e7eb !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  vertical-align: top !important;
+  text-align: center !important;
+}
+
+.update-closing-stock-table th {
+  border-right: 1px solid #e5e7eb !important;
+  border-bottom: 2px solid #e5e7eb !important;
+}
+
+/* Remove right border from last column */
+.update-closing-stock-table td:last-child,
+.update-closing-stock-table th:last-child {
+  border-right: none !important;
+}
+
+/* Remove bottom border from last row */
+.update-closing-stock-table tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Grouped cells styling */
+.update-closing-stock-table .grouped-serial,
+.update-closing-stock-table .grouped-brand-cell {
+  background-color: #f8fafc !important;
+  font-weight: 600 !important;
+  vertical-align: top !important;
+  text-align: center !important;
+}
 
   .update-closing-stock-input {
     width: 50px;
@@ -382,4 +428,3 @@
     padding: 1.5rem;
     min-width: auto;
   }
-}

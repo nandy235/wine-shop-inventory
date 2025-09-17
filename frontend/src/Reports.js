@@ -1,6 +1,5 @@
 import React from 'react';
 import './Reports.css';
-import SettingsDropdown from './SettingsDropdown';
 
 function Reports({ onNavigate, onLogout }) {
  const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -19,7 +18,7 @@ function Reports({ onNavigate, onLogout }) {
          <button className="reports-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
          <button className="reports-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
          <button className="reports-nav-btn reports-nav-btn-active">Reports</button>
-         <SettingsDropdown onLogout={onLogout} />
+         <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
        </nav>
      </header>
 

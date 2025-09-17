@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
 import './IndentEstimate.css';
 import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
 
 // Constants
 const SEARCH_DEBOUNCE_DELAY = 150;
@@ -528,7 +527,7 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
           <button className="indent-estimate-nav-btn indent-estimate-nav-btn-active" onClick={onBack}>Manage Stock</button>
           <button className="indent-estimate-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="indent-estimate-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 

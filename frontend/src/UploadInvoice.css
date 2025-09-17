@@ -1,7 +1,7 @@
 .upload-invoice-container {
   width: 100%;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: #f8f9fa;
 }
 
 .upload-invoice-container .invoice-header {
@@ -68,13 +68,13 @@
 
 .upload-invoice-container .main-title {
   font-size: 32px;
-  color: white;
+  color: #333;
   margin: 0 0 10px 0;
 }
 
 .upload-invoice-container .subtitle {
   font-size: 16px;
-  color: rgba(255, 255, 255, 0.9);
+  color: #666;
   margin: 0;
 }
 

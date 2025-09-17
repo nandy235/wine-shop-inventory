@@ -14,7 +14,7 @@ import DownloadSaleSheet from './DownloadSaleSheet';
 import Reports from './Reports';
 import StockLifted from './StockLifted';
 import SalesReport from './SalesReport';
-import AddStore from './AddStore';
+import AddSupplier from './AddSupplier';
 import ShiftTransfer from './ShiftTransfer';
 import StockTransferReport from './StockTransferReport';
 import './App.css';
@@ -144,8 +144,8 @@ function App() {
       {currentView === 'brandWiseSales' && (
         <SalesReport onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
-      {currentView === 'addStore' && (
-        <AddStore onNavigate={handleNavigate} onLogout={handleLogout} />
+      {currentView === 'addSupplier' && (
+        <AddSupplier onNavigate={handleNavigate} onLogout={handleLogout} />
       )}
       {currentView === 'shiftTransfer' && (
         <ShiftTransfer onNavigate={handleNavigate} onLogout={handleLogout} />

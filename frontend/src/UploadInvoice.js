@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import './UploadInvoice.css';
 import API_BASE_URL from './config';
-import SettingsDropdown from './SettingsDropdown';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -170,7 +169,7 @@ function UploadInvoice({ onNavigate, onLogout }) {
         setParsedData(null);
         
         // Navigate to view stock
-        onNavigate('viewCurrentStock');
+        onNavigate('manageStock');
       } else {
         try {
           const error = await response.json();
@@ -243,7 +242,7 @@ function UploadInvoice({ onNavigate, onLogout }) {
           <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
           <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <SettingsDropdown onLogout={onLogout} />
+          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
         </nav>
       </header>
 

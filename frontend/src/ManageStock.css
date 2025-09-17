@@ -50,13 +50,13 @@
 .manage-stock-container .nav-btn.active {
   color: white;
   font-weight: bold;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  background: #4f46e5;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.2);
 }
 
 .manage-stock-container .nav-btn:hover {
-  background-color: #E5D5FF;
-  color: #7C3AED;
+  background-color: #f3f4f6;
+  color: #4f46e5;
 }
 
 .manage-stock-container .manage-stock-content {
@@ -111,9 +111,9 @@
 }
 
 .manage-stock-container .stock-action-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-  border-color: #7C3AED;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  border-color: #4f46e5;
 }
 
 .manage-stock-container .action-icon {
@@ -128,7 +128,7 @@
 }
 
 .manage-stock-container .action-icon.invoice {
-  background-color: #7C3AED;
+  background-color: #4f46e5;
 }
 
 .manage-stock-container .action-icon.estimate {
@@ -141,6 +141,10 @@
 
 .manage-stock-container .action-icon.supplier {
   background-color: #F59E0B;
+}
+
+.manage-stock-container .action-icon.received {
+  background-color: #EF4444;
 }
 
 .manage-stock-container .action-content {
@@ -169,6 +173,6 @@
 }
 
 .manage-stock-container .stock-action-card:hover .action-arrow {
-  color: #7C3AED;
-  transform: translateX(5px);
+  color: #4f46e5;
+  transform: translateX(3px);
 }
