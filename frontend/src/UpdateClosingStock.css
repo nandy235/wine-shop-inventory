@@ -420,6 +420,27 @@
   text-align: center !important;
 }
 
+/* Totals row styling */
+.update-closing-stock-table .totals-row {
+  background-color: #f8fafc !important;
+  border-top: 2px solid #e5e7eb !important;
+  font-weight: 700 !important;
+}
+
+.update-closing-stock-table .totals-label {
+  text-align: center !important;
+  font-weight: 700 !important;
+  color: #2d3748 !important;
+  background-color: #f1f5f9 !important;
+}
+
+.update-closing-stock-table .totals-value {
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  font-size: 1rem !important;
+}
+
   .update-closing-stock-input {
     width: 50px;
   }

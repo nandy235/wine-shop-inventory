@@ -1546,6 +1546,7 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
   }
 });
 
+
 // Stock onboarding save endpoint
 app.post('/api/stock-onboarding/save', authenticateToken, async (req, res) => {
   const client = await pool.connect();

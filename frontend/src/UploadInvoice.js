@@ -250,6 +250,37 @@ function UploadInvoice({ onNavigate, onLogout }) {
         <div className="page-title-section">
           <h2 className="main-title">Upload Invoice</h2>
           <p className="subtitle">Upload government invoice PDF to automatically update received stock</p>
+          
+          <div className="excise-portal-link-section" style={{
+            backgroundColor: '#e8f4fd',
+            border: '1px solid #bee5eb',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            margin: '16px 0',
+            textAlign: 'center'
+          }}>
+            <p style={{ margin: '0 0 8px 0', color: '#0c5460', fontWeight: '500' }}>
+              📄 Need to download your invoice PDF?
+            </p>
+            <a 
+              href="https://tgbcl.telangana.gov.in/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={{
+                color: '#007bff',
+                textDecoration: 'none',
+                fontWeight: '500',
+                fontSize: '14px'
+              }}
+              onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+              onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+            >
+              🔗 Visit Telangana Excise Portal to download your invoice PDF
+            </a>
+            <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#6c757d' }}>
+              Download your invoice PDF from the portal and come back here to upload it
+            </p>
+          </div>
         </div>
 
         <div className="upload-section">

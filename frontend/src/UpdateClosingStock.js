@@ -417,6 +417,16 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
                </tr>
              )}
            </tbody>
+           <tfoot>
+             <tr className="totals-row">
+               <td colSpan="3" className="totals-label">TOTAL</td>
+               <td className="totals-value">{filteredData.reduce((sum, item) => sum + item.openingStock, 0)}</td>
+               <td className="totals-value">{filteredData.reduce((sum, item) => sum + item.received, 0)}</td>
+               <td className="totals-value">{filteredData.reduce((sum, item) => sum + item.total, 0)}</td>
+               <td className="totals-value">{filteredData.reduce((sum, item) => sum + item.closingStock, 0)}</td>
+               <td className="totals-value">{filteredData.reduce((sum, item) => sum + item.sales, 0)}</td>
+             </tr>
+           </tfoot>
          </table>
        </div>
 

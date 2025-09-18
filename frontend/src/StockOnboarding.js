@@ -110,6 +110,8 @@ function StockOnboarding({ onNavigate, onLogout }) {
   };
 
 
+
+
   const handleSearchChange = (value) => {
     setSearchTerm(value);
     if (value.trim() === '') {
@@ -423,9 +425,15 @@ function StockOnboarding({ onNavigate, onLogout }) {
                 <h3 className="section-title">Current Shop Inventory ({shopInventory.length})</h3>
                 <p className="inventory-subtitle">Products currently in your inventory</p>
               </div>
-              <div className="inventory-value">
-                <div className="value-label">Total Stock Value</div>
-                <div className="value-amount">₹{formatNumber(shopInventory.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0))}</div>
+              <div className="inventory-stats">
+                <div className="inventory-value">
+                  <div className="value-label">Total Quantities</div>
+                  <div className="value-amount">{shopInventory.reduce((sum, item) => sum + item.quantity, 0)}</div>
+                </div>
+                <div className="inventory-value">
+                  <div className="value-label">Total Stock Value</div>
+                  <div className="value-amount">₹{formatNumber(shopInventory.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0))}</div>
+                </div>
               </div>
             </div>
             {shopInventory.length === 0 ? (

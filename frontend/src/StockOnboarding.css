@@ -911,6 +911,7 @@
   box-shadow: none !important;
 }
 
+
 /* Inventory Display Section */
 .stock-onboarding-container .inventory-display-section {
   background: white !important;
@@ -931,6 +932,12 @@
 
 .stock-onboarding-container .inventory-title-section {
   flex: 1 !important;
+}
+
+.stock-onboarding-container .inventory-stats {
+  display: flex !important;
+  gap: 16px !important;
+  align-items: flex-start !important;
 }
 
 .stock-onboarding-container .inventory-value {
