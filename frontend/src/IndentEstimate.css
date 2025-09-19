@@ -422,7 +422,7 @@
   background: #667eea;
   color: white;
   padding: 1rem;
-  text-align: left;
+  text-align: center;
   font-weight: 600;
   font-size: 0.9rem;
   text-transform: uppercase;
@@ -471,18 +471,20 @@
 .quantity-input:focus::placeholder { color: transparent; }
 
 .remove-button {
-  background: #e53e3e;
-  color: white;
-  border: none;
+  background: transparent;
+  color: #e53e3e;
+  border: 1px solid #e53e3e;
   border-radius: 6px;
-  padding: 0.5rem;
+  padding: 0.5rem 1rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .remove-button:hover {
-  background: #c53030;
+  background: #e53e3e;
+  color: white;
   transform: scale(1.05);
 }
 

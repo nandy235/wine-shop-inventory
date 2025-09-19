@@ -236,8 +236,8 @@ class DatabaseService {
         const today = new Date().toISOString().split('T')[0];
         await pool.query(`
           INSERT INTO received_stock_records 
-          (shop_id, master_brand_id, record_date, manual_quantity, created_at)
-          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          (shop_id, master_brand_id, record_date, invoice_quantity, shift_in, shift_out, created_at)
+          VALUES ($1, $2, $3, $4, 0, 0, CURRENT_TIMESTAMP)
         `, [shopId, masterBrandId, today, currentQuantity]);
       }
       
@@ -268,21 +268,13 @@ class DatabaseService {
       if (additionalQuantity && additionalQuantity !== 0) {
         const today = new Date().toISOString().split('T')[0];
         
-        if (additionalQuantity > 0) {
-          // Positive quantity - add to manual_quantity
-          await pool.query(`
-            INSERT INTO received_stock_records 
-            (shop_id, master_brand_id, record_date, manual_quantity, created_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-          `, [shopId, masterBrandId, today, additionalQuantity]);
-        } else {
-          // Negative quantity - add to shift_out (outgoing)
-          await pool.query(`
-            INSERT INTO received_stock_records 
-            (shop_id, master_brand_id, record_date, shift_out, created_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-          `, [shopId, masterBrandId, today, additionalQuantity]);
-        }
+        // Update current_quantity directly since manual_quantity column was removed
+        await pool.query(`
+          UPDATE shop_inventory 
+          SET current_quantity = current_quantity + $3,
+              last_updated = CURRENT_TIMESTAMP
+          WHERE shop_id = $1 AND master_brand_id = $2
+        `, [shopId, masterBrandId, additionalQuantity]);
       }
       
       return result.rows[0];
@@ -853,7 +845,6 @@ class DatabaseService {
                 SET invoice_quantity = invoice_quantity + $1,
                     mrp_price = COALESCE($2, mrp_price),
                     notes = COALESCE($3, notes),
-                    store_code = COALESCE($4, store_code),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $5
               `;
@@ -862,14 +853,13 @@ class DatabaseService {
                 item.totalQuantity,
                 item.mrp || null,
                 `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
-                'TGBCL',
                 existingRecord.rows[0].id
               ]);
             } else {
               // Insert new record
               const receivedStockQuery = `
                 INSERT INTO received_stock_records 
-                (shop_id, master_brand_id, record_date, store_code, invoice_quantity, 
+                (shop_id, master_brand_id, record_date, source_store_code, invoice_quantity, 
                  mrp_price, invoice_id, notes, created_by, shift_in, shift_out)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
               `;
@@ -878,7 +868,7 @@ class DatabaseService {
                 shopId,
                 item.masterBrandId,
                 recordDate,
-                'TGBCL',
+                null, // source_store_code is NULL for invoice uploads
                 item.totalQuantity,
                 item.mrp || 0,
                 invoiceId,

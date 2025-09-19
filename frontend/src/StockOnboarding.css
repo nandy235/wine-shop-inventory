@@ -542,9 +542,9 @@
 /* Search Results Dropdown */
 .stock-onboarding-container .search-section .search-results {
  background-color: white !important;
- border: 2px solid #e5e7eb !important;
+ border: 1px solid #d1d5db !important;
  border-top: none !important;
- border-radius: 0 0 12px 12px !important;
+ border-radius: 0 0 8px 8px !important;
  max-height: 180px !important;
  overflow-y: auto !important;
  overflow-x: visible !important;
@@ -552,9 +552,11 @@
  position: absolute !important;
  top: 100% !important;
  left: 0 !important;
- right: 0 !important;
- z-index: 200 !important;
  width: 100% !important;
+ z-index: 200 !important;
+ margin: 0 !important;
+ padding: 0 !important;
+ box-sizing: border-box !important;
 }
 
 .stock-onboarding-container .search-section .search-result-item {
@@ -564,6 +566,8 @@
  transition: background-color 0.2s ease !important;
  white-space: nowrap !important;
  overflow: visible !important;
+ text-align: left !important;
+ box-sizing: border-box !important;
 }
 
 .stock-onboarding-container .search-section .search-result-item:hover {
@@ -582,7 +586,6 @@
  line-height: 1.4 !important;
  white-space: nowrap !important;
  overflow: visible !important;
- text-overflow: unset !important;
 }
 
 .stock-onboarding-container .search-section .brand-info {
@@ -825,7 +828,14 @@
 }
 
 .stock-onboarding-container .pack-info {
- text-align: left !important;
+  text-align: center !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 4px !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .stock-onboarding-container .pack-size {
@@ -998,7 +1008,7 @@
   color: #374151 !important;
   font-weight: 600 !important;
   padding: 12px 16px !important;
-  text-align: left !important;
+  text-align: center !important;
   border-bottom: 2px solid #e5e7eb !important;
   font-size: 13px !important;
   text-transform: uppercase !important;
@@ -1018,7 +1028,13 @@
 .stock-onboarding-container .stock-quantity {
   display: flex !important;
   align-items: center !important;
+  justify-content: flex-start !important;
   gap: 4px !important;
+  flex-direction: column !important;
+  text-align: center !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .stock-onboarding-container .quantity-value {
@@ -1140,11 +1156,20 @@
 
 .stock-onboarding-container .variant-size-cell,
 .stock-onboarding-container .variant-price-cell,
-.stock-onboarding-container .variant-stock-cell,
 .stock-onboarding-container .variant-updated-cell {
   background-color: #ffffff !important;
   vertical-align: top !important;
   text-align: center !important;
+  padding-top: 12px !important;
+  padding-bottom: 0 !important;
+}
+
+.stock-onboarding-container .variant-stock-cell {
+  background-color: #ffffff !important;
+  vertical-align: top !important;
+  text-align: center !important;
+  padding-top: 12px !important;
+  padding-bottom: 0 !important;
 }
 
 .stock-onboarding-container .inventory-row:hover .variant-size-cell,

@@ -102,7 +102,7 @@ CREATE TABLE daily_stock_records (
     UNIQUE(shop_inventory_id, stock_date),
     CONSTRAINT chk_nonnegative_vals CHECK (
         opening_stock >= 0 AND
-        received_stock >= 0 AND
+        received_stock >= -opening_stock AND
         (closing_stock IS NULL OR closing_stock >= 0) AND
         (price_per_unit IS NULL OR price_per_unit >= 0)
     ),

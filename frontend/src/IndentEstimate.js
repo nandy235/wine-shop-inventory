@@ -731,7 +731,7 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
                           aria-label={`Remove ${item.brandName} from estimate`}
                           title="Remove item"
                         >
-                          🗑️
+                          Remove
                         </button>
                       </td>
                     </tr>

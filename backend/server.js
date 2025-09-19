@@ -494,13 +494,13 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
 
     // Enforce supplier selection
     if (!isFromTGBCL && (!storeName || storeName === 'Unknown')) {
-      console.log(`❌ [${requestId}] Supplier validation failed:`, {
+      console.log(`❌ [${requestId}] Store validation failed:`, {
         isFromTGBCL: isFromTGBCL,
         storeName: storeName
       });
-      return res.status(400).json({ message: 'Supplier is required for stock shift' });
+      return res.status(400).json({ message: 'Store is required for stock shift' });
     }
-    console.log(`✅ [${requestId}] Supplier validation passed:`, {
+    console.log(`✅ [${requestId}] Store validation passed:`, {
       storeName: storeName,
       isFromTGBCL: isFromTGBCL,
       storeCode: storeCode
@@ -563,16 +563,14 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
     );
 
     if (!receivedStockRecord) {
-      const isTgbclInvoiceIn = isFromTGBCL && shiftType === 'in';
-      const initialInvoiceQty = isTgbclInvoiceIn ? Math.abs(parseInt(quantity)) : 0;
-
+      // Create record with all zeros, then let the update logic handle setting correct values
       receivedStockRecord = await dbService.createReceivedStockRecord({
         shopId,
         masterBrandId: actualMasterBrandId,
         recordDate: targetDate,
-        invoiceQuantity: initialInvoiceQty,
-        shiftIn: isFromTGBCL ? 0 : (shiftType === 'in' ? Math.abs(parseInt(quantity)) : 0),
-        shiftOut: isFromTGBCL ? 0 : (shiftType === 'out' ? -Math.abs(parseInt(quantity)) : 0),
+        invoiceQuantity: 0,
+        shiftIn: 0,
+        shiftOut: 0,
         createdBy: userId,
         sourceStoreCode: shiftType === 'in' ? sourceStoreCode : null,
         destinationStoreCode: shiftType === 'out' ? destinationStoreCode : null
@@ -613,29 +611,23 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
         
         if (storeShopId) {
           console.log(`🔍 [${requestId}] Looking up destination shop for storeShopId: ${storeShopId}`);
-          const supplierResult = await pool.query(
-            'SELECT shop_name, retailer_code FROM external_stores WHERE id = $1',
+          
+          // First, directly check if this is an internal shop (exists in shops table)
+          const shopResult = await pool.query(
+            'SELECT id, shop_name, retailer_code FROM shops WHERE id = $1',
             [parseInt(storeShopId)]
           );
-          if (supplierResult.rows.length > 0) {
-            const { shop_name, retailer_code } = supplierResult.rows[0];
-            console.log(`🔍 [${requestId}] Found supplier info:`, {
-              shop_name: shop_name,
-              retailer_code: retailer_code
+          
+          if (shopResult.rows.length > 0) {
+            // Internal transfer - shop exists in shops table
+            destShopId = shopResult.rows[0].id;
+            console.log(`✅ [${requestId}] Found internal destination shop:`, {
+              shopId: destShopId,
+              shopName: shopResult.rows[0].shop_name,
+              retailerCode: shopResult.rows[0].retailer_code
             });
-            
-            const shopResult = await pool.query(
-              'SELECT id FROM shops WHERE shop_name = $1 AND retailer_code = $2',
-              [shop_name, retailer_code]
-            );
-            if (shopResult.rows.length > 0) {
-              destShopId = shopResult.rows[0].id;
-              console.log(`✅ [${requestId}] Found destination shop ID: ${destShopId}`);
-            } else {
-              console.log(`❌ [${requestId}] No shop found for supplier: ${shop_name} (${retailer_code})`);
-            }
           } else {
-            console.log(`❌ [${requestId}] No supplier found for ID: ${storeShopId}`);
+            console.log(`❌ [${requestId}] Shop ID ${storeShopId} not found in shops table - treating as external transfer`);
           }
         }
 
@@ -701,12 +693,9 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
             }, true);
           }
 
-          // Update destination inventory
-          try {
-            await dbService.updateShopProductQuantity(destShopId, actualMasterBrandId, absQty);
-          } catch (e) {
-            console.error('❌ Could not update destination shop_inventory current_quantity:', e.message);
-          }
+          // Note: Destination inventory will be updated by trigger system when
+          // destination shop's received_stock_records are created
+          console.log(`✅ [${requestId}] Destination shop inventory will be updated by trigger system`);
         }
       } catch (e) {
         console.warn('⚠️ Shift Out internal transfer processing failed:', e.message);
@@ -715,20 +704,9 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
 
     // ===== SOURCE SHOP UPDATE (LAST) =====
     console.log(`\n🔍 [${requestId}] ===== SOURCE SHOP UPDATE =====`);
-    try {
-      console.log(`🔄 [${requestId}] Updating source shop product quantity: ${quantityInt}`);
-      await dbService.updateShopProductQuantity(shopId, actualMasterBrandId, quantityInt);
-      console.log(`✅ [${requestId}] Source shop product quantity updated successfully`);
-    } catch (e) {
-      console.error(`❌ [${requestId}] Failed to update source shop_inventory current_quantity:`, {
-        error: e.message,
-        stack: e.stack,
-        shopId: shopId,
-        masterBrandId: actualMasterBrandId,
-        quantity: quantity
-      });
-      return res.status(400).json({ message: 'Failed to update inventory. This may be due to insufficient stock or database constraint violation.' });
-    }
+    // Note: shop_inventory.current_quantity is automatically updated by the trigger system
+    // when received_stock_records are updated, so no direct update needed here
+    console.log(`✅ [${requestId}] Source shop inventory will be updated by trigger system`);
 
     // Update source shop received_stock_records
     await dbService.updateReceivedStockQuantities(receivedStockRecord.id, updates, false);
@@ -783,10 +761,9 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
           }
           console.log(`✅ [${requestId}] Source shop has sufficient stock`);
 
-          // Deduct from source shop inventory
-          console.log(`🔄 [${requestId}] Deducting ${requestedQty} from source shop inventory`);
-          await dbService.updateShopProductQuantity(actualSourceShopId, actualMasterBrandId, -requestedQty);
-          console.log(`✅ [${requestId}] Successfully deducted from source shop inventory`);
+          // Note: Source shop inventory will be updated by trigger system when
+          // source shop's received_stock_records are updated
+          console.log(`✅ [${requestId}] Source shop inventory will be updated by trigger system`);
 
           // Create/Update transfer OUT record for source shop
           let sourceRecord = await dbService.getReceivedStockRecord(

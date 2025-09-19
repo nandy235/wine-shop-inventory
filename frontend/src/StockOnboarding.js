@@ -76,12 +76,31 @@ function StockOnboarding({ onNavigate, onLogout }) {
       if (response.ok) {
         const brands = await response.json();
         console.log('Loaded master brands:', brands.length);
-        // Debug: Log mansion house brands
-        const mansionHouseBrands = brands.filter(b => 
-          b.name.toLowerCase().includes('mansion') || 
-          b.brandNumber.toLowerCase().includes('mansion')
-        );
-        console.log('Mansion House brands found:', mansionHouseBrands);
+        
+        // Debug: Check pack types distribution
+        const packTypeStats = brands.reduce((stats, brand) => {
+          stats[brand.packType] = (stats[brand.packType] || 0) + 1;
+          return stats;
+        }, {});
+        console.log('Pack type distribution:', packTypeStats);
+        
+        // Debug: Find brands with both P and G pack types
+        const brandGroups = brands.reduce((groups, brand) => {
+          const key = `${brand.brandNumber}_${brand.sizeCode}`;
+          if (!groups[key]) {
+            groups[key] = { name: brand.name, packTypes: [] };
+          }
+          if (!groups[key].packTypes.includes(brand.packType)) {
+            groups[key].packTypes.push(brand.packType);
+          }
+          return groups;
+        }, {});
+        
+        const brandsWithMultiplePackTypes = Object.values(brandGroups).filter(group => group.packTypes.length > 1);
+        console.log('Brands with multiple pack types:', brandsWithMultiplePackTypes.length);
+        if (brandsWithMultiplePackTypes.length > 0) {
+          console.log('Sample brand with multiple pack types:', brandsWithMultiplePackTypes[0]);
+        }
         setMasterBrands(brands);
       }
     } catch (error) {
@@ -138,19 +157,27 @@ function StockOnboarding({ onNavigate, onLogout }) {
         return matches;
       });
       
-      // Then filter out products already in shop inventory
+      // Then filter out products that already exist in inventory
       const filtered = searchFiltered.filter(brand => {
-        // Check if this brand is already in shop inventory
-        const isInInventory = shopInventory.some(inventoryItem => 
+        // Check if this brand exists in shop inventory (by master_brand_id)
+        const inventoryItem = shopInventory.find(inventoryItem => 
           inventoryItem.master_brand_id === brand.id
         );
         
-        // Debug logging for mansion house searches
-        if (searchTerm.includes('mansion') || searchTerm.includes('brandy') || searchTerm.includes('96')) {
-          console.log('Brand:', brand.name, 'Pack Type:', brand.packType, 'Size:', brand.size, 'In Inventory:', isInInventory);
-        }
+        const existsInInventory = !!inventoryItem;
         
-        return !isInInventory; // Only show products NOT in inventory
+        // Debug logging for all searches to understand filtering
+        console.log('🔍 Filtering brand:', {
+          name: brand.name,
+          packType: brand.packType,
+          masterBrandId: brand.id,
+          existsInInventory: existsInInventory,
+          openingStock: inventoryItem?.openingStock || 0,
+          willShow: !existsInInventory,
+          inventoryLength: shopInventory?.length || 0
+        });
+        
+        return !existsInInventory; // Only show products NOT in inventory
       });
       
       setFilteredBrands(filtered);
@@ -262,6 +289,38 @@ function StockOnboarding({ onNavigate, onLogout }) {
     });
   };
 
+  // Helper function to group inventory items by brand name (aggregated display)
+  const groupInventoryByBrand = (inventory) => {
+    const grouped = {};
+    let serialCounter = 1;
+    
+    inventory.forEach((item) => {
+      const brandKey = item.name; // Group by brand name only (aggregated)
+      if (!grouped[brandKey]) {
+        grouped[brandKey] = {
+          brandName: item.name,
+          brandNumber: item.brandNumber,
+          packTypes: [], // Track all pack types for this brand
+          items: [],
+          serialNumber: serialCounter++
+        };
+      }
+      
+      // Add pack types from the aggregated item (which contains packTypes array)
+      if (item.packTypes && Array.isArray(item.packTypes)) {
+        item.packTypes.forEach(packType => {
+          if (!grouped[brandKey].packTypes.includes(packType)) {
+            grouped[brandKey].packTypes.push(packType);
+          }
+        });
+      }
+      
+      grouped[brandKey].items.push(item);
+    });
+    
+    return Object.values(grouped);
+  };
+
   // Drag and Drop functionality
   const handleDragStart = (e, item, index) => {
     setDraggedItem({ item, index });
@@ -292,7 +351,7 @@ function StockOnboarding({ onNavigate, onLogout }) {
       return;
     }
 
-    const newInventory = [...shopInventory];
+    const newInventory = [...(shopInventory || [])];
     const draggedItemData = newInventory[draggedItem.index];
     
     // Remove the dragged item
@@ -422,21 +481,21 @@ function StockOnboarding({ onNavigate, onLogout }) {
           <div className="inventory-display-section">
             <div className="inventory-header">
               <div className="inventory-title-section">
-                <h3 className="section-title">Current Shop Inventory ({shopInventory.length})</h3>
+                <h3 className="section-title">Current Shop Inventory ({shopInventory?.length || 0})</h3>
                 <p className="inventory-subtitle">Products currently in your inventory</p>
               </div>
               <div className="inventory-stats">
                 <div className="inventory-value">
                   <div className="value-label">Total Quantities</div>
-                  <div className="value-amount">{shopInventory.reduce((sum, item) => sum + item.quantity, 0)}</div>
+                  <div className="value-amount">{shopInventory?.reduce((sum, item) => sum + item.quantity, 0) || 0}</div>
                 </div>
                 <div className="inventory-value">
                   <div className="value-label">Total Stock Value</div>
-                  <div className="value-amount">₹{formatNumber(shopInventory.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0))}</div>
+                  <div className="value-amount">₹{formatNumber(shopInventory?.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0) || 0)}</div>
                 </div>
               </div>
             </div>
-            {shopInventory.length === 0 ? (
+            {!shopInventory || shopInventory.length === 0 ? (
               <div className="empty-state-box">
                 <div className="empty-icon">📋</div>
                 <h4 className="empty-title">No products in inventory</h4>
@@ -461,51 +520,57 @@ function StockOnboarding({ onNavigate, onLogout }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {shopInventory.map((item, index) => (
-                      <tr 
-                        key={item.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, item, index)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOver(e, index)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, index)}
-                        className={`inventory-row ${draggedOver === index ? 'drag-over' : ''} ${draggedItem?.index === index ? 'dragging' : ''}`}
-                      >
-                        <td className="drag-handle-cell">
-                          <div className="drag-handle-container">
-                            <span className="serial-number">{index + 1}</span>
-                            <div className="drag-handle" title="Drag to reorder">
-                              ⋮⋮
+                    {groupInventoryByBrand(shopInventory || []).map((brandGroup) => 
+                      brandGroup.items.map((item, itemIndex) => (
+                        <tr 
+                          key={item.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, item, (shopInventory || []).findIndex(inv => inv.id === item.id))}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, (shopInventory || []).findIndex(inv => inv.id === item.id))}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, (shopInventory || []).findIndex(inv => inv.id === item.id))}
+                          className={`inventory-row ${draggedOver === (shopInventory || []).findIndex(inv => inv.id === item.id) ? 'drag-over' : ''} ${draggedItem?.index === (shopInventory || []).findIndex(inv => inv.id === item.id) ? 'dragging' : ''} ${itemIndex === brandGroup.items.length - 1 ? 'brand-group-end' : ''}`}
+                        >
+                          {itemIndex === 0 && (
+                            <>
+                              <td className="grouped-serial" rowSpan={brandGroup.items.length}>
+                                <div className="drag-handle-container">
+                                  <span className="serial-number">{brandGroup.serialNumber}</span>
+                                  <div className="drag-handle" title="Drag to reorder">
+                                    ⋮⋮
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="grouped-brand-cell" rowSpan={brandGroup.items.length}>
+                                <div className="brand-details">
+                                  <div className="brand-name">{brandGroup.brandName}</div>
+                                  <div className="brand-number">#{brandGroup.brandNumber}</div>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                          <td className="variant-size-cell">
+                            <div className="pack-info">
+                              <div className="pack-size">{item.pack_quantity} × {item.size}ml</div>
+                              <div className="pack-type">Type: {item.packType}</div>
                             </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="brand-details">
-                            <div className="brand-name">{item.name}</div>
-                            <div className="brand-number">#{item.brandNumber}</div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="pack-info">
-                            <div className="pack-size">{item.pack_quantity} × {item.size}ml</div>
-                            <div className="pack-type">Type: {item.packType}</div>
-                          </div>
-                        </td>
-                        <td>₹{formatNumber(parseFloat(item.mrp) + parseFloat(item.markup_price || 0))}</td>
-                        <td>
-                          <div className="stock-quantity">
-                            <span className="quantity-value">{item.quantity}</span>
-                            <span className="quantity-unit">units</span>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="last-updated">
-                            {item.last_updated ? new Date(item.last_updated).toLocaleDateString() : 'N/A'}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="variant-price-cell">₹{formatNumber(parseFloat(item.mrp) + parseFloat(item.markup_price || 0))}</td>
+                          <td className="variant-stock-cell">
+                            <div className="stock-quantity">
+                              <span className="quantity-value">{item.quantity}</span>
+                              <span className="quantity-unit">units</span>
+                            </div>
+                          </td>
+                          <td className="variant-updated-cell">
+                            <div className="last-updated">
+                              {item.last_updated ? new Date(item.last_updated).toLocaleDateString() : 'N/A'}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
