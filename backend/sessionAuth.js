@@ -16,7 +16,7 @@ const sessionConfig = {
   secret: process.env.SESSION_SECRET || 'your-session-secret-key-change-in-production',
   name: 'sessionId', // Don't use default session name
   resave: false,
-  saveUninitialized: true,
+  saveUninitialized: false,
   cookie: {
     httpOnly: true, // Prevent XSS
     secure: true,
