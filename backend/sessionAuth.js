@@ -20,7 +20,7 @@ const sessionConfig = {
   cookie: {
     httpOnly: true, // Prevent XSS
     secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    sameSite: 'strict', // CSRF protection
+    sameSite: 'none', // CSRF protection
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   },
   rolling: true, // Reset expiration on activity
