@@ -236,9 +236,11 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors({
   origin: [
-    'http://localhost:3000',
+    'https://easysheetsdaily.com',
+    'https://www.easysheetsdaily.com',
     'https://wine-shop-inventory.vercel.app',
-    'https://wine-shop-inventory-gbaha94u9-nkstories0-5188s-projects.vercel.app'
+    'https://wine-shop-inventory-qbaha4u9-nkstories0-5188s-projects.vercel.app',
+    'http://localhost:3000'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
