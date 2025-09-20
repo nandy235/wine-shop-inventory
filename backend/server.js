@@ -248,7 +248,8 @@ app.use(cors({
 // Security middleware
 app.use(securityHeaders);
 app.use(apiRateLimit);
-
+// Trust Railway's proxy for proper HTTPS detection
+app.set('trust proxy', 1);
 // Session middleware
 app.use(session(sessionConfig));
 
