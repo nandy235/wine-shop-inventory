@@ -1438,25 +1438,33 @@ app.post('/api/login',
    // Create session instead of JWT token
    loginUser(req, user);
    
-   // Generate CSRF token for this session
-   const csrfToken = generateCSRFToken(req);
-   
-   res.json({ 
-     message: 'Login successful',
-     csrfToken: csrfToken,
-     user: { 
-       id: user.id, 
-       name: user.name, 
-       email: user.email, 
-       shopName: user.shop_name,
-       retailerCode: user.retailer_code
+   // Explicitly save the session before responding
+   req.session.save((err) => {
+     if (err) {
+       console.error('Session save error:', err);
+       return res.status(500).json({ message: 'Session creation failed' });
      }
+     
+     // Generate CSRF token for this session
+     const csrfToken = generateCSRFToken(req);
+     
+     res.json({ 
+       message: 'Login successful',
+       csrfToken: csrfToken,
+       user: { 
+         id: user.id, 
+         name: user.name, 
+         email: user.email, 
+         shopName: user.shop_name,
+         retailerCode: user.retailer_code
+       }
+     });
    });
- } catch (error) {
-   console.error('Login error:', error);
-   res.status(500).json({ message: 'Server error during login', error: error.message });
- }
-});
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error during login', error: error.message });
+  }
+ });
 
 app.get('/api/verify-token', requireAuth, (req, res) => {
  res.json({ 
