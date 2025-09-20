@@ -36,18 +36,25 @@ const sessionConfig = {
  * Authentication middleware - check if user is logged in
  */
 const requireAuth = (req, res, next) => {
+  console.log('🔍 Auth check - Session exists:', !!req.session);
+  console.log('🔍 Session ID:', req.sessionID);
+  console.log('🔍 Session data:', req.session);
+  console.log('🔍 Session user:', req.session?.user);
+  
   if (!req.session || !req.session.user) {
+    console.log('❌ Auth failed - no session or user');
     return res.status(401).json({ 
       message: 'Authentication required',
       error: 'Not authenticated' 
     });
   }
   
+  console.log('✅ Auth successful for user:', req.session.user.name);
+  
   // Add user info to request for convenience
   req.user = req.session.user;
   next();
 };
-
 /**
  * CSRF middleware
  */
