@@ -19,8 +19,8 @@ const sessionConfig = {
   saveUninitialized: true,
   cookie: {
     httpOnly: true, // Prevent XSS
-    secure: false,
-    sameSite: 'lax', // CSRF protection
+    secure: true,
+    sameSite: 'none', // CSRF protection
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   },
   rolling: true, // Reset expiration on activity
