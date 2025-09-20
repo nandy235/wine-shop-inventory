@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
 import './IndentEstimate.css';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Constants
 const SEARCH_DEBOUNCE_DELAY = 150;
@@ -91,7 +92,7 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
   const notificationTimeoutRef = useRef(null);
   const [summaryPulse, setSummaryPulse] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = getCurrentUser();
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Utility functions
@@ -169,29 +170,14 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
     dispatch({ type: actionTypes.SET_LOADING, payload: true });
     
     try {
-      const token = localStorage.getItem('token');
-      const url = `${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`;
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        signal: abortControllerRef.current.signal
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Support both shapes: { brands: [...] } or [...]
-        const results = Array.isArray(data) ? data : (data.brands || []);
+      const response = await apiGet(`/api/search-brands?q=${encodeURIComponent(searchQuery)}`);
+      const data = await response.json();
+      // Support both shapes: { brands: [...] } or [...]
+      const results = Array.isArray(data) ? data : (data.brands || []);
         
         dispatch({ type: actionTypes.SET_SEARCH_RESULTS, payload: results });
         dispatch({ type: actionTypes.SET_SHOW_RESULTS, payload: true });
         dispatch({ type: actionTypes.CACHE_SEARCH_RESULT, payload: { term: searchQuery, results } });
-      } else {
-        const errorText = await response.text().catch(() => '');
-        console.error('IndentEstimate: search failed', { status: response.status, errorText });
-        throw new Error(`Search failed (${response.status})`);
-      }
     } catch (error) {
       if (error.name !== 'AbortError') {
         console.error('Search error:', error);

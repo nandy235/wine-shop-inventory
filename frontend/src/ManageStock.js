@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import './ManageStock.css';
 import IndentEstimate from './IndentEstimate';
 import StockReceived from './StockReceived';
+import { getCurrentUser } from './authUtils';
 
 function ManageStock({ onNavigate, onLogout }) {
   const [currentView, setCurrentView] = useState('main');
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = getCurrentUser();
   const shopName = user.shopName || 'Liquor Ledger';
 
   if (currentView === 'indentEstimate') {

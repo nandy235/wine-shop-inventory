@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './StockOnboarding.css';
-import API_BASE_URL from './config';
+import { useUserContext } from './contexts/UserContext';
+import { apiGet, apiPost } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
-function StockOnboarding({ onNavigate, onLogout }) {
+function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
   const [masterBrands, setMasterBrands] = useState([]);
   const [shopInventory, setShopInventory] = useState([]);
   const [filteredBrands, setFilteredBrands] = useState([]);
@@ -14,9 +16,10 @@ function StockOnboarding({ onNavigate, onLogout }) {
   const [draggedItem, setDraggedItem] = useState(null);
   const [draggedOver, setDraggedOver] = useState(null);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const token = localStorage.getItem('token');
-  const shopName = user.shopName || 'test wines';
+  // Get user data from server when needed, with authUtils fallback
+  const { user, loading: userLoading, error: userError, shopName: contextShopName } = useUserContext();
+  const fallbackUser = getCurrentUser();
+  const shopName = contextShopName || fallbackUser.shopName || 'Liquor Ledger';
 
   // Helper function to get business date (day starts at 11:30 AM IST)
   const getBusinessDate = () => {
@@ -66,16 +69,9 @@ function StockOnboarding({ onNavigate, onLogout }) {
   const fetchMasterBrands = async () => {
     try {
       // Fetch all master brands without pack type filter
-      const response = await fetch(`${API_BASE_URL}/api/master-brands`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const brands = await response.json();
-        console.log('Loaded master brands:', brands.length);
+      const response = await apiGet('/api/master-brands');
+      const brands = await response.json();
+      console.log('Loaded master brands:', brands.length);
         
         // Debug: Check pack types distribution
         const packTypeStats = brands.reduce((stats, brand) => {
@@ -102,7 +98,6 @@ function StockOnboarding({ onNavigate, onLogout }) {
           console.log('Sample brand with multiple pack types:', brandsWithMultiplePackTypes[0]);
         }
         setMasterBrands(brands);
-      }
     } catch (error) {
       console.error('Error fetching master brands:', error);
     }
@@ -111,18 +106,10 @@ function StockOnboarding({ onNavigate, onLogout }) {
 
   const fetchShopInventory = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/shop/products`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setShopInventory(data.products || []);
-        console.log('Loaded shop inventory:', data.products?.length || 0);
-      }
+      const response = await apiGet('/api/shop/products');
+      const data = await response.json();
+      setShopInventory(data.products || []);
+      console.log('Loaded shop inventory:', data.products?.length || 0);
     } catch (error) {
       console.error('Error fetching shop inventory:', error);
     }
@@ -238,16 +225,9 @@ function StockOnboarding({ onNavigate, onLogout }) {
       const businessDate = getBusinessDate();
       console.log('🗓️ Using business date for stock onboarding:', businessDate);
 
-      const response = await fetch(`${API_BASE_URL}/api/stock-onboarding/save`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          products: selectedProducts,
-          businessDate: businessDate
-        })
+      const response = await apiPost('/api/stock-onboarding/save', {
+        products: selectedProducts,
+        businessDate: businessDate
       });
 
       if (response.ok) {

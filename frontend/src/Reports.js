@@ -1,8 +1,9 @@
 import React from 'react';
 import './Reports.css';
+import { getCurrentUser } from './authUtils';
 
 function Reports({ onNavigate, onLogout }) {
- const user = JSON.parse(localStorage.getItem('user') || '{}');
+ const user = getCurrentUser();
  const shopName = user.shopName || 'Liquor Ledger';
 
  return (

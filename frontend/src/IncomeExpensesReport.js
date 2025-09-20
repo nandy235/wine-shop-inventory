@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './IncomeExpensesReport.css';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to calculate business date
 const calculateBusinessDate = () => {
@@ -100,8 +101,8 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
   const [generating, setGenerating] = useState(false);
 
   // User data
-  const userData = useMemo(() => JSON.parse(localStorage.getItem('user') || '{}'), []);
-  const token = useMemo(() => localStorage.getItem('token'), []);
+  const userData = useMemo(() => getCurrentUser(), []);
+  // Token no longer needed - apiUtils handles authentication automatically
   const shopName = useMemo(() => userData.shopName || 'Liquor Ledger', [userData.shopName]);
 
   // Category ordering (to preserve original entry order from category master)
@@ -112,11 +113,8 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
   useEffect(() => {
     const loadIncomeCategories = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/income-expenses/income-categories`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        });
-        if (res.ok) {
-          const categories = await res.json();
+        const res = await apiGet('/api/income-expenses/income-categories');
+        const categories = await res.json();
           // Build order map: lower index means earlier in list
           const map = {};
           (categories || []).forEach((c, idx) => {
@@ -125,11 +123,10 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
             if (key) map[key] = idx;
           });
           setIncomeCategoryOrderMap(map);
-        }
       } catch (_) {}
     };
     loadIncomeCategories();
-  }, [token]);
+  }, []);
 
   // Get weeks for selected month
   const weeksInMonth = useMemo(() => {
@@ -204,17 +201,23 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
       }
       
       // Fetch data for all dates in parallel
-      const incomePromises = dates.map(date => 
-        fetch(`${API_BASE_URL}/api/income-expenses/income?date=${date}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        }).then(res => res.ok ? res.json() : []).catch(() => [])
-      );
+      const incomePromises = dates.map(async date => {
+        try {
+          const res = await apiGet(`/api/income-expenses/income?date=${date}`);
+          return await res.json();
+        } catch (error) {
+          return [];
+        }
+      });
       
-      const expensesPromises = dates.map(date => 
-        fetch(`${API_BASE_URL}/api/income-expenses/expenses?date=${date}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        }).then(res => res.ok ? res.json() : []).catch(() => [])
-      );
+      const expensesPromises = dates.map(async date => {
+        try {
+          const res = await apiGet(`/api/income-expenses/expenses?date=${date}`);
+          return await res.json();
+        } catch (error) {
+          return [];
+        }
+      });
       
       const [incomeResults, expensesResults] = await Promise.all([
         Promise.all(incomePromises),
@@ -239,7 +242,7 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, [getDateRange, token]);
+  }, [getDateRange]);
 
   // Fetch data when parameters change
   useEffect(() => {

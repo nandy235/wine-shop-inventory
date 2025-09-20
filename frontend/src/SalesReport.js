@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './SalesReport.css';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Business date helper (11:30 AM IST boundary)
 const calculateBusinessDate = () => {
@@ -68,8 +69,7 @@ function SalesReport({ onNavigate, onLogout }) {
   const currentMonth = new Date().getMonth() + 1;
 
   // Auth and shop
-  const user = useMemo(() => JSON.parse(localStorage.getItem('user') || '{}'), []);
-  const token = useMemo(() => localStorage.getItem('token'), []);
+  const user = useMemo(() => getCurrentUser(), []);
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Controls
@@ -102,31 +102,27 @@ function SalesReport({ onNavigate, onLogout }) {
   useEffect(() => {
     const loadMasterBrands = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/master-brands`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        });
-        if (res.ok) {
-          const list = await res.json();
-          const m = new Map();
-          (list || []).forEach(b => {
-            m.set(b.id, {
-              id: b.id,
-              brandNumber: b.brandNumber,
-              brandName: b.name,
-              size: b.size,
-              sizeCode: b.sizeCode,
-              packType: b.packType,
-              packQuantity: b.packQuantity,
-              mrp: b.mrp,
-              brandKind: b.brandKind || null
-            });
+        const response = await apiGet('/api/master-brands');
+        const list = await response.json();
+        const m = new Map();
+        (list || []).forEach(b => {
+          m.set(b.id, {
+            id: b.id,
+            brandNumber: b.brandNumber,
+            brandName: b.name,
+            size: b.size,
+            sizeCode: b.sizeCode,
+            packType: b.packType,
+            packQuantity: b.packQuantity,
+            mrp: b.mrp,
+            brandKind: b.brandKind || null
           });
-          setBrandMap(m);
-        }
+        });
+        setBrandMap(m);
       } catch (_) {}
     };
     loadMasterBrands();
-  }, [token]);
+  }, []);
 
   // Helpers
   const toDatesArray = (start, end) => {
@@ -182,20 +178,13 @@ function SalesReport({ onNavigate, onLogout }) {
       }
       const { startDate, endDate } = getDateRange();
       // Determine display order from start date shop products
-      const firstDayRes = await fetch(`${API_BASE_URL}/api/shop/products?date=${startDate}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
+      const firstDayResponse = await apiGet(`/api/shop/products?date=${startDate}`);
+      const firstDayJson = await firstDayResponse.json();
       const orderIndex = new Map();
-      if (firstDayRes.ok) {
-        const firstDayJson = await firstDayRes.json();
-        (firstDayJson.products || []).forEach((p, i) => orderIndex.set(`${p.brandNumber}|${p.sizeCode}`, i));
-      }
+      (firstDayJson.products || []).forEach((p, i) => orderIndex.set(`${p.brandNumber}|${p.sizeCode}`, i));
 
-      const res = await fetch(`${API_BASE_URL}/api/reports/sales?startDate=${startDate}&endDate=${endDate}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
-      if (!res.ok) throw new Error('Failed to load sales');
-      const data = await res.json();
+      const salesResponse = await apiGet(`/api/reports/sales?startDate=${startDate}&endDate=${endDate}`);
+      const data = await salesResponse.json();
 
       const list = (data.rows || []).map(r => {
         const mb = brandMap.get(r.master_brand_id);
@@ -238,9 +227,7 @@ function SalesReport({ onNavigate, onLogout }) {
           label: new Date(selectedYear, m - 1).toLocaleDateString('en-US', { month: 'long' })
         }));
         const results = await Promise.all(ranges.map(r =>
-          fetch(`${API_BASE_URL}/api/reports/sales?startDate=${r.start}&endDate=${r.end}`, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-          }).then(x => x.ok ? x.json() : { rows: [] }).catch(() => ({ rows: [] }))
+          apiGet(`/api/reports/sales?startDate=${r.start}&endDate=${r.end}`).catch(() => ({ rows: [] }))
         ));
         const totals = results.map((resp, idx) => {
           const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
@@ -253,9 +240,7 @@ function SalesReport({ onNavigate, onLogout }) {
         const e = new Date(endDate);
         while (c <= e) { dates.push(c.toLocaleDateString('en-CA')); c.setDate(c.getDate() + 1); }
         const results = await Promise.all(dates.map(d =>
-          fetch(`${API_BASE_URL}/api/reports/sales?startDate=${d}&endDate=${d}`, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-          }).then(x => x.ok ? x.json() : { rows: [] }).catch(() => ({ rows: [] }))
+          apiGet(`/api/reports/sales?startDate=${d}&endDate=${d}`).catch(() => ({ rows: [] }))
         ));
         const totals = results.map((resp, idx) => {
           const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
@@ -270,7 +255,7 @@ function SalesReport({ onNavigate, onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, [getDateRange, token, brandMap]);
+  }, [getDateRange, brandMap]);
 
   useEffect(() => {
     fetchData();

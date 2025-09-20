@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './StockLifted.css';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Business date helper (11:30 AM IST boundary)
 const calculateBusinessDate = () => {
@@ -68,8 +69,8 @@ function StockLifted({ onNavigate, onLogout }) {
   const currentMonth = new Date().getMonth() + 1;
 
   // Auth and shop
-  const user = useMemo(() => JSON.parse(localStorage.getItem('user') || '{}'), []);
-  const token = useMemo(() => localStorage.getItem('token'), []);
+  const user = useMemo(() => getCurrentUser(), []);
+  // Token no longer needed - apiUtils handles authentication automatically
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Controls
@@ -102,13 +103,10 @@ function StockLifted({ onNavigate, onLogout }) {
   useEffect(() => {
     const loadMasterBrands = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/master-brands`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        });
-        if (res.ok) {
-          const list = await res.json();
-          const m = new Map();
-          (list || []).forEach(b => {
+        const res = await apiGet('/api/master-brands');
+        const list = await res.json();
+        const m = new Map();
+        (list || []).forEach(b => {
             m.set(b.id, {
               id: b.id,
               brandNumber: b.brandNumber,
@@ -123,11 +121,10 @@ function StockLifted({ onNavigate, onLogout }) {
             });
           });
           setBrandMap(m);
-        }
       } catch (_) {}
     };
     loadMasterBrands();
-  }, [token]);
+  }, []);
 
   // Helpers
   const toDatesArray = (start, end) => {
@@ -187,9 +184,7 @@ function StockLifted({ onNavigate, onLogout }) {
 
       // Maintain initial order based on the first day's products
       const firstDay = dates[0];
-      const firstDayRes = await fetch(`${API_BASE_URL}/api/shop/products?date=${firstDay}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
+      const firstDayRes = await apiGet(`/api/shop/products?date=${firstDay}`);
       if (!firstDayRes.ok) throw new Error('Failed to load stock');
       const firstDayJson = await firstDayRes.json();
       const orderKeys = (firstDayJson.products || []).map(p => `${p.brandNumber}|${p.sizeCode}`);
@@ -197,11 +192,14 @@ function StockLifted({ onNavigate, onLogout }) {
       orderKeys.forEach((k, i) => orderIndex.set(k, i));
 
       // Fetch received stock across range and aggregate invoice quantities
-      const allReceived = await Promise.all(dates.map(d =>
-        fetch(`${API_BASE_URL}/api/received-stock?date=${d}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        }).then(r => r.ok ? r.json() : { receivedStock: [] }).catch(() => ({ receivedStock: [] }))
-      ));
+      const allReceived = await Promise.all(dates.map(async d => {
+        try {
+          const r = await apiGet(`/api/received-stock?date=${d}`);
+          return await r.json();
+        } catch (error) {
+          return { receivedStock: [] };
+        }
+      }));
 
       const agg = new Map(); // key by master_brand_id
       const dayTotals = new Map(); // dateStr -> { inv, mrp }
@@ -292,7 +290,7 @@ function StockLifted({ onNavigate, onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, [getDateRange, token, brandMap]);
+  }, [getDateRange, brandMap]);
 
   useEffect(() => {
     fetchData();

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './StockReceived.css';
 import useBusinessDate from './hooks/useBusinessDate';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 function StockReceived({ onNavigate, onBack, onLogout }) {
   const [stockData, setStockData] = useState([]);
@@ -13,7 +14,7 @@ function StockReceived({ onNavigate, onBack, onLogout }) {
   const [showStoreDropdown, setShowStoreDropdown] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const businessDate = useBusinessDate();
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = getCurrentUser();
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Initialize selected date with business date
@@ -47,13 +48,7 @@ function StockReceived({ onNavigate, onBack, onLogout }) {
 
   const fetchStores = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/api/stores`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await apiGet('/api/stores');
 
       if (response.ok) {
         const data = await response.json();
@@ -75,30 +70,10 @@ function StockReceived({ onNavigate, onBack, onLogout }) {
       setLoading(true);
       setError(null);
       
-      const token = localStorage.getItem('token');
-      const url = `${API_BASE_URL}/api/stock-received?startDate=${selectedDate}&endDate=${selectedDate}&storeFilter=${selectedStore}`;
-      
       console.log('🔍 Fetching stock received data...');
-      console.log('URL:', url);
       console.log('Date:', selectedDate);
-      console.log('Token exists:', !!token);
       
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`Failed to fetch stock received data: ${response.status} ${errorText}`);
-      }
-
+      const response = await apiGet(`/api/stock-received?startDate=${selectedDate}&endDate=${selectedDate}&storeFilter=${selectedStore}`);
       const data = await response.json();
       console.log('Data received:', data);
       setStockData(data.records || []);

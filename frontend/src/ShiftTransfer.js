@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ShiftTransfer.css';
-import API_BASE_URL from './config';
-import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
+import { apiGet, apiPost } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 function ShiftTransfer({ onNavigate, onLogout }) {
   console.log('🔍 ShiftTransfer - Component rendering');
@@ -32,7 +32,8 @@ function ShiftTransfer({ onNavigate, onLogout }) {
   const searchContainerRef = useRef(null);
   const abortControllerRef = useRef(null);
   
-  const shopName = getShopNameForDisplay();
+  const user = getCurrentUser();
+  const shopName = user?.shopName || 'Unknown Shop';
   // Clear store selection when switching shift types if incompatible
   useEffect(() => {
     if (shiftType === 'out' && selectedStore === 'tgbcl') {
@@ -53,20 +54,11 @@ function ShiftTransfer({ onNavigate, onLogout }) {
     const loadShopProducts = async () => {
       try {
         console.log('🔍 ShiftTransfer - loadShopProducts called');
-        const token = localStorage.getItem('token');
-        const resp = await fetch(`${API_BASE_URL}/api/shop/products`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        console.log('🔍 ShiftTransfer - loadShopProducts response status:', resp.status);
-        if (resp.ok) {
-          const data = await resp.json();
-          const items = Array.isArray(data) ? data : (data.products || data || []);
-          console.log('🔍 ShiftTransfer - loadShopProducts items loaded:', items.length);
-          setShopProductsCache(items);
-        }
+        const response = await apiGet('/api/shop/products');
+        const data = await response.json();
+        const items = Array.isArray(data) ? data : (data.products || data || []);
+        console.log('🔍 ShiftTransfer - loadShopProducts items loaded:', items.length);
+        setShopProductsCache(items);
       } catch (e) {
         console.error('Failed to load shop products:', e);
       }
@@ -90,42 +82,30 @@ function ShiftTransfer({ onNavigate, onLogout }) {
   const fetchStores = useCallback(async () => {
     try {
       console.log('🔍 ShiftTransfer - fetchStores called, shiftType:', shiftType);
-      const token = localStorage.getItem('token');
-      console.log('🔍 ShiftTransfer - token exists:', !!token);
-      console.log('🔍 ShiftTransfer - API_BASE_URL:', API_BASE_URL);
       
       let allStores = [];
 
-      // Get current shop data from JWT token (secure)
-      const currentShop = getCurrentShopFromJWT();
-      console.log('🔍 ShiftTransfer - Current shop from JWT:', currentShop);
+      // Get current shop data from session (secure)
+      const currentShop = user;
+      console.log('🔍 ShiftTransfer - Current shop from session:', currentShop);
 
       // Fetch stores from the unified stores endpoint with operation type filter
       try {
         const operationParam = shiftType === 'in' ? 'shift-in' : 'shift-out';
-        const response = await fetch(`${API_BASE_URL}/api/stores?operation=${operationParam}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        console.log('🔍 ShiftTransfer - fetchStores response status:', response.status, 'for operation:', operationParam);
-
-        if (response.ok) {
-          const storesData = await response.json();
-          console.log('🔍 ShiftTransfer - Stores data for', operationParam, ':', storesData);
-          
-          // Map stores data to expected format
-          const storesAsStores = storesData.map(store => ({
-            id: store.id === 'tgbcl' ? 'tgbcl' : `store_${store.id}`,
-            shop_name: store.shop_name,
-            retailer_code: store.retailer_code,
-            contact: store.contact,
-            source: store.store_type || 'store'
-          }));
-          
-          allStores.push(...storesAsStores);
-        }
+        const storesResponse = await apiGet(`/api/stores?operation=${operationParam}`);
+        const storesData = await storesResponse.json();
+        console.log('🔍 ShiftTransfer - Stores data for', operationParam, ':', storesData);
+        
+        // Map stores data to expected format
+        const storesAsStores = storesData.map(store => ({
+          id: store.id === 'tgbcl' ? 'tgbcl' : `store_${store.id}`,
+          shop_name: store.shop_name,
+          retailer_code: store.retailer_code,
+          contact: store.contact,
+          source: store.store_type || 'store'
+        }));
+        
+        allStores.push(...storesAsStores);
       } catch (storesError) {
         console.error('🔍 ShiftTransfer - Error fetching stores:', storesError);
       }
@@ -159,40 +139,26 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       abortControllerRef.current = new AbortController();
 
       try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`${API_BASE_URL}/api/shop/products?search=${encodeURIComponent(searchQuery)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          signal: abortControllerRef.current.signal
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const results = Array.isArray(data) ? data : (data.products || []);
-          const normalized = results.map(r => ({
-            id: r.id,
-            name: (r.brand_name || r.name || '').trim(),
-            brandNumber: r.brand_number || r.brandNumber,
-            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-            sizeMl: Number(r.size_ml || r.size || 0),
-            mrp: r.standard_mrp ?? r.mrp ?? 0,
-            packType: r.pack_type || r.packType || '',
-            available: Number(
-              // Prefer daily closing for the business date, else total stock, else raw quantity
-              (r.closingStock ?? r.closing_stock) ??
-              (r.totalStock ?? r.total_stock) ??
-              (r.quantity ?? r.current_quantity) ?? 0
-            )
-          }));
-          setSearchResults(normalized);
-          setShowSearchResults(true);
-        } else {
-          console.error('Search failed:', response.status);
-          setSearchResults([]);
-          setShowSearchResults(false);
-        }
+        const response = await apiGet(`/api/shop/products?search=${encodeURIComponent(searchQuery)}`);
+        const data = await response.json();
+        const results = Array.isArray(data) ? data : (data.products || []);
+        const normalized = results.map(r => ({
+          id: r.id,
+          name: (r.brand_name || r.name || '').trim(),
+          brandNumber: r.brand_number || r.brandNumber,
+          packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+          sizeMl: Number(r.size_ml || r.size || 0),
+          mrp: r.standard_mrp ?? r.mrp ?? 0,
+          packType: r.pack_type || r.packType || '',
+          available: Number(
+            // Prefer daily closing for the business date, else total stock, else raw quantity
+            (r.closingStock ?? r.closing_stock) ??
+            (r.totalStock ?? r.total_stock) ??
+            (r.quantity ?? r.current_quantity) ?? 0
+          )
+        }));
+        setSearchResults(normalized);
+        setShowSearchResults(true);
       } catch (error) {
         if (error.name !== 'AbortError') {
           console.error('Search error:', error);
@@ -220,33 +186,20 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       abortControllerRef.current = new AbortController();
 
       try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          signal: abortControllerRef.current.signal
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const results = Array.isArray(data) ? data : (data.brands || []);
-          const normalized = results.map(r => ({
-            id: r.id,
-            name: (r.brand_name || r.name || '').trim(),
-            brandNumber: r.brand_number || r.brandNumber,
-            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-            sizeMl: Number(r.size_ml || r.size || 0),
-            mrp: r.standard_mrp ?? r.mrp ?? 0,
-            packType: r.pack_type || r.packType || ''
-          }));
-          setSearchResults(normalized);
-          setShowSearchResults(true);
-        } else {
-          setSearchResults([]);
-          setShowSearchResults(false);
-        }
+        const response = await apiGet(`/api/search-brands?q=${encodeURIComponent(searchQuery)}`);
+        const data = await response.json();
+        const results = Array.isArray(data) ? data : (data.brands || []);
+        const normalized = results.map(r => ({
+          id: r.id,
+          name: (r.brand_name || r.name || '').trim(),
+          brandNumber: r.brand_number || r.brandNumber,
+          packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+          sizeMl: Number(r.size_ml || r.size || 0),
+          mrp: r.standard_mrp ?? r.mrp ?? 0,
+          packType: r.pack_type || r.packType || ''
+        }));
+        setSearchResults(normalized);
+        setShowSearchResults(true);
       } catch (error) {
         if (error.name !== 'AbortError') {
           console.error('Error searching brands:', error);
@@ -260,17 +213,9 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       console.log('🔍 Checking store type for store ID:', storeId);
       
       try {
-        const token = localStorage.getItem('token');
-        const typeResponse = await fetch(`${API_BASE_URL}/api/check-supplier-type?supplierId=${storeId}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (typeResponse.ok) {
-          const typeData = await typeResponse.json();
-          console.log('🔍 Supplier type result:', typeData);
+        const typeResponse = await apiGet(`/api/check-supplier-type?supplierId=${storeId}`);
+        const typeData = await typeResponse.json();
+        console.log('🔍 Supplier type result:', typeData);
           
           if (typeData.isInternal) {
             // Internal supplier: Search that shop's inventory
@@ -280,34 +225,21 @@ function ShiftTransfer({ onNavigate, onLogout }) {
             }
             abortControllerRef.current = new AbortController();
 
-            const searchResponse = await fetch(`${API_BASE_URL}/api/shop/products?shopId=${typeData.shopInfo.id}&search=${encodeURIComponent(searchQuery)}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              signal: abortControllerRef.current.signal
-            });
-
-            if (searchResponse.ok) {
-              const data = await searchResponse.json();
-              const results = Array.isArray(data) ? data : (data.products || []);
-              const normalized = results.map(r => ({
-                id: r.id,
-                name: (r.brand_name || r.name || '').trim(),
-                brandNumber: r.brand_number || r.brandNumber,
-                packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-                sizeMl: Number(r.size_ml || r.size || 0),
-                mrp: r.standard_mrp ?? r.mrp ?? 0,
-                packType: r.pack_type || r.packType || '',
-                available: Number(r.current_quantity || r.quantity || 0)
-              }));
-              setSearchResults(normalized);
-              setShowSearchResults(true);
-            } else {
-              console.error('Search failed:', searchResponse.status);
-              setSearchResults([]);
-              setShowSearchResults(false);
-            }
+            const response = await apiGet(`/api/shop/products?shopId=${typeData.shopInfo.id}&search=${encodeURIComponent(searchQuery)}`);
+            const data = await response.json();
+            const results = Array.isArray(data) ? data : (data.products || []);
+            const normalized = results.map(r => ({
+              id: r.id,
+              name: (r.brand_name || r.name || '').trim(),
+              brandNumber: r.brand_number || r.brandNumber,
+              packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+              sizeMl: Number(r.size_ml || r.size || 0),
+              mrp: r.standard_mrp ?? r.mrp ?? 0,
+              packType: r.pack_type || r.packType || '',
+              available: Number(r.current_quantity || r.quantity || 0)
+            }));
+            setSearchResults(normalized);
+            setShowSearchResults(true);
           } else {
             // External supplier: Search all master brands
             console.log('🔍 Searching master brands for external supplier:', typeData.supplierName);
@@ -316,38 +248,21 @@ function ShiftTransfer({ onNavigate, onLogout }) {
             }
             abortControllerRef.current = new AbortController();
 
-            const searchResponse = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              signal: abortControllerRef.current.signal
-            });
-
-            if (searchResponse.ok) {
-              const data = await searchResponse.json();
-              const results = Array.isArray(data) ? data : (data.brands || []);
-              const normalized = results.map(r => ({
-                id: r.id,
-                name: (r.brand_name || r.name || '').trim(),
-                brandNumber: r.brand_number || r.brandNumber,
-                packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-                sizeMl: Number(r.size_ml || r.size || 0),
-                mrp: r.standard_mrp ?? r.mrp ?? 0,
-                packType: r.pack_type || r.packType || ''
-              }));
-              setSearchResults(normalized);
-              setShowSearchResults(true);
-            } else {
-              setSearchResults([]);
-              setShowSearchResults(false);
-            }
+            const response = await apiGet(`/api/search-brands?q=${encodeURIComponent(searchQuery)}`);
+            const data = await response.json();
+            const results = Array.isArray(data) ? data : (data.brands || []);
+            const normalized = results.map(r => ({
+              id: r.id,
+              name: (r.brand_name || r.name || '').trim(),
+              brandNumber: r.brand_number || r.brandNumber,
+              packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+              sizeMl: Number(r.size_ml || r.size || 0),
+              mrp: r.standard_mrp ?? r.mrp ?? 0,
+              packType: r.pack_type || r.packType || ''
+            }));
+            setSearchResults(normalized);
+            setShowSearchResults(true);
           }
-        } else {
-          console.error('Failed to check supplier type:', typeResponse.status);
-          setSearchResults([]);
-          setShowSearchResults(false);
-        }
       } catch (error) {
         if (error.name !== 'AbortError') {
           console.error('Error checking supplier type:', error);
@@ -364,33 +279,20 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       abortControllerRef.current = new AbortController();
 
       try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`${API_BASE_URL}/api/search-brands?q=${encodeURIComponent(searchQuery)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          signal: abortControllerRef.current.signal
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const results = Array.isArray(data) ? data : (data.brands || []);
-          const normalized = results.map(r => ({
-            id: r.id,
-            name: (r.brand_name || r.name || '').trim(),
-            brandNumber: r.brand_number || r.brandNumber,
-            packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
-            sizeMl: Number(r.size_ml || r.size || 0),
-            mrp: r.standard_mrp ?? r.mrp ?? 0,
-            packType: r.pack_type || r.packType || ''
-          }));
-          setSearchResults(normalized);
-          setShowSearchResults(true);
-        } else {
-          setSearchResults([]);
-          setShowSearchResults(false);
-        }
+        const response = await apiGet(`/api/search-brands?q=${encodeURIComponent(searchQuery)}`);
+        const data = await response.json();
+        const results = Array.isArray(data) ? data : (data.brands || []);
+        const normalized = results.map(r => ({
+          id: r.id,
+          name: (r.brand_name || r.name || '').trim(),
+          brandNumber: r.brand_number || r.brandNumber,
+          packQuantity: Number(r.pack_quantity || r.packQuantity || 12),
+          sizeMl: Number(r.size_ml || r.size || 0),
+          mrp: r.standard_mrp ?? r.mrp ?? 0,
+          packType: r.pack_type || r.packType || ''
+        }));
+        setSearchResults(normalized);
+        setShowSearchResults(true);
       } catch (error) {
         if (error.name !== 'AbortError') {
           console.error('Error searching brands:', error);
@@ -501,7 +403,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
     const getAvailable = () => {
       let avail = Number(product.available || 0);
       if (!avail) {
-        const match = shopProductsCache.find(sp => {
+        const match = (shopProductsCache || []).find(sp => {
           const bn = sp.brand_number || sp.brandNumber;
           const bnP = product.brandNumber;
           const sz = Number(sp.size_ml || sp.size || 0);
@@ -547,8 +449,8 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       selectedProducts: selectedProducts.length,
       shiftType,
       loading,
-      shopName: getShopNameForDisplay(),
-      currentShop: getCurrentShopFromJWT()
+      shopName: shopName,
+      currentShop: user
     });
     console.log(`📋 [${requestId}] Selected Products Details:`, selectedProducts.map(p => ({
       id: p.id,
@@ -609,13 +511,11 @@ function ShiftTransfer({ onNavigate, onLogout }) {
       setLoading(true);
       setError('');
 
-      const token = localStorage.getItem('token');
-      const currentShop = getCurrentShopFromJWT();
+      const currentShop = user;
       
       console.log(`🔑 [${requestId}] Authentication details:`, {
-        tokenExists: !!token,
         currentShop: currentShop,
-        shopName: getShopNameForDisplay()
+        shopName: shopName
       });
 
       console.log(`📦 [${requestId}] Processing ${productsWithQuantity.length} products for ${shiftType.toUpperCase()} operation`);
@@ -674,43 +574,10 @@ function ShiftTransfer({ onNavigate, onLogout }) {
 
         console.log(`🌐 [${requestId}] Frontend - Making API call to /api/stock-shift`);
         console.log(`📡 [${requestId}] API Request Details:`, {
-          url: `${API_BASE_URL}/api/stock-shift`,
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token ? token.substring(0, 20) + '...' : 'NO_TOKEN'}`,
-            'Content-Type': 'application/json'
-          },
           body: shiftData
         });
         
-        const response = await fetch(`${API_BASE_URL}/api/stock-shift`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(shiftData)
-        });
-
-        console.log(`📡 [${requestId}] Frontend - API response received:`, {
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          headers: Object.fromEntries(response.headers.entries())
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.log(`❌ [${requestId}] Frontend - API error response:`, {
-            status: response.status,
-            errorData: errorData,
-            productId: product.id,
-            productName: product.name
-          });
-          throw new Error(errorData.message || 'Failed to process shift');
-        }
-
-        const result = await response.json();
+        const result = await apiPost('/api/stock-shift', shiftData);
         console.log(`✅ [${requestId}] Frontend - Shift successful for product:`, {
           productId: product.id,
           productName: product.name,
@@ -957,7 +824,7 @@ function ShiftTransfer({ onNavigate, onLogout }) {
                               
                               if (shiftType === 'out') {
                                 // For shift out, get from current shop's inventory
-                                const match = shopProductsCache.find(sp => {
+                                const match = (shopProductsCache || []).find(sp => {
                                   const bn = sp.brand_number || sp.brandNumber;
                                   const bnP = product.brandNumber;
                                   const sz = Number(sp.size_ml || sp.size || 0);

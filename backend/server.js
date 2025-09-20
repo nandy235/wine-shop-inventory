@@ -5,12 +5,41 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+const session = require('express-session');
 // Import database pool
 const { pool } = require('./database');
+// Import security middleware
+const {
+  securityHeaders,
+  authRateLimit,
+  apiRateLimit
+} = require('./securityMiddleware');
+
+// Import session authentication
+const {
+  sessionConfig,
+  requireAuth,
+  csrfMiddleware,
+  generateCSRFToken,
+  loginUser,
+  logoutUser,
+  refreshSession
+} = require('./sessionAuth');
+
+// Import validation schemas
+const {
+  loginSchema,
+  registerSchema,
+  stockOnboardingSchema,
+  stockUpdateSchema,
+  idSchema,
+  validateInput,
+  validateParams,
+  validateQuery
+} = require('./validationSchemas');
 // Load master brands from database instead of JSON file
 let masterBrandsData = [];
 
@@ -205,8 +234,6 @@ app.get(['/health', '/_health'], (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-wine-shop-secret-key-2024';
-
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -215,10 +242,21 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Requested-With']
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+// Security middleware
+app.use(securityHeaders);
+app.use(apiRateLimit);
+
+// Session middleware
+app.use(session(sessionConfig));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// CSRF protection (after session)
+app.use(csrfMiddleware);
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
@@ -237,22 +275,7 @@ const upload = multer({
   }
 });
 
-const authenticateToken = (req, res, next) => {
- const authHeader = req.headers['authorization'];
- const token = authHeader && authHeader.split(' ')[1];
-
- if (!token) {
-   return res.status(401).json({ message: 'Access token required' });
- }
-
- jwt.verify(token, JWT_SECRET, (err, user) => {
-   if (err) {
-     return res.status(403).json({ message: 'Invalid or expired token' });
-   }
-   req.user = user;
-   next();
- });
-};
+// JWT authentication removed - using session-based auth
 // Import database configuration
 const { connectDB, initializeTables } = require('./database');
 
@@ -302,7 +325,7 @@ setInterval(cleanupExpiredInvoices, 10 * 60 * 1000);
 
 
 // ===== STOCK SHIFT ENDPOINT =====
-app.post('/api/stock-shift', authenticateToken, async (req, res) => {
+app.post('/api/stock-shift', requireAuth, async (req, res) => {
   const requestId = Date.now() + Math.random();
   
   // Declare variables outside try block so they're accessible in catch block
@@ -850,7 +873,7 @@ app.post('/api/stock-shift', authenticateToken, async (req, res) => {
 // ===== CLOSING STOCK UPDATE ENDPOINT =====
 
 // Update closing stock for multiple products
-app.post('/api/closing-stock/update', authenticateToken, async (req, res) => {
+app.post('/api/closing-stock/update', requireAuth, async (req, res) => {
   try {
     console.log('\n📦 Closing stock update started...');
     
@@ -913,7 +936,7 @@ app.post('/api/closing-stock/update', authenticateToken, async (req, res) => {
 // ===== INVOICE UPLOAD & PARSING ENDPOINTS =====
 
 // Parse uploaded invoice PDF
-app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
+app.post('/api/invoice/upload', requireAuth, (req, res, next) => {
   upload.single('invoice')(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
@@ -1171,7 +1194,7 @@ app.post('/api/invoice/upload', authenticateToken, (req, res, next) => {
 });
 
 // Confirm and add parsed invoice data to stock
-app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
+app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
   try {
     console.log('\n🔄 Invoice confirmation started...');
     console.log('📦 Request body:', req.body);
@@ -1293,7 +1316,7 @@ app.post('/api/invoice/confirm', authenticateToken, async (req, res) => {
   }
 });
 // Cancel pending invoice (manual cleanup)
-app.post('/api/invoice/cancel', authenticateToken, async (req, res) => {
+app.post('/api/invoice/cancel', requireAuth, async (req, res) => {
   try {
     const { tempId } = req.body;
     const userId = parseInt(req.user.userId);
@@ -1330,7 +1353,7 @@ app.post('/api/invoice/cancel', authenticateToken, async (req, res) => {
 });
 
 // Optional: Get invoice history
-app.get('/api/invoices', authenticateToken, async (req, res) => {
+app.get('/api/invoices', requireAuth, async (req, res) => {
   try {
     const userId = parseInt(req.user.userId);
     const shopId = parseInt(req.user.shopId);
@@ -1355,7 +1378,7 @@ app.get('/api/invoices', authenticateToken, async (req, res) => {
 
 // Debug endpoint to check pending invoices (development only)
 if (process.env.NODE_ENV === 'development') {
-  app.get('/api/debug/pending-invoices', authenticateToken, async (req, res) => {
+  app.get('/api/debug/pending-invoices', requireAuth, async (req, res) => {
     try {
       const result = await pool.query(`
         SELECT temp_id, user_id, shop_id, invoice_number, 
@@ -1391,14 +1414,12 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Auth endpoints
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', 
+  authRateLimit,
+  validateInput(loginSchema),
+  async (req, res) => {
  try {
    const { retailerCode, password } = req.body;
-   
-   // Validate retailer code format (exactly 7 digits)
-   if (!retailerCode || !/^\d{7}$/.test(retailerCode)) {
-     return res.status(400).json({ message: 'Retailer code must be exactly 7 digits' });
-   }
    
   const user = await dbService.findUserByRetailerCode(retailerCode);
   if (!user) {
@@ -1413,26 +1434,21 @@ app.post('/api/login', async (req, res) => {
      return res.status(400).json({ message: 'Invalid credentials' });
    }
    
-     const token = jwt.sign(
-    { 
-      userId: user.id, 
-      shopId: user.shop_id,
-      email: user.email,
-      shopName: user.shop_name,
-      retailerCode: user.retailer_code
-    },
-    JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+   // Create session instead of JWT token
+   loginUser(req, user);
+   
+   // Generate CSRF token for this session
+   const csrfToken = generateCSRFToken(req);
    
    res.json({ 
      message: 'Login successful',
-     token: token,
+     csrfToken: csrfToken,
      user: { 
        id: user.id, 
        name: user.name, 
        email: user.email, 
-       shopName: user.shop_name 
+       shopName: user.shop_name,
+       retailerCode: user.retailer_code
      }
    });
  } catch (error) {
@@ -1441,26 +1457,75 @@ app.post('/api/login', async (req, res) => {
  }
 });
 
-app.get('/api/verify-token', authenticateToken, (req, res) => {
+app.get('/api/verify-token', requireAuth, (req, res) => {
  res.json({ 
-   message: 'Token is valid',
+   message: 'Session is valid',
    user: req.user 
  });
 });
 
-app.post('/api/register', async (req, res) => {
+// CSRF token endpoint
+app.get('/api/csrf-token', requireAuth, (req, res) => {
+  const csrfToken = generateCSRFToken(req);
+  
+  res.json({ 
+    csrfToken: csrfToken
+  });
+});
+
+// Removed duplicate logout endpoint - using /api/auth/logout instead
+
+// Authentication status check - returns boolean status
+app.get('/api/auth/status', (req, res) => {
+  const isAuthenticated = !!(req.session && req.session.user);
+  
+  if (isAuthenticated) {
+    res.json({ authenticated: true });
+  } else {
+    res.status(401).json({ authenticated: false });
+  }
+});
+
+// Get current user data
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json(req.session.user);
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', (req, res) => {
+  if (req.session) {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('Session destroy error:', err);
+        return res.status(500).json({ error: 'Logout failed' });
+      }
+      
+      // Clear the session cookie (use the same name as configured)
+      res.clearCookie('sessionId');
+      res.json({ success: true, message: 'Logged out successfully' });
+    });
+  } else {
+    res.json({ success: true, message: 'No active session' });
+  }
+});
+
+// Refresh session endpoint - extends session if valid
+app.post('/api/auth/refresh', (req, res) => {
+  if (req.session && req.session.user) {
+    // Extend session by touching it
+    req.session.touch();
+    res.json({ success: true, message: 'Session refreshed' });
+  } else {
+    res.status(401).json({ error: 'Not authenticated', success: false });
+  }
+});
+
+app.post('/api/register',
+  authRateLimit,
+  validateInput(registerSchema),
+  async (req, res) => {
   try {
     const { name, email, password, shopName, retailerCode, address, licenseNumber } = req.body;
-    
-    // Validation
-    if (!name || !email || !password || !shopName || !retailerCode) {
-      return res.status(400).json({ message: 'Name, email, password, shop name, and retailer code are required' });
-    }
-    
-    // Validate retailer code format (exactly 7 digits)
-    if (!/^\d{7}$/.test(retailerCode)) {
-      return res.status(400).json({ message: 'Retailer code must be exactly 7 digits' });
-    }
     
     // Check if retailer code already exists (each shop must have unique retailer code)
     const existingRetailerCode = await dbService.findUserByRetailerCode(retailerCode);
@@ -1504,7 +1569,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Enhanced stock initialization with auto-recovery
-app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
+app.post('/api/stock/initialize-today', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const today = getBusinessDate();
@@ -1525,7 +1590,10 @@ app.post('/api/stock/initialize-today', authenticateToken, async (req, res) => {
 
 
 // Stock onboarding save endpoint
-app.post('/api/stock-onboarding/save', authenticateToken, async (req, res) => {
+app.post('/api/stock-onboarding/save', 
+  requireAuth, 
+  validateInput(stockOnboardingSchema), 
+  async (req, res) => {
   const client = await pool.connect();
   try {
     const { products, businessDate } = req.body;
@@ -1629,7 +1697,7 @@ app.post('/api/stock-onboarding/save', authenticateToken, async (req, res) => {
 });
 
 // Master brands endpoint - always get fresh data from database
-app.get('/api/master-brands', authenticateToken, async (req, res) => {
+app.get('/api/master-brands', requireAuth, async (req, res) => {
   try {
     // Check if filtering by pack types for stock onboarding
     const { packTypes, stockOnboarding } = req.query;
@@ -1667,7 +1735,7 @@ app.get('/api/master-brands', authenticateToken, async (req, res) => {
 });
 
 // Search brands endpoint for indent estimate
-app.get('/api/search-brands', authenticateToken, async (req, res) => {
+app.get('/api/search-brands', requireAuth, async (req, res) => {
   try {
     const { q } = req.query;
     const query = (q || '').trim();
@@ -1690,7 +1758,7 @@ app.get('/api/search-brands', authenticateToken, async (req, res) => {
 });
 
 // Shop product management
-app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
+app.post('/api/shop/add-product', requireAuth, async (req, res) => {
  try {
    const { masterBrandId, quantity, shopMarkup = 0 } = req.body;
    const shopId = parseInt(req.user.shopId);
@@ -1799,7 +1867,7 @@ app.post('/api/shop/add-product', authenticateToken, async (req, res) => {
  }
 });
 
-app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
+app.put('/api/shop/update-sort-order', requireAuth, async (req, res) => {
   try {
     const { sortedBrandGroups } = req.body;
     const shopId = parseInt(req.user.shopId);
@@ -1813,7 +1881,7 @@ app.put('/api/shop/update-sort-order', authenticateToken, async (req, res) => {
 });
 
 // Debug endpoint to check sort order values
-app.get('/api/debug/sort-order', authenticateToken, async (req, res) => {
+app.get('/api/debug/sort-order', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     
@@ -1844,7 +1912,7 @@ app.get('/api/debug/sort-order', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/shop/products', authenticateToken, async (req, res) => {
+app.get('/api/shop/products', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date, search, shopId: queryShopId } = req.query;
@@ -1939,7 +2007,7 @@ app.get('/api/shop/products', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
+app.put('/api/shop/update-product/:id', requireAuth, async (req, res) => {
  try {
    const { id } = req.params;
    const { quantity, finalPrice } = req.body;
@@ -1994,7 +2062,7 @@ app.put('/api/shop/update-product/:id', authenticateToken, async (req, res) => {
  }
 });
 
-app.delete('/api/shop/delete-product/:id', authenticateToken, async (req, res) => {
+app.delete('/api/shop/delete-product/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const shopId = parseInt(req.user.shopId);
@@ -2048,7 +2116,7 @@ app.delete('/api/shop/delete-product/:id', authenticateToken, async (req, res) =
 });
 
 // Update daily stock record (for editing Received and Price)
-app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) => {
+app.put('/api/shop/update-daily-stock/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params; // shop_inventory.id
     const { receivedStock, finalPrice } = req.body;
@@ -2121,7 +2189,7 @@ app.put('/api/shop/update-daily-stock/:id', authenticateToken, async (req, res) 
 });
 
 // Enhanced closing stock update with validation
-app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
+app.post('/api/stock/update-closing', requireAuth, async (req, res) => {
   try {
     const { date, stockUpdates } = req.body;
     const shopId = parseInt(req.user.shopId);
@@ -2148,7 +2216,7 @@ app.post('/api/stock/update-closing', authenticateToken, async (req, res) => {
 });
 
 // Summary endpoint with improved stock value calculation
-app.get('/api/summary', authenticateToken, async (req, res) => {
+app.get('/api/summary', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2169,7 +2237,7 @@ app.get('/api/summary', authenticateToken, async (req, res) => {
 
 // Income and Expenses endpoints
 // Income Categories
-app.get('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+app.get('/api/income-expenses/income-categories', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     if (!shopId) return res.status(400).json({ message: 'Shop ID not found in token' });
@@ -2181,7 +2249,7 @@ app.get('/api/income-expenses/income-categories', authenticateToken, async (req,
   }
 });
 
-app.post('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+app.post('/api/income-expenses/income-categories', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { name } = req.body;
@@ -2196,7 +2264,7 @@ app.post('/api/income-expenses/income-categories', authenticateToken, async (req
   }
 });
 
-app.delete('/api/income-expenses/income-categories', authenticateToken, async (req, res) => {
+app.delete('/api/income-expenses/income-categories', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { name } = req.body;
@@ -2210,7 +2278,7 @@ app.delete('/api/income-expenses/income-categories', authenticateToken, async (r
     res.status(400).json({ message: error.message });
   }
 });
-app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
+app.get('/api/income-expenses/income', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2226,7 +2294,7 @@ app.get('/api/income-expenses/income', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/income-expenses/expenses', authenticateToken, async (req, res) => {
+app.get('/api/income-expenses/expenses', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2242,7 +2310,7 @@ app.get('/api/income-expenses/expenses', authenticateToken, async (req, res) => 
   }
 });
 
-app.post('/api/income-expenses/save-income', authenticateToken, async (req, res) => {
+app.post('/api/income-expenses/save-income', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date, income } = req.body;
@@ -2262,7 +2330,7 @@ app.post('/api/income-expenses/save-income', authenticateToken, async (req, res)
   }
 });
 
-app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, res) => {
+app.post('/api/income-expenses/save-expenses', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date, expenses } = req.body;
@@ -2285,7 +2353,7 @@ app.post('/api/income-expenses/save-expenses', authenticateToken, async (req, re
 // ===== PAYMENTS ENDPOINTS =====
 
 // Get payment record for a specific date
-app.get('/api/payments', authenticateToken, async (req, res) => {
+app.get('/api/payments', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2318,7 +2386,7 @@ app.get('/api/payments', authenticateToken, async (req, res) => {
 });
 
 // Save or update payment record
-app.post('/api/payments', authenticateToken, async (req, res) => {
+app.post('/api/payments', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { payment_date, cash_amount, upi_amount, card_amount } = req.body;
@@ -2384,7 +2452,7 @@ app.post('/api/analytics/web-vitals', (req, res) => {
 // ===============================================
 
 // Received Stock Management Endpoints
-app.post('/api/received-stock', authenticateToken, async (req, res) => {
+app.post('/api/received-stock', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
@@ -2425,7 +2493,7 @@ app.post('/api/received-stock', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/received-stock', authenticateToken, async (req, res) => {
+app.get('/api/received-stock', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date, masterBrandId } = req.query;
@@ -2445,7 +2513,7 @@ app.get('/api/received-stock', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/received-stock/:id', authenticateToken, async (req, res) => {
+app.put('/api/received-stock/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { invoiceQuantity, shiftIn, shiftOut, transferReference, notes } = req.body;
@@ -2475,7 +2543,7 @@ app.put('/api/received-stock/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/received-stock/:id', authenticateToken, async (req, res) => {
+app.delete('/api/received-stock/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const shopId = parseInt(req.user.shopId);
@@ -2500,7 +2568,7 @@ app.delete('/api/received-stock/:id', authenticateToken, async (req, res) => {
 });
 
 // Stock Transfer Endpoints
-app.post('/api/stock-transfers', authenticateToken, async (req, res) => {
+app.post('/api/stock-transfers', requireAuth, async (req, res) => {
   try {
     const userId = parseInt(req.user.userId);
     const {
@@ -2544,7 +2612,7 @@ app.post('/api/stock-transfers', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/stock-transfers', authenticateToken, async (req, res) => {
+app.get('/api/stock-transfers', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2565,7 +2633,7 @@ app.get('/api/stock-transfers', authenticateToken, async (req, res) => {
 });
 
 // Closing Stock Management Endpoints
-app.post('/api/closing-stock', authenticateToken, async (req, res) => {
+app.post('/api/closing-stock', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
@@ -2606,7 +2674,7 @@ app.post('/api/closing-stock', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/closing-stock', authenticateToken, async (req, res) => {
+app.get('/api/closing-stock', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date, masterBrandId } = req.query;
@@ -2626,7 +2694,7 @@ app.get('/api/closing-stock', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/closing-stock/finalize', authenticateToken, async (req, res) => {
+app.post('/api/closing-stock/finalize', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
@@ -2651,7 +2719,7 @@ app.post('/api/closing-stock/finalize', authenticateToken, async (req, res) => {
 });
 
 // Enhanced Daily Stock Summary Endpoint
-app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
+app.get('/api/enhanced-daily-summary', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.query;
@@ -2679,7 +2747,7 @@ app.get('/api/enhanced-daily-summary', authenticateToken, async (req, res) => {
 });
 
 // Sales Report (aggregated using dsr.sales)
-app.get('/api/reports/sales', authenticateToken, async (req, res) => {
+app.get('/api/reports/sales', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { startDate, endDate } = req.query;
@@ -2695,7 +2763,7 @@ app.get('/api/reports/sales', authenticateToken, async (req, res) => {
 });
 
 // Initialize closing stock records for a date
-app.post('/api/closing-stock/initialize', authenticateToken, async (req, res) => {
+app.post('/api/closing-stock/initialize', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { date } = req.body;
@@ -2747,7 +2815,7 @@ app.get('/api/debug/time', (req, res) => {
 // ===============================================
 
 // Get stores for a shop (filtered by operation type)
-app.get('/api/stores', authenticateToken, async (req, res) => {
+app.get('/api/stores', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
@@ -2816,7 +2884,7 @@ app.get('/api/stores', authenticateToken, async (req, res) => {
 });
 
 // Add new external store
-app.post('/api/stores', authenticateToken, async (req, res) => {
+app.post('/api/stores', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { shopName, retailerCode, contact } = req.body;
@@ -2884,7 +2952,7 @@ app.post('/api/stores', authenticateToken, async (req, res) => {
 });
 
 // Delete external store
-app.delete('/api/stores/:id', authenticateToken, async (req, res) => {
+app.delete('/api/stores/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const shopId = parseInt(req.user.shopId);
@@ -2921,7 +2989,7 @@ app.delete('/api/stores/:id', authenticateToken, async (req, res) => {
 });
 
 // Check if a supplier is internal or external
-app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
+app.get('/api/check-supplier-type', requireAuth, async (req, res) => {
   try {
     const userId = parseInt(req.user.userId);
     const { supplierId } = req.query;
@@ -2986,7 +3054,7 @@ app.get('/api/check-supplier-type', authenticateToken, async (req, res) => {
 // ===== STOCK TRANSFER HISTORY ENDPOINTS =====
 
 // Get stock shifted in (received from other shops)
-app.get('/api/stock-transfers/shifted-in', authenticateToken, async (req, res) => {
+app.get('/api/stock-transfers/shifted-in', requireAuth, async (req, res) => {
   try {
     const { date } = req.query;
     const shopId = parseInt(req.user.shopId);
@@ -3059,7 +3127,7 @@ app.get('/api/stock-transfers/shifted-in', authenticateToken, async (req, res) =
 });
 
 // Get stock shifted out (sent to other shops)
-app.get('/api/stock-transfers/shifted-out', authenticateToken, async (req, res) => {
+app.get('/api/stock-transfers/shifted-out', requireAuth, async (req, res) => {
   try {
     const { date } = req.query;
     const shopId = parseInt(req.user.shopId);
@@ -3252,7 +3320,7 @@ async function fixMissingInternalSuppliers() {
 
 
 // Keep the old suppliers endpoint for backward compatibility
-app.get('/api/suppliers', authenticateToken, async (req, res) => {
+app.get('/api/suppliers', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const userId = parseInt(req.user.userId);
@@ -3278,7 +3346,7 @@ app.get('/api/suppliers', authenticateToken, async (req, res) => {
 });
 
 // Fix missing internal supplier relationships (admin endpoint)
-app.post('/api/fix-internal-suppliers', authenticateToken, async (req, res) => {
+app.post('/api/fix-internal-suppliers', requireAuth, async (req, res) => {
   try {
     console.log('🔧 Admin requested to fix missing internal supplier relationships');
     await fixMissingInternalSuppliers();
@@ -3290,7 +3358,7 @@ app.post('/api/fix-internal-suppliers', authenticateToken, async (req, res) => {
 });
 
 // Stock Received Report Endpoint
-app.get('/api/stock-received', authenticateToken, async (req, res) => {
+app.get('/api/stock-received', requireAuth, async (req, res) => {
   try {
     const shopId = parseInt(req.user.shopId);
     const { startDate, endDate, storeFilter } = req.query;
@@ -3433,6 +3501,64 @@ app.get('/api/stock-received', authenticateToken, async (req, res) => {
 // Basic route
 app.get('/', (req, res) => {
  res.json({ message: 'Wine Shop Inventory API is running!' });
+});
+
+// Error handling middleware - must be before server start
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  
+  // Handle specific error types that match client expectations
+  if (err.type === 'time-out') {
+    return res.status(408).json({ 
+      error: 'Request timeout',
+      message: 'The server took too long to respond. Please try again.'
+    });
+  }
+  
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      error: 'File too large',
+      message: 'The uploaded file is too large. Please try a smaller file.'
+    });
+  }
+  
+  if (err.code === 'EBADCSRFTOKEN') {
+    return res.status(403).json({
+      error: 'Invalid CSRF token',
+      message: 'Security token mismatch. Please refresh the page and try again.'
+    });
+  }
+  
+  // Database connection errors
+  if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+    return res.status(503).json({
+      error: 'Service unavailable',
+      message: 'Database connection failed. Please try again later.'
+    });
+  }
+  
+  // Validation errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      error: 'Validation failed',
+      message: err.message,
+      details: err.details
+    });
+  }
+  
+  // Default server error
+  res.status(500).json({
+    error: 'Internal server error',
+    message: 'An unexpected error occurred. Please try again later.'
+  });
+});
+
+// Handle 404 for undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Not found',
+    message: 'The requested endpoint does not exist.'
+  });
 });
 
 // --- Start the server FIRST ---

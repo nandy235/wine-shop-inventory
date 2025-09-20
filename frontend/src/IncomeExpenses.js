@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './IncomeExpenses.css';
-import API_BASE_URL from './config';
+import { apiGet, apiPost, apiDelete } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -46,8 +47,8 @@ function IncomeExpenses({ onNavigate, onLogout }) {
   const [addCategoryName, setAddCategoryName] = useState('');
   const [addingCategory, setAddingCategory] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const token = localStorage.getItem('token');
+  const user = getCurrentUser();
+  // Token no longer needed - apiUtils handles authentication automatically
   const shopName = user.shopName || 'Liquor Ledger';
 
   const defaultIncomeCategories = [
@@ -79,19 +80,10 @@ function IncomeExpenses({ onNavigate, onLogout }) {
     // Load categories on mount
     const fetchIncomeCategories = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/income-expenses/income-categories`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (response.ok) {
-          const result = await response.json();
-          const names = Array.isArray(result) ? result.map(c => c.name) : [];
-          setIncomeCategories(names && names.length > 0 ? names : defaultIncomeCategories);
-        } else {
-          setIncomeCategories(defaultIncomeCategories);
-        }
+        const response = await apiGet('/api/income-expenses/income-categories');
+        const result = await response.json();
+        const names = Array.isArray(result) ? result.map(c => c.name) : [];
+        setIncomeCategories(names && names.length > 0 ? names : defaultIncomeCategories);
       } catch (e) {
         setIncomeCategories(defaultIncomeCategories);
       }
@@ -109,23 +101,12 @@ function IncomeExpenses({ onNavigate, onLogout }) {
   const fetchIncomeExpenses = async () => {
     try {
       // Fetch existing income data
-      const incomeResponse = await fetch(`${API_BASE_URL}/api/income-expenses/income?date=${date}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const incomeResponse = await apiGet(`/api/income-expenses/income?date=${date}`);
+      const incomeResult = await incomeResponse.json();
 
       // Fetch existing expenses data
-      const expensesResponse = await fetch(`${API_BASE_URL}/api/income-expenses/expenses?date=${date}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      const incomeResult = incomeResponse.ok ? await incomeResponse.json() : [];
-      const expensesResult = expensesResponse.ok ? await expensesResponse.json() : [];
+      const expensesResponse = await apiGet(`/api/income-expenses/expenses?date=${date}`);
+      const expensesResult = await expensesResponse.json();
 
       // Check if there's actually saved data (not just zeros)
       const hasIncomeData = incomeResult.length > 0 && incomeResult.some(item => item.amount > 0);
@@ -177,14 +158,7 @@ function IncomeExpenses({ onNavigate, onLogout }) {
     if (!name || addingCategory) return;
     setAddingCategory(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/income-expenses/income-categories`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name })
-      });
+      const response = await apiPost('/api/income-expenses/income-categories', { name });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         alert(err.message || 'Failed to add category');
@@ -237,16 +211,9 @@ function IncomeExpenses({ onNavigate, onLogout }) {
     try {
       const incomeEntries = incomeData.filter(item => item.amount > 0);
 
-      const response = await fetch(`${API_BASE_URL}/api/income-expenses/save-income`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          date,
-          income: incomeEntries
-        })
+      const response = await apiPost('/api/income-expenses/save-income', {
+        date,
+        income: incomeEntries
       });
 
       if (response.ok) {
@@ -270,16 +237,9 @@ function IncomeExpenses({ onNavigate, onLogout }) {
     try {
       const expenseEntries = expensesData.filter(item => item.amount > 0);
 
-      const response = await fetch(`${API_BASE_URL}/api/income-expenses/save-expenses`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          date,
-          expenses: expenseEntries
-        })
+      const response = await apiPost('/api/income-expenses/save-expenses', {
+        date,
+        expenses: expenseEntries
       });
 
       if (response.ok) {
@@ -337,14 +297,7 @@ function IncomeExpenses({ onNavigate, onLogout }) {
     const confirmDelete = window.confirm(`Delete category "${categoryName}"?`);
     if (!confirmDelete) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/income-expenses/income-categories`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name: categoryName })
-      });
+      const response = await apiPost('/api/income-expenses/income-categories/delete', { name: categoryName });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         alert(data.message || 'Failed to delete category');

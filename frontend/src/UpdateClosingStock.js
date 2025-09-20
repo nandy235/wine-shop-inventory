@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './UpdateClosingStock.css';
-import API_BASE_URL from './config';
+import { apiGet, apiPost } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -34,8 +35,8 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
  const [businessDate, setBusinessDate] = useState(getBusinessDate());
  const [originalValues, setOriginalValues] = useState({});
 
- const user = JSON.parse(localStorage.getItem('user') || '{}');
- const token = localStorage.getItem('token');
+ const user = getCurrentUser();
+  // Token no longer needed - apiUtils handles authentication automatically
  const shopName = user.shopName || 'Liquor Ledger';
 
  const formatBusinessDate = (dateString) => {
@@ -103,15 +104,8 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
 
  const fetchTodayStock = async () => {
    try {
-     const response = await fetch(`${API_BASE_URL}/api/shop/products`, {
-       headers: {
-         'Authorization': `Bearer ${token}`,
-         'Content-Type': 'application/json'
-       }
-     });
-
-         if (response.ok) {
-      const responseData = await response.json();
+    const response = await apiGet('/api/shop/products');
+    const responseData = await response.json();
       
       // Handle both old and new API response formats
       const products = responseData.products || responseData;
@@ -152,12 +146,9 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
         originalClosingStocks[item.id] = item.closingStock;
       });
       setOriginalValues(originalClosingStocks);
-     } else {
-       console.error('Failed to fetch stock data');
-     }
-   } catch (error) {
-     console.error('Error fetching stock data:', error);
-   }
+ } catch (error) {
+   console.error('Error fetching stock data:', error);
+ }
    setLoading(false);
  };
 
@@ -249,19 +240,12 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
      // Use business date instead of regular date
      const targetDate = businessDate || getBusinessDate();
      
-     const response = await fetch(`${API_BASE_URL}/api/closing-stock/update`, {
-       method: 'POST',
-       headers: {
-         'Authorization': `Bearer ${token}`,
-         'Content-Type': 'application/json'
-       },
-       body: JSON.stringify({
-         date: targetDate,
-         stockUpdates: stockData.map(item => ({
-           id: item.id,
-           closingStock: item.closingStock
-         }))
-       })
+     const response = await apiPost('/api/closing-stock/update', {
+       date: targetDate,
+       stockUpdates: stockData.map(item => ({
+         id: item.id,
+         closingStock: item.closingStock
+       }))
      });
 
          if (response.ok) {

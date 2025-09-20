@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './TrackPayments.css';
-import API_BASE_URL from './config';
+import { apiGet, apiPost } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -77,7 +78,7 @@ function TrackPayments({ onNavigate, onLogout }) {
   const [openingBalanceSet, setOpeningBalanceSet] = useState(false);
   // Removed manual balance setting - now automatically uses previous day's closing balance
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = getCurrentUser();
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Monitor business date changes and auto-update selected date
@@ -122,64 +123,46 @@ function TrackPayments({ onNavigate, onLogout }) {
 
   const loadData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      
       // Load payments data
-      const paymentsResponse = await fetch(`${API_BASE_URL}/api/payments?date=${selectedDate}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (paymentsResponse.ok) {
-        const paymentsData = await paymentsResponse.json();
-        if (paymentsData.payment) {
-          setPayments({
-            cash_amount: paymentsData.payment.cash_amount.toString(),
-            upi_amount: paymentsData.payment.upi_amount.toString(),
-            card_amount: paymentsData.payment.card_amount.toString()
-          });
-          setPaymentsModified(false); // Data exists, not modified
-        } else {
-          setPayments({
-            cash_amount: '',
-            upi_amount: '',
-            card_amount: ''
-          });
-          setPaymentsModified(true); // No data exists, treat as modified to show "Save"
-        }
-        setExistingPayments(paymentsData.recentPayments || []);
+      const paymentsResponse = await apiGet(`/api/payments?date=${selectedDate}`);
+      const paymentsData = await paymentsResponse.json();
+      if (paymentsData.payment) {
+        setPayments({
+          cash_amount: paymentsData.payment.cash_amount.toString(),
+          upi_amount: paymentsData.payment.upi_amount.toString(),
+          card_amount: paymentsData.payment.card_amount.toString()
+        });
+        setPaymentsModified(false); // Data exists, not modified
+      } else {
+        setPayments({
+          cash_amount: '',
+          upi_amount: '',
+          card_amount: ''
+        });
+        setPaymentsModified(true); // No data exists, treat as modified to show "Save"
       }
+      setExistingPayments(paymentsData.recentPayments || []);
 
       // Load summary data (sales, income, expenses)
-      const summaryResponse = await fetch(`${API_BASE_URL}/api/summary?date=${selectedDate}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      const summaryResponse = await apiGet(`/api/summary?date=${selectedDate}`);
+      const summary = await summaryResponse.json();
+      console.log(`📊 Summary API Response for ${selectedDate}:`, {
+        totalSales: summary.totalSales,
+        totalOtherIncome: summary.totalOtherIncome,
+        totalExpenses: summary.totalExpenses,
+        counterBalance: summary.counterBalance,
+        openingBalance: summary.openingBalance
       });
-
-      if (summaryResponse.ok) {
-        const summary = await summaryResponse.json();
-        console.log(`📊 Summary API Response for ${selectedDate}:`, {
-          totalSales: summary.totalSales,
-          totalOtherIncome: summary.totalOtherIncome,
-          totalExpenses: summary.totalExpenses,
-          counterBalance: summary.counterBalance,
-          openingBalance: summary.openingBalance
-        });
-        setSummaryData(prev => ({
-          ...prev,
-          todaysSale: summary.totalSales || 0,
-          totalIncome: summary.totalOtherIncome || 0,
-          totalExpenses: summary.totalExpenses || 0
-        }));
-        
-        // Always use previous day's closing balance as opening balance
-        setOpeningBalance((summary.openingBalance || 0).toString());
-        setOpeningBalanceSet(true); // Always set as automatic (no manual override needed)
-      }
+      setSummaryData(prev => ({
+        ...prev,
+        todaysSale: summary.totalSales || 0,
+        totalIncome: summary.totalOtherIncome || 0,
+        totalExpenses: summary.totalExpenses || 0
+      }));
+      
+      // Always use previous day's closing balance as opening balance
+      setOpeningBalance((summary.openingBalance || 0).toString());
+      setOpeningBalanceSet(true); // Always set as automatic (no manual override needed)
 
     } catch (error) {
       console.error('Error loading data:', error);
@@ -206,7 +189,6 @@ function TrackPayments({ onNavigate, onLogout }) {
     setMessage('');
 
     try {
-      const token = localStorage.getItem('token');
       const paymentData = {
         payment_date: selectedDate,
         cash_amount: parseFloat(payments.cash_amount) || 0,
@@ -214,26 +196,11 @@ function TrackPayments({ onNavigate, onLogout }) {
         card_amount: parseFloat(payments.card_amount) || 0
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/payments`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(paymentData)
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setMessage('Payment record saved successfully!');
-        setMessageType('success');
-        setPaymentsModified(false); // Mark as saved
-        loadData(); // Reload to show updated data
-      } else {
-        setMessage(data.message || 'Failed to save payment record');
-        setMessageType('error');
-      }
+      await apiPost('/api/payments', paymentData);
+      setMessage('Payment record saved successfully!');
+      setMessageType('success');
+      setPaymentsModified(false); // Mark as saved
+      loadData(); // Reload to show updated data
     } catch (error) {
       setMessage('Error saving payment record');
       setMessageType('error');

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './Signup.css';
-import API_BASE_URL from './config';
+import { apiPost } from './apiUtils';
+import { validateEmail, sanitizeRetailerCode, validateRetailerCode, sanitizeInput } from './authUtils';
 
 function Signup({ onLogin }) {
   const [name, setName] = useState('');
@@ -14,40 +15,63 @@ function Signup({ onLogin }) {
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
-  console.log('API_BASE_URL:', API_BASE_URL, typeof API_BASE_URL);
-  console.log('Full URL:', `${API_BASE_URL}/api/register`);
-  
-  setLoading(true);
-  setError('');
-  
+    setLoading(true);
+    setError('');
+    
+    // Client-side validation
+    const cleanName = sanitizeInput(name);
+    const cleanEmail = email.trim();
+    const cleanShopName = sanitizeInput(shopName);
+    const cleanRetailerCode = sanitizeRetailerCode(retailerCode);
+    const cleanAddress = sanitizeInput(address);
+    const cleanLicenseNumber = sanitizeInput(licenseNumber);
+    
+    // Validation checks
+    if (!cleanName) {
+      setError('Name is required');
+      setLoading(false);
+      return;
+    }
+    
+    if (!validateEmail(cleanEmail)) {
+      setError('Please enter a valid email address');
+      setLoading(false);
+      return;
+    }
+    
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters');
+      setLoading(false);
+      return;
+    }
+    
+    if (!cleanShopName) {
+      setError('Shop name is required');
+      setLoading(false);
+      return;
+    }
+    
+    if (!validateRetailerCode(cleanRetailerCode)) {
+      setError('Retailer code must be exactly 7 digits');
+      setLoading(false);
+      return;
+    }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          name, 
-          email, 
-          password, 
-          shopName, 
-          retailerCode, 
-          address, 
-          licenseNumber 
-        })
+      await apiPost('/api/register', { 
+        name: cleanName, 
+        email: cleanEmail, 
+        password, 
+        shopName: cleanShopName, 
+        retailerCode: cleanRetailerCode, 
+        address: cleanAddress, 
+        licenseNumber: cleanLicenseNumber 
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        alert('Account created successfully! Please login.');
-        onLogin();
-      } else {
-        setError(data.message);
-      }
+      alert('Account created successfully! Please login.');
+      onLogin();
     } catch (err) {
-      setError('Network error. Please try again.');
+      setError(err.message || 'Network error. Please try again.');
     }
 
     setLoading(false);
@@ -102,7 +126,7 @@ function Signup({ onLogin }) {
             className="form-input" 
             value={retailerCode}
             onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, ''); // Only allow digits
+              const value = sanitizeRetailerCode(e.target.value);
               if (value.length <= 7) {
                 setRetailerCode(value);
               }

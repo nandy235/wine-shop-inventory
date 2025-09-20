@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './Login.css';
-import API_BASE_URL from './config';
+import { sanitizeRetailerCode, validateRetailerCode } from './authUtils';
 
 function Login({ onLogin, onSignup }) {
   const [retailerCode, setRetailerCode] = useState('');
@@ -12,50 +12,76 @@ function Login({ onLogin, onSignup }) {
     setLoading(true);
     setError('');
 
+    // Client-side validation
+    const cleanRetailerCode = sanitizeRetailerCode(retailerCode);
+    if (!validateRetailerCode(cleanRetailerCode)) {
+      setError('Retailer code must be exactly 7 digits');
+      setLoading(false);
+      return;
+    }
+
+    if (!password || password.length < 1) {
+      setError('Password is required');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ retailerCode, password })
+      // Pass credentials to AuthContext for actual login
+      const loginResult = await onLogin({
+        retailerCode: cleanRetailerCode,
+        password: password.trim()
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        onLogin(data.token, data.user);
-      } else {
-        setError(data.message);
+      
+      if (!loginResult.success) {
+        setError(loginResult.error || 'Login failed');
       }
+      // If successful, AuthContext handles authentication state
     } catch (err) {
+      console.error('Login error:', err);
       setError('Network error. Please try again.');
     }
 
     setLoading(false);
   };
 
+  // Keyboard accessibility - Enter key to login (using modern onKeyDown)
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !loading) {
+      handleLogin();
+    }
+  };
+
+  // Handle form submission for better accessibility
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!loading) {
+      handleLogin();
+    }
+  };
+
   return (
     <div className="login-container">
       <div className="login-form">
         <h1 className="login-title">Liquor Ledger</h1>
-        {error && <div style={{color: 'red', marginBottom: '10px'}}>{error}</div>}
-        <div className="form-group">
+        {error && <div style={{color: 'red', marginBottom: '10px'}} role="alert">{error}</div>}
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="form-group">
           <label className="form-label">Retailer Code:</label>
           <input 
             type="text" 
             className="form-input" 
             value={retailerCode}
             onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, ''); // Only allow digits
-              if (value.length <= 7) {
-                setRetailerCode(value);
-              }
+              const sanitized = sanitizeRetailerCode(e.target.value);
+              setRetailerCode(sanitized);
             }}
+            onKeyDown={handleKeyDown}
             placeholder="7-digit number (e.g., 1234567)"
             maxLength="7"
             pattern="[0-9]{7}"
             inputMode="numeric"
+            disabled={loading}
             style={{
               MozAppearance: 'textfield',
               WebkitAppearance: 'none',
@@ -70,15 +96,20 @@ function Login({ onLogin, onSignup }) {
             className="form-input" 
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Enter your password"
+            disabled={loading}
           />
-        </div>
-        <button 
-          className="signin-button" 
-          onClick={handleLogin}
-          disabled={loading}
-        >
-          {loading ? 'Signing In...' : 'Sign In'}
-        </button>
+          </div>
+          <button 
+            type="submit"
+            className="signin-button" 
+            disabled={loading}
+            aria-label={loading ? 'Signing in, please wait' : 'Sign in to your account'}
+          >
+            {loading ? 'Signing In...' : 'Sign In'}
+          </button>
+        </form>
         <p className="signup-text">
           New user? 
           <a href="#" className="signup-link" onClick={(e) => { e.preventDefault(); onSignup(); }}>

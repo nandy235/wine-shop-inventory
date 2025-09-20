@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Login from './Login';
 import Signup from './Signup';
 import Dashboard from './Dashboard';
@@ -18,71 +18,34 @@ import AddStore from './AddStore';
 import ShiftTransfer from './ShiftTransfer';
 import StockTransferReport from './StockTransferReport';
 import './App.css';
-import API_BASE_URL from './config';
+import { AuthProvider, useAuthContext } from './contexts/AuthContext';
+import { UserProvider } from './contexts/UserContext';
 
-function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+// Main App component that uses contexts
+function AppContent() {
   const [currentView, setCurrentView] = useState('login');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
-
-  const checkAuthStatus = async () => {
-    const token = localStorage.getItem('token');
-    
-    if (token) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/verify-token`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.ok) {
-          setIsAuthenticated(true);
-          setCurrentView('dashboard');
-        } else {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setIsAuthenticated(false);
-          setCurrentView('login');
-        }
-      } catch (error) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setIsAuthenticated(false);
-        setCurrentView('login');
-      }
-    } else {
-      setIsAuthenticated(false);
-      setCurrentView('login');
-    }
-    setLoading(false);
-  };
-
-  const handleLogin = (token, user) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    setIsAuthenticated(true);
-    setCurrentView('dashboard');
-  };
+  const { isAuthenticated, loading, handleLogin, handleLogout, handleAuthError } = useAuthContext();
 
   const handleNavigate = (view) => {
     setCurrentView(view);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setIsAuthenticated(false);
-    setCurrentView('login');
-  };
+  // Update view based on authentication status
+  React.useEffect(() => {
+    if (isAuthenticated && currentView === 'login') {
+      setCurrentView('dashboard');
+    } else if (!isAuthenticated && currentView !== 'login' && currentView !== 'signup') {
+      setCurrentView('login');
+    }
+  }, [isAuthenticated, currentView]);
 
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="loading-container">
+        <div className="loading-spinner"></div>
+        <p>Loading...</p>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -97,6 +60,7 @@ function App() {
         {currentView === 'signup' && (
           <Signup 
             onLogin={() => setCurrentView('login')} 
+            onSignup={() => setCurrentView('login')} 
           />
         )}
       </div>
@@ -104,56 +68,116 @@ function App() {
   }
 
   return (
-    <div className="App">
-      {currentView === 'dashboard' && (
-        <Dashboard onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'stockOnboarding' && (
-        <StockOnboarding onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'manageStock' && (
-        <ManageStock onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'uploadInvoice' && (
-        <UploadInvoice onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'sheets' && (
-        <Sheets onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'updateClosingStock' && (
-        <UpdateClosingStock onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'incomeExpenses' && (
-        <IncomeExpenses onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'incomeExpensesReport' && (
-        <IncomeExpensesReport onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'trackPayments' && (
-        <TrackPayments onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'downloadSaleSheet' && (
-        <DownloadSaleSheet onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'reports' && (
-        <Reports onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'stockLifted' && (
-        <StockLifted onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'brandWiseSales' && (
-        <SalesReport onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'addStore' && (
-        <AddStore onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'shiftTransfer' && (
-        <ShiftTransfer onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {currentView === 'stockTransferReport' && (
-        <StockTransferReport onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-    </div>
+    <UserProvider isAuthenticated={isAuthenticated} onAuthError={handleAuthError}>
+      <div className="App">
+        {currentView === 'dashboard' && (
+          <Dashboard 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'stockOnboarding' && (
+          <StockOnboarding 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+            isAuthenticated={isAuthenticated}
+          />
+        )}
+        {currentView === 'manageStock' && (
+          <ManageStock 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'uploadInvoice' && (
+          <UploadInvoice 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'sheets' && (
+          <Sheets 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'updateClosingStock' && (
+          <UpdateClosingStock 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'incomeExpenses' && (
+          <IncomeExpenses 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'incomeExpensesReport' && (
+          <IncomeExpensesReport 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'trackPayments' && (
+          <TrackPayments 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'downloadSaleSheet' && (
+          <DownloadSaleSheet 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'reports' && (
+          <Reports 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'stockLifted' && (
+          <StockLifted 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'brandWiseSales' && (
+          <SalesReport 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'addStore' && (
+          <AddStore 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'shiftTransfer' && (
+          <ShiftTransfer 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+        {currentView === 'stockTransferReport' && (
+          <StockTransferReport 
+            onNavigate={handleNavigate} 
+            onLogout={handleLogout} 
+          />
+        )}
+      </div>
+    </UserProvider>
+  );
+}
+
+// Root App component with context providers
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

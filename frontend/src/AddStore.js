@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './AddStore.css';
-import API_BASE_URL from './config';
+import { apiGet, apiPost, apiDelete } from './apiUtils';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
+import { sanitizeRetailerCode, validateRetailerCode, sanitizeInput } from './authUtils';
 
 function AddStore({ onNavigate, onLogout }) {
   const [stores, setStores] = useState([]);
@@ -36,21 +37,11 @@ function AddStore({ onNavigate, onLogout }) {
     setLoading(true);
     setError(null);
     
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('No authentication token found');
-      setLoading(false);
-      return;
-    }
+    // Token no longer needed - apiUtils handles authentication automatically
 
     try {
       // Use the unified /api/stores endpoint
-      const response = await fetch(`${API_BASE_URL}/api/stores`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await apiGet('/api/stores');
 
       if (!response.ok) {
         throw new Error('Failed to fetch stores');
@@ -72,29 +63,21 @@ function AddStore({ onNavigate, onLogout }) {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     
-    // Handle retailer code validation (only allow digits, max 7)
-    if (name === 'retailerCode') {
-      const digitsOnly = value.replace(/\D/g, '').slice(0, 7);
-      setFormData(prev => ({
-        ...prev,
-        [name]: digitsOnly
-      }));
-      return;
-    }
+    let processedValue = value;
     
-    // Handle contact validation (only allow digits, max 10)
-    if (name === 'contact') {
-      const digitsOnly = value.replace(/\D/g, '').slice(0, 10);
-      setFormData(prev => ({
-        ...prev,
-        [name]: digitsOnly
-      }));
-      return;
+    // Handle different input types with proper sanitization
+    if (name === 'retailerCode') {
+      processedValue = sanitizeRetailerCode(value);
+    } else if (name === 'shopName') {
+      processedValue = sanitizeInput(value);
+    } else if (name === 'contact') {
+      // Keep contact as digits only, max 10
+      processedValue = value.replace(/\D/g, '').slice(0, 10);
     }
     
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: processedValue
     }));
   };
 
@@ -103,7 +86,7 @@ function AddStore({ onNavigate, onLogout }) {
       setError('Shop name is required');
       return false;
     }
-    if (!formData.retailerCode || formData.retailerCode.length !== 7) {
+    if (!validateRetailerCode(formData.retailerCode)) {
       setError('Retailer code must be exactly 7 digits');
       return false;
     }
@@ -125,30 +108,17 @@ function AddStore({ onNavigate, onLogout }) {
 
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      // Token no longer needed - apiUtils handles authentication automatically
 
-      const response = await fetch(`${API_BASE_URL}/api/stores`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          shopName: formData.shopName.trim(),
-          retailerCode: formData.retailerCode,
-          contact: formData.contact
-        })
+      const response = await apiPost('/api/stores', {
+        shopName: formData.shopName.trim(),
+        retailerCode: formData.retailerCode,
+        contact: formData.contact
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSuccess('Store added successfully!');
-        resetForm();
-        fetchStores();
-      } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Failed to add store');
-      }
+      const data = await response.json();
+      setSuccess('Store added successfully!');
+      resetForm();
+      fetchStores();
     } catch (error) {
       console.error('Error adding store:', error);
       setError('Error adding store');
@@ -182,14 +152,7 @@ function AddStore({ onNavigate, onLogout }) {
 
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/api/stores/${storeId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await apiDelete(`/api/stores/${storeId}`);
 
       if (response.ok) {
         setSuccess('Store deleted successfully!');

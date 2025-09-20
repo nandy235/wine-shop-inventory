@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useReducer, useMemo, useCallback } from 'react';
 import './DownloadSaleSheet.css';
-import API_BASE_URL from './config';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Constants
 const BUSINESS_CONFIG = {
@@ -128,21 +129,10 @@ const dataReducer = (state, action) => {
   }
 };
 
-// API service
-const createApiService = (token) => ({
+// API service - now using apiUtils
+const createApiService = () => ({
   async fetchWithAuth(url) {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
-    }
-    
-    return response.json();
+    return await apiGet(url);
   }
 });
 
@@ -220,13 +210,12 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
   // Main state with reducer
   const [state, dispatch] = useReducer(dataReducer, initialState);
 
-  // Memoized user data and token
-  const userData = useMemo(() => JSON.parse(localStorage.getItem('user') || '{}'), []);
-  const token = useMemo(() => localStorage.getItem('token'), []);
+  // Memoized user data
+  const userData = useMemo(() => getCurrentUser(), []);
   const shopName = useMemo(() => userData.shopName || 'Liquor Ledger', [userData.shopName]);
   
   // Memoized API service
-  const apiService = useMemo(() => createApiService(token), [token]);
+  const apiService = useMemo(() => createApiService(), []);
   
   // Memoized calculations
   const calculations = useMemo(() => {
@@ -251,76 +240,60 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
     try {
       if (dateMode === 'single') {
         // Single date logic
-        const response = await fetch(`${API_BASE_URL}/api/shop/products?date=${selectedDate}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+        const response = await apiGet(`/api/shop/products?date=${selectedDate}`);
+        const result = await response.json();
+        const products = result.products || [];
+        
+        console.log('📊 Received products from API:', products.length);
+        if (products.length > 0) {
+          console.log('📋 Sample product from API:', products[0]);
+        }
+          
+        const salesData = products.map((item, index) => {
+          const openingStock = item.openingStock || 0;
+          // Handle both receivedStock and totalReceivedToday from backend
+          const receivedStock = item.receivedStock || item.totalReceivedToday || 0;
+          const totalStock = item.totalStock || (openingStock + receivedStock);
+          const closingStock = item.closingStock !== null ? item.closingStock : totalStock;
+          const sales = Math.max(0, totalStock - closingStock);
+          
+          console.log(`Product ${item.brandName}: opening=${openingStock}, received=${receivedStock}, total=${totalStock}, closing=${closingStock}, sales=${sales}`);
+          
+          return {
+            serialNo: index + 1,
+            brandNumber: item.brandNumber,
+            brandName: item.name,
+            sizeCode: item.sizeCode,
+            openingStock,
+            receivedStock,
+            totalStock,
+            closingStock,
+            sales,
+            price: item.finalPrice || 0,
+            salesValue: sales * (item.finalPrice || 0),
+            productType: item.product_type || item.category || 'IML'
+          };
         });
 
-        if (response.ok) {
-          const result = await response.json();
-          const products = result.products || [];
-          
-          console.log('📊 Received products from API:', products.length);
-          if (products.length > 0) {
-            console.log('📋 Sample product from API:', products[0]);
-          }
-          
-          const salesData = products.map((item, index) => {
-            const openingStock = item.openingStock || 0;
-            // Handle both receivedStock and totalReceivedToday from backend
-            const receivedStock = item.receivedStock || item.totalReceivedToday || 0;
-            const totalStock = item.totalStock || (openingStock + receivedStock);
-            const closingStock = item.closingStock !== null ? item.closingStock : totalStock;
-            const sales = Math.max(0, totalStock - closingStock);
-            
-            console.log(`Product ${item.brandName}: opening=${openingStock}, received=${receivedStock}, total=${totalStock}, closing=${closingStock}, sales=${sales}`);
-            
-            return {
-              serialNo: index + 1,
-              brandNumber: item.brandNumber,
-              brandName: item.name,
-              sizeCode: item.sizeCode,
-              openingStock,
-              receivedStock,
-              totalStock,
-              closingStock,
-              sales,
-              price: item.finalPrice || 0,
-              salesValue: sales * (item.finalPrice || 0),
-              productType: item.product_type || item.category || 'IML'
-            };
-          });
-
-          dispatch({ type: 'SET_STOCK_DATA', payload: salesData });
-        }
+        dispatch({ type: 'SET_STOCK_DATA', payload: salesData });
       } else {
         // Date range logic: opening from start date, closing from end date
-        const [startResponse, endResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/shop/products?date=${startDate}`, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-          }),
-          fetch(`${API_BASE_URL}/api/shop/products?date=${endDate}`, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-          })
+        const [startResult, endResult] = await Promise.all([
+          apiGet(`/api/shop/products?date=${startDate}`),
+          apiGet(`/api/shop/products?date=${endDate}`)
         ]);
+        
+        const startProducts = startResult.products || [];
+        const endProducts = endResult.products || [];
 
-        if (startResponse.ok && endResponse.ok) {
-          const startResult = await startResponse.json();
-          const endResult = await endResponse.json();
-          
-          const startProducts = startResult.products || [];
-          const endProducts = endResult.products || [];
-
-          // Create a map of end products by brand + size for lookup
-          const endProductsMap = new Map();
-          endProducts.forEach(product => {
+        // Create a map of end products by brand + size for lookup
+        const endProductsMap = new Map();
+        endProducts.forEach(product => {
             const key = `${product.brandNumber}_${product.sizeCode}`;
             endProductsMap.set(key, product);
           });
 
-          const salesData = startProducts.map((startItem, index) => {
+        const salesData = startProducts.map((startItem, index) => {
             const key = `${startItem.brandNumber}_${startItem.sizeCode}`;
             const endItem = endProductsMap.get(key);
             
@@ -347,97 +320,61 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
               salesValue: sales * (startItem.finalPrice || 0),
               productType: startItem.product_type || startItem.category || 'IML'
             };
-          });
+        });
 
-          dispatch({ type: 'SET_STOCK_DATA', payload: salesData });
-        }
+        dispatch({ type: 'SET_STOCK_DATA', payload: salesData });
       }
     } catch (error) {
       console.error('Error fetching stock data:', error);
     }
-  }, [dateMode, selectedDate, startDate, endDate, token]);
+  }, [dateMode, selectedDate, startDate, endDate]);
 
   const fetchSummaryData = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/summary`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        dispatch({ type: 'SET_SUMMARY_DATA', payload: result });
-      }
+      const response = await apiGet('/api/summary');
+      const result = await response.json();
+      dispatch({ type: 'SET_SUMMARY_DATA', payload: result });
     } catch (error) {
       console.error('Error fetching summary data:', error);
     }
-  }, [token]);
+  }, []);
 
   const fetchIncomeExpensesData = useCallback(async () => {
     try {
       const targetDate = getCurrentDate();
-      const [incomeResponse, expensesResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/income-expenses/income?date=${targetDate}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        }),
-        fetch(`${API_BASE_URL}/api/income-expenses/expenses?date=${targetDate}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        })
+      const [incomeResult, expensesResult] = await Promise.all([
+        apiGet(`/api/income-expenses/income?date=${targetDate}`),
+        apiGet(`/api/income-expenses/expenses?date=${targetDate}`)
       ]);
 
-      if (incomeResponse.ok) {
-        const incomeResult = await incomeResponse.json();
-        dispatch({ type: 'SET_INCOME_DATA', payload: incomeResult || [] });
-      }
-
-      if (expensesResponse.ok) {
-        const expensesResult = await expensesResponse.json();
-        dispatch({ type: 'SET_EXPENSES_DATA', payload: expensesResult || [] });
-      }
+      dispatch({ type: 'SET_INCOME_DATA', payload: incomeResult || [] });
+      dispatch({ type: 'SET_EXPENSES_DATA', payload: expensesResult || [] });
     } catch (error) {
       console.error('Error fetching income/expenses data:', error);
     }
-  }, [getCurrentDate, token]);
+  }, [getCurrentDate]);
 
   const fetchPaymentsData = useCallback(async () => {
     try {
       const targetDate = getCurrentDate();
-      const response = await fetch(`${API_BASE_URL}/api/payments?date=${targetDate}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        dispatch({ type: 'SET_PAYMENTS_DATA', payload: result.payment || {} });
-      }
+      const response = await apiGet(`/api/payments?date=${targetDate}`);
+      const result = await response.json();
+      dispatch({ type: 'SET_PAYMENTS_DATA', payload: result.payment || {} });
     } catch (error) {
       console.error('Error fetching payments data:', error);
     }
-  }, [getCurrentDate, token]);
+  }, [getCurrentDate]);
 
   const fetchClosingStockStatus = useCallback(async () => {
     try {
       const targetDate = getCurrentDate();
-      const response = await fetch(`${API_BASE_URL}/api/shop/products?date=${targetDate}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        dispatch({ type: 'SET_CLOSING_STOCK_STATUS', payload: result.closingStockStatus });
-      }
+      const response = await apiGet(`/api/shop/products?date=${targetDate}`);
+      const result = await response.json();
+      dispatch({ type: 'SET_CLOSING_STOCK_STATUS', payload: result.closingStockStatus });
     } catch (error) {
       console.error('Error fetching closing stock status:', error);
     }
-  }, [getCurrentDate, token]);
+  }, [getCurrentDate]);
 
 
   // Main fetch function that calls all individual fetch functions

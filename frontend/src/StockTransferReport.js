@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useBusinessDate from './hooks/useBusinessDate';
 import './StockTransferReport.css';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { apiGet } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 function StockTransferReport({ onNavigate, onLogout }) {
   // Use business date hook
@@ -22,9 +22,8 @@ function StockTransferReport({ onNavigate, onLogout }) {
     setSelectedDate(businessDate);
   }, [businessDate]);
 
-  // Memoized user data and token
-  const userData = useMemo(() => JSON.parse(localStorage.getItem('user') || '{}'), []);
-  const token = useMemo(() => localStorage.getItem('token'), []);
+  // Memoized user data
+  const userData = useMemo(() => getCurrentUser(), []);
   const shopName = useMemo(() => userData.shopName || 'Liquor Ledger', [userData.shopName]);
 
   // Fetch stock transfer data
@@ -36,18 +35,10 @@ function StockTransferReport({ onNavigate, onLogout }) {
       console.log(`Fetching stock transfer data for date: ${selectedDate}`);
       
       const [shiftedInResponse, shiftedOutResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/stock-transfers/shifted-in?date=${selectedDate}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        }),
-        fetch(`${API_BASE_URL}/api/stock-transfers/shifted-out?date=${selectedDate}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        })
+        apiGet(`/api/stock-transfers/shifted-in?date=${selectedDate}`),
+        apiGet(`/api/stock-transfers/shifted-out?date=${selectedDate}`)
       ]);
-
-      if (!shiftedInResponse.ok || !shiftedOutResponse.ok) {
-        throw new Error('Failed to fetch stock transfer data');
-      }
-
+      
       const shiftedInResult = await shiftedInResponse.json();
       const shiftedOutResult = await shiftedOutResponse.json();
       
@@ -67,7 +58,7 @@ function StockTransferReport({ onNavigate, onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, token]);
+  }, [selectedDate]);
 
   // Effect to fetch data when date changes
   useEffect(() => {

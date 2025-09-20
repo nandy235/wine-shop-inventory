@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import './UploadInvoice.css';
-import API_BASE_URL from './config';
+import { apiPost, secureFileUpload } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -39,8 +40,8 @@ function UploadInvoice({ onNavigate, onLogout }) {
   const fileInputRef = useRef(null);
 
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const token = localStorage.getItem('token');
+  const user = getCurrentUser();
+  // Token no longer needed - apiUtils handles authentication automatically
   const shopName = user.shopName || 'Liquor Ledger';
 
   const handleFileSelect = (e) => {
@@ -117,13 +118,7 @@ function UploadInvoice({ onNavigate, onLogout }) {
     formData.append('invoice', selectedFile);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/invoice/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
+      const response = await secureFileUpload('/api/invoice/upload', formData);
 
       if (response.ok) {
         const data = await response.json();
@@ -148,21 +143,12 @@ function UploadInvoice({ onNavigate, onLogout }) {
       const businessDate = getBusinessDate();
       console.log('🗓️ Using business date:', businessDate);
       
-      const response = await fetch(`${API_BASE_URL}/api/invoice/confirm`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          tempId: parsedData.tempId,
-          businessDate: businessDate
-        })
+      const response = await apiPost('/api/invoice/confirm', {
+        tempId: parsedData.tempId,
+        businessDate: businessDate
       });
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(`✅ Stock updated successfully!\n${result.updatedCount} items added to received stock.`);
+      const result = await response.json();
+      alert(`✅ Stock updated successfully!\n${result.updatedCount} items added to received stock.`);
         
         // Reset form
         setSelectedFile(null);
@@ -170,16 +156,6 @@ function UploadInvoice({ onNavigate, onLogout }) {
         
         // Navigate to view stock
         onNavigate('manageStock');
-      } else {
-        try {
-          const error = await response.json();
-          console.error('Server error response:', error);
-          alert(`❌ Error: ${error.message || 'Server error during invoice confirmation'}`);
-        } catch (parseError) {
-          console.error('Failed to parse error response:', parseError);
-          alert(`❌ Server error (${response.status}): ${response.statusText}`);
-        }
-      }
     } catch (error) {
       console.error('Error confirming invoice:', error);
       alert(`❌ Error processing invoice: ${error.message || 'Network error'}`);
@@ -191,22 +167,10 @@ function UploadInvoice({ onNavigate, onLogout }) {
     if (!parsedData || !parsedData.tempId) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/invoice/cancel`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          tempId: parsedData.tempId
-        })
+      const response = await apiPost('/api/invoice/cancel', {
+        tempId: parsedData.tempId
       });
-
-      if (response.ok) {
-        console.log('Invoice cancelled successfully');
-      } else {
-        console.warn('Failed to cancel invoice on server');
-      }
+      console.log('Invoice cancelled successfully');
     } catch (error) {
       console.warn('Error cancelling invoice:', error);
     }

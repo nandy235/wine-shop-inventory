@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './Dashboard.css';
-import API_BASE_URL from './config';
+import { apiGet, apiPost } from './apiUtils';
+import { getCurrentUser } from './authUtils';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -44,8 +45,8 @@ function Dashboard({ onNavigate, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [businessDate, setBusinessDate] = useState(getBusinessDate());
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const token = localStorage.getItem('token');
+  // Get user data from authUtils for consistent display
+  const user = getCurrentUser();
   const shopName = user.shopName || 'Liquor Ledger';
 
   // Monitor business date changes
@@ -68,49 +69,24 @@ function Dashboard({ onNavigate, onLogout }) {
 
   const fetchDashboardData = useCallback(async () => {
     try { 
-      const initResponse = await fetch(`${API_BASE_URL}/api/stock/initialize-today`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const initResponse = await apiPost('/api/stock/initialize-today');
 
       if (initResponse.ok) {
         const initData = await initResponse.json();
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/summary?date=${businessDate}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        
-        setDashboardData({
-          stockValue: data.stockValue || 0,      
-          stockLiftedInvoiceValue: data.stockLiftedInvoiceValue || 0,
-          stockLiftedMrpValue: data.stockLiftedMrpValue || 0,
-          todaysSale: data.totalSales || 0,      
-          counterBalance: data.counterBalance || 0,
-          totalAmountCollected: data.totalAmountCollected || 0,
+      const response = await apiGet(`/api/summary?date=${businessDate}`);
+      const data = await response.json();
+      
+      setDashboardData({
+        stockValue: data.stockValue || 0,      
+        stockLiftedInvoiceValue: data.stockLiftedInvoiceValue || 0,
+        stockLiftedMrpValue: data.stockLiftedMrpValue || 0,
+        todaysSale: data.totalSales || 0,      
+        counterBalance: data.counterBalance || 0,
+        totalAmountCollected: data.totalAmountCollected || 0,
           balanceStatus: data.balanceStatus || 'BALANCED'
         });
-      } else {
-        console.error('Failed to fetch dashboard data:', response.status, response.statusText);
-        setDashboardData({
-          stockValue: 0,
-          stockLiftedInvoiceValue: 0,
-          stockLiftedMrpValue: 0,
-          todaysSale: 0,
-          counterBalance: 0,
-          totalAmountCollected: 0,
-          balanceStatus: 'BALANCED'
-        });
-      }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       setDashboardData({
@@ -124,7 +100,7 @@ function Dashboard({ onNavigate, onLogout }) {
       });
     }
     setLoading(false);
-  }, [businessDate, token]);
+  }, [businessDate]);
 
   // Fetch data when business date changes
   useEffect(() => {
