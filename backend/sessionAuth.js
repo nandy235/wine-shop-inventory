@@ -16,11 +16,11 @@ const sessionConfig = {
   secret: process.env.SESSION_SECRET || 'your-session-secret-key-change-in-production',
   name: 'sessionId', // Don't use default session name
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: true,
   cookie: {
     httpOnly: true, // Prevent XSS
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    sameSite: 'none', // CSRF protection
+    secure: false,
+    sameSite: 'lax', // CSRF protection
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   },
   rolling: true, // Reset expiration on activity
