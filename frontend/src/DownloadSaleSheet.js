@@ -362,7 +362,11 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
       const expensesResult = await expensesResponse.json();
 
       console.log('Income result:', incomeResult);
+      console.log('Income result type:', typeof incomeResult);
+      console.log('Income result is array:', Array.isArray(incomeResult));
       console.log('Expenses result:', expensesResult);
+      console.log('Expenses result type:', typeof expensesResult);
+      console.log('Expenses result is array:', Array.isArray(expensesResult));
 
       // Ensure we always set arrays
       dispatch({ type: 'SET_INCOME_DATA', payload: Array.isArray(incomeResult) ? incomeResult : [] });

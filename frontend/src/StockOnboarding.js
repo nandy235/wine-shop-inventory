@@ -15,6 +15,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
   const [saving, setSaving] = useState(false);
   const [draggedItem, setDraggedItem] = useState(null);
   const [draggedOver, setDraggedOver] = useState(null);
+  const searchContainerRef = useRef(null);
 
   // Get user data from server when needed, with authUtils fallback
   const { user, loading: userLoading, error: userError, shopName: contextShopName } = useUserContext();
@@ -57,13 +58,34 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
     fetchShopInventory();
   }, []);
 
-  // Auto-refresh shop inventory every 30 seconds
+  // Smart refresh - only when user returns to the page
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchShopInventory();
-    }, 30000); // 30 seconds
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // User returned to the page, refresh inventory
+        fetchShopInventory();
+      }
+    };
 
-    return () => clearInterval(interval);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Close search results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+        setShowSearchResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   const fetchMasterBrands = async () => {
@@ -183,8 +205,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       };
       setSelectedProducts([...selectedProducts, newProduct]);
     }
-    setSearchTerm('');
-    setShowSearchResults(false);
+    // Don't close search results or clear search term - keep it open for more additions
   };
 
   const handleQuantityChange = (productId, value) => {
@@ -423,7 +444,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         
         <div className="search-section">
           <h3 className="section-title">Search Products</h3>
-          <div className="search-box">
+          <div className="search-box" ref={searchContainerRef}>
             <div className="search-icon">🔍</div>
             <input
               type="text"
@@ -431,26 +452,37 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
               placeholder="Search by brand name, number, or size code..."
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
+              onFocus={() => {
+                // Show search results if there's a search term and results exist
+                if (searchTerm.trim() !== '' && filteredBrands.length > 0) {
+                  setShowSearchResults(true);
+                }
+              }}
             />
             
             {showSearchResults && (
               <div className="search-results">
-                {filteredBrands.map(brand => (
-                  <div 
-                    key={brand.id} 
-                    className="search-result-item"
-                    onClick={() => handleProductSelect(brand)}
-                  >
-                    <div className="brand-info">
-                      <h4 className="brand-name">{brand.name} - ({brand.brandNumber}) | Size: {brand.packQuantity} × {brand.size}ml | Pack Type: {brand.packType} | MRP: ₹{brand.mrp}</h4>
-                      <div className="brand-details">
-                        {brand.brandKind && <span className="brand-kind">{brand.brandKind}</span>}
-                        {brand.sizeCode && <span className="size-code">Size Code: {brand.sizeCode}</span>}
-                        {brand.productType && <span className="product-type">{brand.productType}</span>}
-                      </div>
+                {filteredBrands.map(brand => {
+                  const isAlreadyAdded = selectedProducts.some(p => p.id === brand.id);
+                  return (
+                    <div 
+                      key={brand.id} 
+                      className="search-result-item"
+                    >
+                      <span className="brand-name">#{brand.brandNumber} | {brand.name} | {brand.packType} | {brand.packQuantity} × {brand.size}ml | ₹{brand.mrp}</span>
+                      <button 
+                        className={`add-product-btn ${isAlreadyAdded ? 'added' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleProductSelect(brand);
+                        }}
+                        disabled={isAlreadyAdded}
+                      >
+                        {isAlreadyAdded ? 'Added' : 'Add'}
+                      </button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
