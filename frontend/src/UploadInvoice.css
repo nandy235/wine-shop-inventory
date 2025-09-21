@@ -31,30 +31,7 @@
   margin: 4px 0 0 0;
 }
 
-.upload-invoice-container .navigation {
-  display: flex;
-  gap: 10px;
-}
-
-.upload-invoice-container .nav-btn {
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.3s;
-  font-size: 14px;
-}
-
-.upload-invoice-container .nav-btn:hover {
-  background: #f0f0f0;
-}
-
-.upload-invoice-container .nav-btn.active {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 .upload-invoice-container .invoice-content {
   padding: 40px;

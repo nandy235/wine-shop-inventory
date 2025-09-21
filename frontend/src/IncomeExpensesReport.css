@@ -48,46 +48,7 @@
   font-weight: 500;
 }
 
-.income-expenses-container .navigation {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.income-expenses-container .navigation::-webkit-scrollbar {
-  display: none;
-}
-
-.income-expenses-container .nav-btn {
-  padding: 0.75rem 1.2rem;
-  background: transparent;
-  border: 2px solid transparent;
-  border-radius: 25px;
-  color: #4a5568;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.income-expenses-container .nav-btn:hover {
-  background: rgba(102, 126, 234, 0.1);
-  border-color: rgba(102, 126, 234, 0.3);
-  color: #667eea;
-  transform: translateY(-2px);
-}
-
-.income-expenses-container .nav-btn.active {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  border-color: transparent;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 /* Main Content */
 .income-expenses-content {

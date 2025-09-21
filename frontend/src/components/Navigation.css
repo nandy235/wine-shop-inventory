@@ -1,0 +1,93 @@
+/* ===== SHARED NAVIGATION STYLES ===== */
+.app-header {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  padding: 20px 40px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.logo-section h1.app-title {
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.5px;
+}
+
+.logo-section p.app-subtitle {
+  font-size: 14px;
+  color: #64748b;
+  margin: 0;
+  font-weight: 500;
+}
+
+.navigation {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.nav-btn {
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.nav-btn:hover {
+  background-color: #f1f5f9;
+  color: #3b82f6;
+  transform: translateY(-1px);
+}
+
+/* Higher specificity to override page-specific CSS */
+.app-header .nav-btn.active,
+.dashboard-container .nav-btn.active,
+.dashboard-container .nav-button.active,
+.manage-stock-container .nav-btn.active,
+.stock-onboarding-container .nav-btn.active,
+.sheets-page-container .nav-btn.active,
+.sheets-page-container .sheets-nav-btn-active,
+.reports-page-container .nav-btn.active,
+.reports-page-container .reports-nav-btn-active,
+.upload-invoice-container .nav-btn.active,
+.update-closing-stock-container .nav-btn.active,
+.income-expenses-container .nav-btn.active,
+.track-payments-container .nav-btn.active,
+.download-sale-sheet-container .nav-btn.active {
+  color: white !important;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3) !important;
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+    padding: 16px 20px;
+  }
+  
+  .navigation {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .nav-btn {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+}

@@ -41,44 +41,7 @@
   font-weight: 500;
 }
 
-.stock-transfer-report-container .navigation {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.stock-transfer-report-container .navigation::-webkit-scrollbar {
-  display: none;
-}
-
-.stock-transfer-report-container .nav-btn {
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #4a5568;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-weight: 500;
-  white-space: nowrap;
-  backdrop-filter: blur(10px);
-}
-
-.stock-transfer-report-container .nav-btn:hover {
-  background: rgba(255, 255, 255, 0.9);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.stock-transfer-report-container .nav-btn.active {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  border-color: transparent;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 /* Main Content */
 .report-content {

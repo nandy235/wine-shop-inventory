@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } 
 import './IndentEstimate.css';
 import { apiGet } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Constants
 const SEARCH_DEBOUNCE_DELAY = 150;
@@ -502,20 +503,13 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
         onClose={() => dispatch({ type: actionTypes.CLEAR_NOTIFICATION })} 
       />
       
-      <header className="indent-estimate-header">
-        <div className="indent-estimate-logo-section">
-          <h1 className="indent-estimate-app-title">{shopName}</h1>
-          <p className="indent-estimate-app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="indent-estimate-navigation">
-          <button className="indent-estimate-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="indent-estimate-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="indent-estimate-nav-btn indent-estimate-nav-btn-active" onClick={onBack}>Manage Stock</button>
-          <button className="indent-estimate-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="indent-estimate-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="indentEstimate"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+        onBack={onBack}
+      />
 
       <main className="indent-estimate-content">
         <div className="indent-estimate-title-section">

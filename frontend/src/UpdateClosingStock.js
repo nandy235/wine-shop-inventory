@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './UpdateClosingStock.css';
 import { apiGet, apiPost } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -272,22 +273,14 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
    );
  }
 
- return (
-   <div className="update-closing-stock-container">
-     <header className="update-closing-stock-header">
-       <div className="update-closing-stock-logo-section">
-         <h1 className="update-closing-stock-app-title">{shopName}</h1>
-         <p className="update-closing-stock-app-subtitle">Inventory Management</p>
-       </div>
-       <nav className="update-closing-stock-navigation">
-         <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-         <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-         <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-                   <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="update-closing-stock-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-       </nav>
-     </header>
+return (
+  <div className="update-closing-stock-container">
+    <Navigation 
+      currentPage="updateClosingStock"
+      onNavigate={onNavigate}
+      onLogout={onLogout}
+      shopName={shopName}
+    />
 
      <main className="update-closing-stock-content">
        <div className="update-closing-stock-page-title-section">

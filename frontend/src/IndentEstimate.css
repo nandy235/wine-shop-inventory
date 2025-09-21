@@ -30,32 +30,7 @@
   margin: 0;
 }
 
-.indent-estimate-navigation {
-  display: flex;
-  gap: 1rem;
-}
-
-.indent-estimate-nav-btn {
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  color: #4a5568;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.indent-estimate-nav-btn:hover {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-}
-
-.indent-estimate-nav-btn-active {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 .indent-estimate-content {
   padding: 2rem;

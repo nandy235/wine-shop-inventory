@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import './Dashboard.css';
 import { apiGet, apiPost } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -150,20 +151,12 @@ function Dashboard({ onNavigate, onLogout }) {
 
   return (
     <div className="dashboard-container">
-      <header className="dashboard-header">
-        <div className="logo-section">
-          <h1 className="app-title">{shopName}</h1>
-          <p className="app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-button active">Dashboard</button>
-          <button className="nav-button" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-button" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="nav-button" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-button" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-button logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="dashboard"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
       
       <main className="dashboard-content">
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

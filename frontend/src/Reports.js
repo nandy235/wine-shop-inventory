@@ -1,6 +1,7 @@
 import React from 'react';
 import './Reports.css';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 function Reports({ onNavigate, onLogout }) {
  const user = getCurrentUser();
@@ -8,20 +9,12 @@ function Reports({ onNavigate, onLogout }) {
 
  return (
    <div className="reports-page-container">
-     <header className="reports-page-header">
-       <div className="reports-logo-section">
-         <h1 className="reports-app-title">{shopName}</h1>
-         <p className="reports-app-subtitle">Inventory Management</p>
-       </div>
-       <nav className="reports-navigation">
-         <button className="reports-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-         <button className="reports-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-         <button className="reports-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-         <button className="reports-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-         <button className="reports-nav-btn reports-nav-btn-active">Reports</button>
-         <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-       </nav>
-     </header>
+     <Navigation 
+       currentPage="reports"
+       onNavigate={onNavigate}
+       onLogout={onLogout}
+       shopName={shopName}
+     />
 
      <main className="reports-page-content">
        <div className="reports-page-title-section">

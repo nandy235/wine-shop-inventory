@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ShiftTransfer.css';
 import { apiGet, apiPost } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 function ShiftTransfer({ onNavigate, onLogout }) {
   console.log('🔍 ShiftTransfer - Component rendering');
@@ -612,20 +613,12 @@ function ShiftTransfer({ onNavigate, onLogout }) {
 
   return (
     <div className="shift-transfer-container">
-      <header className="shift-transfer-header">
-        <div className="logo-section">
-          <h1 className="app-title">{shopName}</h1>
-          <p className="app-subtitle">Stock Transfer Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="shiftTransfer"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
 
       <main className="shift-transfer-content">
         <div className="page-title-section">

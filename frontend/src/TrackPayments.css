@@ -26,26 +26,7 @@
   margin: 0;
 }
 
-.track-payments-navigation {
-  display: flex;
-  gap: 1rem;
-}
-
-.track-payments-nav-btn {
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  color: #4a5568;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.track-payments-nav-btn:hover {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 .track-payments-content {
   padding: 2rem;

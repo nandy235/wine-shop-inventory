@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './IncomeExpenses.css';
 import { apiGet, apiPost, apiDelete } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Helper function to get business date (day starts at 11:30 AM)
 function getBusinessDate() {
@@ -327,20 +328,12 @@ function IncomeExpenses({ onNavigate, onLogout }) {
 
   return (
     <div className="income-expenses-container">
-      <header className="income-expenses-header">
-        <div className="income-expenses-logo-section">
-          <h1 className="income-expenses-app-title">{shopName}</h1>
-          <p className="income-expenses-app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="income-expenses-navigation">
-          <button className="income-expenses-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="income-expenses-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="income-expenses-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="income-expenses-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="income-expenses-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="incomeExpenses"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
 
       <main className="income-expenses-content">
         <div className="income-expenses-page-title-section">

@@ -1,6 +1,7 @@
 import React from 'react';
 import './Sheets.css';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 function Sheets({ onNavigate, onLogout }) {
  const user = getCurrentUser();
@@ -8,21 +9,12 @@ function Sheets({ onNavigate, onLogout }) {
 
  return (
    <div className="sheets-page-container">
-     <header className="sheets-page-header">
-       <div className="sheets-logo-section">
-         <h1 className="sheets-app-title">{shopName}</h1>
-         <p className="sheets-app-subtitle">Inventory Management</p>
-       </div>
-       <nav className="sheets-navigation">
-         <button className="sheets-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-         <button className="sheets-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-         <button className="sheets-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-         <button className="sheets-nav-btn sheets-nav-btn-active">Sheets</button>
- 
-         <button className="sheets-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-         <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-       </nav>
-     </header>
+     <Navigation 
+       currentPage="sheets"
+       onNavigate={onNavigate}
+       onLogout={onLogout}
+       shopName={shopName}
+     />
 
      <main className="sheets-page-content">
        <div className="sheets-page-title-section">

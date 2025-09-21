@@ -3,6 +3,7 @@ import './AddStore.css';
 import { apiGet, apiPost, apiDelete } from './apiUtils';
 import { getCurrentShopFromJWT, getShopNameForDisplay } from './jwtUtils';
 import { sanitizeRetailerCode, validateRetailerCode, sanitizeInput } from './authUtils';
+import Navigation from './components/Navigation';
 
 function AddStore({ onNavigate, onLogout }) {
   const [stores, setStores] = useState([]);
@@ -171,20 +172,12 @@ function AddStore({ onNavigate, onLogout }) {
 
   return (
     <div className="add-supplier-container">
-      <header className="add-supplier-header">
-        <div className="logo-section">
-          <h1 className="app-title">{currentShopName}</h1>
-          <p className="app-subtitle">Store Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn active" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="addStore"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={currentShopName}
+      />
 
       <main className="add-supplier-content">
         <div className="page-title-section">

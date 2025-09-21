@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './TrackPayments.css';
 import { apiGet, apiPost } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Helper function to get business date (day starts at 11:30 AM IST)
 function getBusinessDate() {
@@ -227,21 +228,12 @@ function TrackPayments({ onNavigate, onLogout }) {
 
   return (
     <div className="track-payments-container">
-      <header className="track-payments-header">
-        <div className="track-payments-logo-section">
-          <h1 className="track-payments-app-title">{shopName}</h1>
-          <p className="track-payments-app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="track-payments-navigation">
-          <button className="track-payments-nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="track-payments-nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="track-payments-nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="track-payments-nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-
-          <button className="track-payments-nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="trackPayments"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
 
       <main className="track-payments-content">
         <div className="track-payments-title-section">

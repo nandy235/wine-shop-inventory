@@ -35,39 +35,7 @@
   font-weight: 500;
 }
 
-.navigation {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.nav-btn {
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  color: #6c757d;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.nav-btn:hover {
-  background: #f8f9fa;
-  color: #333;
-}
-
-.nav-btn-active {
-  background: #007bff;
-  color: white;
-}
-
-.nav-btn-active:hover {
-  background: #0056b3;
-  color: white;
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 .stock-received-content {
   padding: 0 40px 40px;

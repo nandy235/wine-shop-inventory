@@ -3,6 +3,7 @@ import './ManageStock.css';
 import IndentEstimate from './IndentEstimate';
 import StockReceived from './StockReceived';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 function ManageStock({ onNavigate, onLogout }) {
   const [currentView, setCurrentView] = useState('main');
@@ -21,20 +22,12 @@ function ManageStock({ onNavigate, onLogout }) {
 
   return (
     <div className="manage-stock-container">
-      <header className="manage-stock-header">
-        <div className="logo-section">
-          <h1 className="app-title">{shopName}</h1>
-          <p className="app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn active">Manage Stock</button>
-          <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="manageStock"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
 
       <main className="manage-stock-content">
         <div className="page-title-section">

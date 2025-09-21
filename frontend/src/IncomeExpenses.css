@@ -32,26 +32,7 @@
   margin: 0;
 }
 
-.income-expenses-navigation {
-  display: flex;
-  gap: 1rem;
-}
-
-.income-expenses-nav-btn {
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  color: #4a5568;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.income-expenses-nav-btn:hover {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-}
+/* Navigation header styles removed - now using shared Navigation component */
 
 .income-expenses-content {
   padding: 2rem;
@@ -591,11 +572,7 @@
     padding: 1rem;
   }
 
-  .income-expenses-navigation {
-    flex-wrap: wrap;
-    justify-content: center;
-    font-size: 0.9rem;
-  }
+  /* Navigation responsive styles removed - now using shared Navigation component */
 
   .income-expenses-content {
     padding: 1rem;

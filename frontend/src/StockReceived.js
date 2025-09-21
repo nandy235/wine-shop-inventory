@@ -3,6 +3,7 @@ import './StockReceived.css';
 import useBusinessDate from './hooks/useBusinessDate';
 import { apiGet } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 function StockReceived({ onNavigate, onBack, onLogout }) {
   const [stockData, setStockData] = useState([]);
@@ -118,20 +119,13 @@ function StockReceived({ onNavigate, onBack, onLogout }) {
 
   return (
     <div className="stock-received-container">
-      <header className="stock-received-header">
-        <div className="logo-section">
-          <h1 className="app-title">{shopName}</h1>
-          <p className="app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn nav-btn-active" onClick={onBack}>Manage Stock</button>
-          <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="stockReceived"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+        onBack={onBack}
+      />
 
       <main className="stock-received-content">
         <div className="title-section">

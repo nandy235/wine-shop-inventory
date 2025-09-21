@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import './SalesReport.css';
 import { apiGet } from './apiUtils';
 import { getCurrentUser } from './authUtils';
+import Navigation from './components/Navigation';
 
 // Business date helper (11:30 AM IST boundary)
 const calculateBusinessDate = () => {
@@ -761,20 +762,12 @@ function SalesReport({ onNavigate, onLogout }) {
 
   return (
     <div className="stock-lifted-container">
-      <header className="stock-lifted-header">
-        <div className="logo-section">
-          <h1 className="app-title">{shopName}</h1>
-          <p className="app-subtitle">Inventory Management</p>
-        </div>
-        <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
-          <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
-          <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
-          <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>
-          <button className="nav-btn active" onClick={() => onNavigate('reports')}>Reports</button>
-          <button className="nav-btn logout-btn" onClick={onLogout}>Log Out</button>
-        </nav>
-      </header>
+      <Navigation 
+        currentPage="brandWiseSales"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        shopName={shopName}
+      />
 
       <main className="stock-lifted-content">
         <div className="page-title-section">
