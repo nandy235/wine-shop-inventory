@@ -19,8 +19,8 @@ const sessionConfig = {
   saveUninitialized: false,
   cookie: {
     httpOnly: true, // Prevent XSS
-    secure: true,
-    sameSite: 'none', // CSRF protection
+    secure: process.env.NODE_ENV === 'production', // Only secure in production (HTTPS)
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Strict for localhost, none for cross-domain
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   },
   rolling: true, // Reset expiration on activity
