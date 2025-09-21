@@ -226,9 +226,14 @@ function SalesReport({ onNavigate, onLogout }) {
           end: new Date(selectedYear, m, 0).toLocaleDateString('en-CA'),
           label: new Date(selectedYear, m - 1).toLocaleDateString('en-US', { month: 'long' })
         }));
-        const results = await Promise.all(ranges.map(r =>
-          apiGet(`/api/reports/sales?startDate=${r.start}&endDate=${r.end}`).catch(() => ({ rows: [] }))
-        ));
+        const results = await Promise.all(ranges.map(async r => {
+          try {
+            const response = await apiGet(`/api/reports/sales?startDate=${r.start}&endDate=${r.end}`);
+            return await response.json();
+          } catch (error) {
+            return { rows: [] };
+          }
+        }));
         const totals = results.map((resp, idx) => {
           const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
           return { label: ranges[idx].label, mrpTotal: sum };
@@ -239,9 +244,14 @@ function SalesReport({ onNavigate, onLogout }) {
         const c = new Date(startDate);
         const e = new Date(endDate);
         while (c <= e) { dates.push(c.toLocaleDateString('en-CA')); c.setDate(c.getDate() + 1); }
-        const results = await Promise.all(dates.map(d =>
-          apiGet(`/api/reports/sales?startDate=${d}&endDate=${d}`).catch(() => ({ rows: [] }))
-        ));
+        const results = await Promise.all(dates.map(async d => {
+          try {
+            const response = await apiGet(`/api/reports/sales?startDate=${d}&endDate=${d}`);
+            return await response.json();
+          } catch (error) {
+            return { rows: [] };
+          }
+        }));
         const totals = results.map((resp, idx) => {
           const sum = (resp.rows || []).reduce((s, rr) => s + ((parseInt(rr.sold_bottles, 10) || 0) * (parseFloat(rr.standard_mrp) || 0)), 0);
           const label = new Date(dates[idx]).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });

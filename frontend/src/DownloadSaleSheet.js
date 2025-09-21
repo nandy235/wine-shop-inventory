@@ -278,10 +278,13 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
         dispatch({ type: 'SET_STOCK_DATA', payload: salesData });
       } else {
         // Date range logic: opening from start date, closing from end date
-        const [startResult, endResult] = await Promise.all([
+        const [startResponse, endResponse] = await Promise.all([
           apiGet(`/api/shop/products?date=${startDate}`),
           apiGet(`/api/shop/products?date=${endDate}`)
         ]);
+        
+        const startResult = await startResponse.json();
+        const endResult = await endResponse.json();
         
         const startProducts = startResult.products || [];
         const endProducts = endResult.products || [];
@@ -342,10 +345,13 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
   const fetchIncomeExpensesData = useCallback(async () => {
     try {
       const targetDate = getCurrentDate();
-      const [incomeResult, expensesResult] = await Promise.all([
+      const [incomeResponse, expensesResponse] = await Promise.all([
         apiGet(`/api/income-expenses/income?date=${targetDate}`),
         apiGet(`/api/income-expenses/expenses?date=${targetDate}`)
       ]);
+
+      const incomeResult = await incomeResponse.json();
+      const expensesResult = await expensesResponse.json();
 
       dispatch({ type: 'SET_INCOME_DATA', payload: incomeResult || [] });
       dispatch({ type: 'SET_EXPENSES_DATA', payload: expensesResult || [] });
