@@ -1,7 +1,6 @@
 // Comprehensive Invoice Parser - Handles All Formats
 
 const pdfParse = require('pdf-parse');
-const SmartCasesBottlesParser = require('./smartCasesBottlesParser');
 
 class HybridInvoiceParser {
   constructor() {
@@ -16,9 +15,6 @@ class HybridInvoiceParser {
         /(\d{1,2}[-/][A-Za-z]{3}[-/]\d{4})/
       ]
     };
-    
-    // Initialize smart parser for enhanced cases/bottles resolution
-    this.smartParser = new SmartCasesBottlesParser();
   }
 
   async parseInvoiceWithValidation(pdfBuffer, masterBrands = []) {
@@ -37,14 +33,10 @@ class HybridInvoiceParser {
       const date = this.extractDate(text);
       const financialData = this.extractFinancialValues(text);
       
-      // Extract summary totals for smart parsing validation
-      const summaryTotals = this.extractSummaryTotals(text);
-      console.log('📊 Summary totals:', summaryTotals);
-      
       console.log('📄 Invoice:', invoiceNumber, ', Date:', date);
       
-      // Extract products using comprehensive method with summary totals
-      const products = this.extractProductsComprehensive(text, summaryTotals);
+      // Extract products using comprehensive method
+      const products = this.extractProductsComprehensive(text);
       
       console.log('📦 Products found:', products.length);
       
@@ -202,62 +194,7 @@ class HybridInvoiceParser {
     }
   }
 
-  extractSummaryTotals(text) {
-    // Look for summary line: "Total (Cases/Btls):18 / 0291 / 0309 / 0"
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (line.includes('Total (Cases/Btls):')) {
-        console.log('📊 Found summary line:', line);
-        const cleanLine = line.replace('Total (Cases/Btls):', '').trim();
-        const numbers = cleanLine.match(/\d+/g);
-        if (numbers && numbers.length === 4) {
-          const result = {
-            imfl: { cases: parseInt(numbers[0]), bottles: 0 },
-            beer: { cases: parseInt(numbers[1]), bottles: 0 },
-            total: { cases: parseInt(numbers[2]), bottles: parseInt(numbers[3]) }
-          };
-          console.log('📊 Parsed summary totals:', result);
-          return result;
-        }
-      }
-    }
-    return null;
-  }
-
-  buildParsingContext(currentLine, allLines, lineIndex, summaryTotals, existingProducts) {
-    const context = { summaryTotals };
-    
-    // Look for rate/amount information in nearby lines
-    for (let i = lineIndex + 1; i <= Math.min(lineIndex + 3, allLines.length - 1); i++) {
-      const nextLine = allLines[i];
-      
-      // Look for rate per case
-      const rateMatch = nextLine.match(/([\d,]+\.?\d*)\s*\//);
-      if (rateMatch) {
-        context.ratePerCase = parseFloat(rateMatch[1].replace(/,/g, ''));
-      }
-      
-      // Look for total amount
-      const totalMatch = nextLine.match(/^([\d,]+\.?\d*)$/);
-      if (totalMatch && !context.totalAmount) {
-        const amount = parseFloat(totalMatch[1].replace(/,/g, ''));
-        if (amount > 1000) { // Reasonable total amount
-          context.totalAmount = amount;
-        }
-      }
-    }
-    
-    // Add existing products for pattern recognition
-    context.otherProducts = existingProducts.map(p => ({
-      type: p.productType,
-      cases: p.cases,
-      bottles: p.bottles
-    }));
-    
-    return context;
-  }
-
-  extractProductsComprehensive(text, summaryTotals = null) {
+  extractProductsComprehensive(text) {
     console.log('\n📦 === COMPREHENSIVE PRODUCT EXTRACTION ===');
     
     const products = [];
@@ -266,19 +203,19 @@ class HybridInvoiceParser {
     
     // Format 1: Table-based extraction (cleanest format)
     console.log('🔍 Format 1: Table-based extraction...');
-    this.extractTableFormat(lines, products, processedBrands, summaryTotals);
+    this.extractTableFormat(lines, products, processedBrands);
     
     // Format 2: Compact single-line format 
     console.log('🔍 Format 2: Compact single-line format...');
-    this.extractCompactFormat(lines, products, processedBrands, summaryTotals);
+    this.extractCompactFormat(lines, products, processedBrands);
     
     // Format 3: Vertical multi-line format (with parentheses)
     console.log('🔍 Format 3: Vertical multi-line format...');
-    this.extractVerticalFormat(lines, products, processedBrands, summaryTotals);
+    this.extractVerticalFormat(lines, products, processedBrands);
     
     // Format 4: Standalone brand format (no parentheses)
     console.log('🔍 Format 4: Standalone brand format...');
-    this.extractStandaloneFormat(lines, products, processedBrands, summaryTotals);
+    this.extractStandaloneFormat(lines, products, processedBrands);
     
 
     // Sort products by serial number to maintain invoice order
@@ -288,7 +225,7 @@ class HybridInvoiceParser {
     return products;
   }
 
-  extractTableFormat(lines, products, processedBrands, summaryTotals = null) {
+  extractTableFormat(lines, products, processedBrands) {
     lines.forEach((line, index) => {
       // Enhanced table row pattern supporting all product types and pack types
       const tablePatterns = [
@@ -339,7 +276,7 @@ class HybridInvoiceParser {
     });
   }
 
-  extractCompactFormat(lines, products, processedBrands, summaryTotals = null) {
+  extractCompactFormat(lines, products, processedBrands) {
     lines.forEach((line, index) => {
       // Enhanced compact patterns - FIXED to handle concatenated cases+bottles
       const compactPatterns = [
@@ -360,22 +297,125 @@ class HybridInvoiceParser {
           const sizeML = match[7];           // 650 (ACTUAL SIZE)
           const casesBottles = match[8];     // 1000 (concatenated cases+bottles)
           
-          // ENHANCED: Use smart parser for cases/bottles resolution
-          console.log(`🧠 Smart parsing: "${casesBottles}" for ${productType} (pack: ${packQty})`);
+          // Parse concatenated cases and bottles
+          // Examples: "3300" = 330 cases + 0 bottles, "500" = 50 cases + 0 bottles, "50" = 5 cases + 0 bottles
+          let cases = 0;
+          let bottles = 0;
           
-          const context = this.buildParsingContext(line, lines, index, summaryTotals, products);
-          const smartResult = this.smartParser.parseCasesBottles(
-            casesBottles,
-            parseInt(packQty),
-            productType,
-            context
-          );
+          // Parse cases/bottles
           
-          const cases = smartResult.cases;
-          const bottles = smartResult.bottles;
+          if (casesBottles.length >= 2) {
+            // For most cases, the last digit is bottles (usually 0), rest are cases
+            if (casesBottles.length === 2) {
+              // "50" = 5 cases, 0 bottles
+              cases = parseInt(casesBottles.substring(0, 1));
+              bottles = parseInt(casesBottles.substring(1));
+            } else if (casesBottles.length === 3) {
+              // "500" = 50 cases, 0 bottles OR "423" = 4 cases, 23 bottles OR "423" = 42 cases, 3 bottles
+              const lastDigit = casesBottles.substring(2);
+              
+              if (lastDigit === '0') {
+                // Numbers ending in 0: "740" = 74 cases, 0 bottles, "500" = 50 cases, 0 bottles
+                cases = parseInt(casesBottles.substring(0, 2));
+                bottles = 0;
+                console.log(`🎯 3-digit validation (ending in 0): "${casesBottles}" → ${cases}c, ${bottles}b`);
+              } else {
+                // Numbers NOT ending in 0: Apply complex validation logic
+                // Need to determine: "423" = 4 cases, 23 bottles OR 42 cases, 3 bottles?
+                const lastTwoDigits = casesBottles.substring(1);
+                const option1_cases = parseInt(casesBottles.substring(0, 1)); // 4
+                const option1_bottles = parseInt(lastTwoDigits); // 23
+                const option2_cases = parseInt(casesBottles.substring(0, 2)); // 42
+                const option2_bottles = parseInt(casesBottles.substring(2)); // 3
+                
+                const packQtyNum = parseInt(packQty);
+                
+                // If option1 bottles > pack quantity, it's definitely wrong
+                if (option1_bottles > packQtyNum) {
+                  // Use option2: 42 cases, 3 bottles
+                  cases = option2_cases;
+                  bottles = option2_bottles;
+                  console.log(`🎯 3-digit validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option1_bottles} > ${packQtyNum})`);
+                } else if (option2_bottles > packQtyNum) {
+                  // Use option1: 4 cases, 23 bottles
+                  cases = option1_cases;
+                  bottles = option1_bottles;
+                  console.log(`🎯 3-digit validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option2_bottles} > ${packQtyNum})`);
+                } else {
+                  // Both are valid, choose the one closer to pack quantity
+                  const option1_diff = Math.abs(packQtyNum - option1_bottles);
+                  const option2_diff = Math.abs(packQtyNum - option2_bottles);
+                  
+                  if (option1_diff <= option2_diff) {
+                    // Option1 is closer to pack quantity
+                    cases = option1_cases;
+                    bottles = option1_bottles;
+                    console.log(`🎯 3-digit validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option1_bottles} closer to ${packQtyNum} than ${option2_bottles})`);
+                  } else {
+                    // Option2 is closer to pack quantity
+                    cases = option2_cases;
+                    bottles = option2_bottles;
+                    console.log(`🎯 3-digit validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option2_bottles} closer to ${packQtyNum} than ${option1_bottles})`);
+                  }
+                }
+              }
+            } else if (casesBottles.length === 4) {
+              // "3300" = 330 cases, 0 bottles OR "2911" = 29 cases, 11 bottles OR "2911" = 291 cases, 1 bottle
+              const lastTwo = casesBottles.substring(2);
+              if (lastTwo === '00') {
+                // "3300" = 330 cases, 0 bottles
+                cases = parseInt(casesBottles.substring(0, 3));
+                bottles = 0;
+              } else {
+                // Need to determine: "2911" = 29 cases, 11 bottles OR 291 cases, 1 bottle?
+                const option1_cases = parseInt(casesBottles.substring(0, 2)); // 29
+                const option1_bottles = parseInt(lastTwo); // 11
+                const option2_cases = parseInt(casesBottles.substring(0, 3)); // 291
+                const option2_bottles = parseInt(casesBottles.substring(3)); // 1
+                
+                const packQtyNum = parseInt(packQty);
+                
+                // If option1 bottles > pack quantity, it's definitely wrong
+                if (option1_bottles > packQtyNum) {
+                  // Use option2: 291 cases, 1 bottle
+                  cases = option2_cases;
+                  bottles = option2_bottles;
+                  console.log(`🎯 4-digit validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option1_bottles} > ${packQtyNum})`);
+                } else if (option2_bottles > packQtyNum) {
+                  // Use option1: 29 cases, 11 bottles
+                  cases = option1_cases;
+                  bottles = option1_bottles;
+                  console.log(`🎯 4-digit validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option2_bottles} > ${packQtyNum})`);
+                } else {
+                  // Both are valid, choose the one closer to pack quantity
+                  const option1_diff = Math.abs(packQtyNum - option1_bottles);
+                  const option2_diff = Math.abs(packQtyNum - option2_bottles);
+                  
+                  if (option1_diff <= option2_diff) {
+                    // Option1 is closer to pack quantity
+                    cases = option1_cases;
+                    bottles = option1_bottles;
+                    console.log(`🎯 4-digit validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option1_bottles} closer to ${packQtyNum} than ${option2_bottles})`);
+                  } else {
+                    // Option2 is closer to pack quantity
+                    cases = option2_cases;
+                    bottles = option2_bottles;
+                    console.log(`🎯 4-digit validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option2_bottles} closer to ${packQtyNum} than ${option1_bottles})`);
+                  }
+                }
+              }
+            } else {
+              // Longer numbers, assume last 2 digits are bottles
+              cases = parseInt(casesBottles.substring(0, casesBottles.length - 2));
+              bottles = parseInt(casesBottles.substring(casesBottles.length - 2));
+            }
+          } else {
+            // Short numbers, all cases
+            cases = parseInt(casesBottles);
+            bottles = 0;
+          }
           
-          console.log(`✅ Smart parsed ${brandNumber}: "${casesBottles}" → Cases: ${cases}, Bottles: ${bottles}`);
-          console.log(`   Confidence: ${smartResult.confidence}, Reasoning: ${smartResult.reasoning}`);
+          console.log(`✅ Parsed ${brandNumber}: "${casesBottles}" → Cases: ${cases}, Bottles: ${bottles}`);
           
           const brandKey = brandNumber + '_' + sizeML + 'ml';
           
@@ -407,7 +447,7 @@ class HybridInvoiceParser {
     });
   }
 
-  extractVerticalFormat(lines, products, processedBrands, summaryTotals = null) {
+  extractVerticalFormat(lines, products, processedBrands) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
@@ -517,7 +557,7 @@ class HybridInvoiceParser {
     }
   }
 
-  extractStandaloneFormat(lines, products, processedBrands, summaryTotals = null) {
+  extractStandaloneFormat(lines, products, processedBrands) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
@@ -564,22 +604,125 @@ class HybridInvoiceParser {
             
             console.log(`🔍 Debug standalone ${brandNumber}: raw="${casesBottles}" length=${casesBottles.length}`);
             
-            // ENHANCED: Use smart parser for vertical format cases/bottles resolution
-            console.log(`🧠 Smart parsing (vertical): "${casesBottles}" for ${productType} (pack: ${packQty})`);
+            // Apply the same smart parsing logic as Compact format
+            let parsedCases = 0;
+            let parsedBottles = 0;
             
-            const context = this.buildParsingContext(line, lines, j, summaryTotals, products);
-            const smartResult = this.smartParser.parseCasesBottles(
-              casesBottles,
-              parseInt(packQty),
-              productType,
-              context
-            );
+            if (casesBottles.length >= 2) {
+              // For most cases, the last digit is bottles (usually 0), rest are cases
+              if (casesBottles.length === 2) {
+                // "50" = 5 cases, 0 bottles
+                parsedCases = parseInt(casesBottles.substring(0, 1));
+                parsedBottles = parseInt(casesBottles.substring(1));
+              } else if (casesBottles.length === 3) {
+                // "500" = 50 cases, 0 bottles OR "423" = 4 cases, 23 bottles
+                const lastDigit = casesBottles.substring(2);
+                
+                if (lastDigit === '0') {
+                  // Numbers ending in 0: "740" = 74 cases, 0 bottles, "500" = 50 cases, 0 bottles
+                  parsedCases = parseInt(casesBottles.substring(0, 2));
+                  parsedBottles = 0;
+                  console.log(`🎯 3-digit standalone validation (ending in 0): "${casesBottles}" → ${parsedCases}c, ${parsedBottles}b`);
+                } else {
+                  // Numbers NOT ending in 0: Apply complex validation logic
+                  // Need to determine: "423" = 4 cases, 23 bottles OR 42 cases, 3 bottles?
+                  const lastTwoDigits = casesBottles.substring(1);
+                  const option1_cases = parseInt(casesBottles.substring(0, 1)); // 4
+                  const option1_bottles = parseInt(lastTwoDigits); // 23
+                  const option2_cases = parseInt(casesBottles.substring(0, 2)); // 42
+                  const option2_bottles = parseInt(casesBottles.substring(2)); // 3
+                  
+                  const packQtyNum = parseInt(packQty);
+                  
+                  // If option1 bottles > pack quantity, it's definitely wrong
+                  if (option1_bottles > packQtyNum) {
+                    // Use option2: 42 cases, 3 bottles
+                    parsedCases = option2_cases;
+                    parsedBottles = option2_bottles;
+                    console.log(`🎯 3-digit standalone validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option1_bottles} > ${packQtyNum})`);
+                  } else if (option2_bottles > packQtyNum) {
+                    // Use option1: 4 cases, 23 bottles
+                    parsedCases = option1_cases;
+                    parsedBottles = option1_bottles;
+                    console.log(`🎯 3-digit standalone validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option2_bottles} > ${packQtyNum})`);
+                  } else {
+                    // Both are valid, choose the one closer to pack quantity
+                    const option1_diff = Math.abs(packQtyNum - option1_bottles);
+                    const option2_diff = Math.abs(packQtyNum - option2_bottles);
+                    
+                    if (option1_diff <= option2_diff) {
+                      // Option1 is closer to pack quantity
+                      parsedCases = option1_cases;
+                      parsedBottles = option1_bottles;
+                      console.log(`🎯 3-digit standalone validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option1_bottles} closer to ${packQtyNum} than ${option2_bottles})`);
+                    } else {
+                      // Option2 is closer to pack quantity
+                      parsedCases = option2_cases;
+                      parsedBottles = option2_bottles;
+                      console.log(`🎯 3-digit standalone validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option2_bottles} closer to ${packQtyNum} than ${option1_bottles})`);
+                    }
+                  }
+                }
+              } else if (casesBottles.length === 4) {
+                // "3300" = 330 cases, 0 bottles OR "2911" = 29 cases, 11 bottles OR "2911" = 291 cases, 1 bottle
+                const lastTwo = casesBottles.substring(2);
+                if (lastTwo === '00') {
+                  // "3300" = 330 cases, 0 bottles
+                  parsedCases = parseInt(casesBottles.substring(0, 3));
+                  parsedBottles = 0;
+                } else {
+                  // Need to determine: "2911" = 29 cases, 11 bottles OR 291 cases, 1 bottle?
+                  const option1_cases = parseInt(casesBottles.substring(0, 2)); // 29
+                  const option1_bottles = parseInt(lastTwo); // 11
+                  const option2_cases = parseInt(casesBottles.substring(0, 3)); // 291
+                  const option2_bottles = parseInt(casesBottles.substring(3)); // 1
+                  
+                  const packQtyNum = parseInt(packQty);
+                  
+                  // If option1 bottles > pack quantity, it's definitely wrong
+                  if (option1_bottles > packQtyNum) {
+                    // Use option2: 291 cases, 1 bottle
+                    parsedCases = option2_cases;
+                    parsedBottles = option2_bottles;
+                    console.log(`🎯 4-digit standalone validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option1_bottles} > ${packQtyNum})`);
+                  } else if (option2_bottles > packQtyNum) {
+                    // Use option1: 29 cases, 11 bottles
+                    parsedCases = option1_cases;
+                    parsedBottles = option1_bottles;
+                    console.log(`🎯 4-digit standalone validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option2_bottles} > ${packQtyNum})`);
+                  } else {
+                    // Both are valid, choose the one closer to pack quantity
+                    const option1_diff = Math.abs(packQtyNum - option1_bottles);
+                    const option2_diff = Math.abs(packQtyNum - option2_bottles);
+                    
+                    if (option1_diff <= option2_diff) {
+                      // Option1 is closer to pack quantity
+                      parsedCases = option1_cases;
+                      parsedBottles = option1_bottles;
+                      console.log(`🎯 4-digit standalone validation: "${casesBottles}" → ${option1_cases}c, ${option1_bottles}b (${option1_bottles} closer to ${packQtyNum} than ${option2_bottles})`);
+                    } else {
+                      // Option2 is closer to pack quantity
+                      parsedCases = option2_cases;
+                      parsedBottles = option2_bottles;
+                      console.log(`🎯 4-digit standalone validation: "${casesBottles}" → ${option2_cases}c, ${option2_bottles}b (${option2_bottles} closer to ${packQtyNum} than ${option1_bottles})`);
+                    }
+                  }
+                }
+              } else {
+                // Longer numbers, assume last 2 digits are bottles
+                parsedCases = parseInt(casesBottles.substring(0, casesBottles.length - 2));
+                parsedBottles = parseInt(casesBottles.substring(casesBottles.length - 2));
+              }
+            } else {
+              // Short numbers, all cases
+              parsedCases = parseInt(casesBottles);
+              parsedBottles = 0;
+            }
             
-            console.log(`✅ Smart parsed vertical ${brandNumber}: "${casesBottles}" → Cases: ${smartResult.cases}, Bottles: ${smartResult.bottles}`);
-            console.log(`   Confidence: ${smartResult.confidence}, Reasoning: ${smartResult.reasoning}`);
+            console.log(`✅ Parsed standalone ${brandNumber}: "${casesBottles}" → Cases: ${parsedCases}, Bottles: ${parsedBottles}`);
             
-            cases = smartResult.cases.toString();
-            bottles = smartResult.bottles.toString();
+            cases = parsedCases.toString();
+            bottles = parsedBottles.toString();
             break;
           }
         }
@@ -694,17 +837,17 @@ class HybridInvoiceParser {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
-      // Pattern: "Retail Shop Excise Turnover Tax:1,30,944.00" or "Bar Excise Turnover Tax:59,854.00"
-      if ((line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && result.retailExciseTurnoverTax === 0) {
-        console.log(`🔍 PATTERN DETECTED: Excise Turnover Tax (same-line)`);
+      // Pattern: "Retail Shop Excise Turnover Tax:1,30,944.00"
+      if (line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && result.retailExciseTurnoverTax === 0) {
+        console.log(`🔍 PATTERN DETECTED: Retail Excise Turnover Tax (same-line)`);
         console.log(`   Line ${i + 1}: "${line}"`);
-        console.log(`   Regex: /(Retail|Bar).*?Excise.*?Turnover.*?Tax:\\s*([\\d,]+\\.?\\d*)/i`);
+        console.log(`   Regex: /Retail.*?Excise.*?Turnover.*?Tax:\\s*([\\d,]+\\.?\\d*)/i`);
         
-        const match = line.match(/(Retail|Bar).*?Excise.*?Turnover.*?Tax:\s*([\d,]+\.?\d*)/i);
+        const match = line.match(/Retail.*?Excise.*?Turnover.*?Tax:\s*([\d,]+\.?\d*)/i);
         if (match) {
-          result.retailExciseTurnoverTax = this.parseAmount(match[2]);
-          console.log(`   ✅ EXTRACTED: "${match[2]}" → ${result.retailExciseTurnoverTax}`);
-          patternsFound.push('Excise Turnover Tax');
+          result.retailExciseTurnoverTax = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.retailExciseTurnoverTax}`);
+          patternsFound.push('Retail Excise Turnover Tax');
         } else {
           console.log(`   ❌ REGEX FAILED: No match found`);
         }
@@ -916,21 +1059,21 @@ class HybridInvoiceParser {
       const line = lines[i];
       const nextLine = lines[i + 1].trim();
       
-      // Pattern: "Retail Shop Excise Turnover Tax:" or "Bar Excise Turnover Tax:" followed by amount on next line
-      if ((line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && 
+      // Pattern: "Retail Shop Excise Turnover Tax:" followed by "1,30,944.00" on next line
+      if (line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && 
           !line.match(/[\d,]+/) && result.retailExciseTurnoverTax === 0) {
         
-        console.log(`🔍 PATTERN DETECTED: Excise Turnover Tax (split-line)`);
+        console.log(`🔍 PATTERN DETECTED: Retail Excise Turnover Tax (split-line)`);
         console.log(`   Line ${i + 1}: "${line}"`);
         console.log(`   Line ${i + 2}: "${nextLine}"`);
-        console.log(`   Detection logic: (line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && !line.match(/[\\d,]+/)`);
+        console.log(`   Detection logic: line.includes('Retail') && line.includes('Excise') && line.includes('Turnover') && !line.match(/[\\d,]+/)`);
         console.log(`   Next line regex: /^([\\d,]+\\.?\\d*)$/`);
         
         const nextLineMatch = nextLine.match(/^([\d,]+\.?\d*)$/);
         if (nextLineMatch) {
           result.retailExciseTurnoverTax = this.parseAmount(nextLineMatch[1]);
           console.log(`   ✅ EXTRACTED: "${nextLineMatch[1]}" → ${result.retailExciseTurnoverTax}`);
-          patternsFound.push('Excise Turnover Tax');
+          patternsFound.push('Retail Excise Turnover Tax');
         } else {
           console.log(`   ❌ REGEX FAILED: Next line "${nextLine}" doesn't match amount pattern`);
         }

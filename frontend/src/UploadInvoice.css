@@ -169,23 +169,27 @@
 
 .upload-invoice-container .upload-btn {
   padding: 12px 40px;
-  background: #48bb78;
+  background: #0f172a;
   color: white;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 16px;
-  transition: all 0.3s;
+  font-weight: 600;
+  transition: all 0.3s ease;
 }
 
 .upload-invoice-container .upload-btn:hover:not(:disabled) {
-  background: #38a169;
-  transform: translateY(-1px);
+  background: #1e293b;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.3);
 }
 
 .upload-invoice-container .upload-btn:disabled {
-  background: #cbd5e0;
+  background: #9ca3af;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .upload-invoice-container .parsed-data-section {
@@ -227,11 +231,12 @@
 }
 
 .upload-invoice-container .items-table th {
-  background: #667eea;
+  background: #0f172a;
   color: white;
   padding: 12px;
-  text-align: left;
+  text-align: center;
   font-size: 14px;
+  font-weight: 600;
 }
 
 .upload-invoice-container .items-table td {
@@ -253,6 +258,32 @@
   font-weight: 600;
 }
 
+/* Totals row styling */
+.upload-invoice-container .items-table .totals-row {
+  background-color: #f8f9fa;
+  border-top: 2px solid #667eea;
+  font-weight: bold;
+}
+
+.upload-invoice-container .items-table .totals-row:hover {
+  background-color: #f8f9fa; /* Override hover effect for totals row */
+}
+
+.upload-invoice-container .items-table .totals-label {
+  text-align: center;
+  color: #333;
+  font-size: 16px;
+  padding: 15px 12px;
+}
+
+.upload-invoice-container .items-table .totals-value {
+  text-align: center;
+  color: #333;
+  font-size: 16px;
+  padding: 15px 12px;
+  background-color: #e8f4fd;
+}
+
 .upload-invoice-container .action-buttons {
   display: flex;
   gap: 15px;
@@ -262,23 +293,27 @@
 
 .upload-invoice-container .confirm-btn {
   padding: 12px 30px;
-  background: #48bb78;
+  background: #0f172a;
   color: white;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 16px;
-  transition: all 0.3s;
+  font-weight: 600;
+  transition: all 0.3s ease;
 }
 
 .upload-invoice-container .confirm-btn:hover:not(:disabled) {
-  background: #38a169;
-  transform: translateY(-1px);
+  background: #1e293b;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.3);
 }
 
 .upload-invoice-container .confirm-btn:disabled {
-  background: #cbd5e0;
+  background: #9ca3af;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .upload-invoice-container .cancel-btn {

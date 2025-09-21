@@ -40,15 +40,22 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       istTime = new Date(now.getTime() + istOffset);
     }
     
+    let businessDate;
     if (istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30)) {
       // Before 11:30 AM IST - use previous day
       const yesterday = new Date(istTime);
       yesterday.setDate(yesterday.getDate() - 1);
-      return yesterday.toLocaleDateString('en-CA');
+      businessDate = yesterday;
     } else {
       // After 11:30 AM IST - use current day
-      return istTime.toLocaleDateString('en-CA');
+      businessDate = istTime;
     }
+    
+    // Format date as DD-MM-YYYY
+    const day = String(businessDate.getDate()).padStart(2, '0');
+    const month = String(businessDate.getMonth() + 1).padStart(2, '0');
+    const year = businessDate.getFullYear();
+    return `${day}-${month}-${year}`;
   };
 
   const businessDate = getBusinessDate();
@@ -243,12 +250,14 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
     setSaving(true);
     try {
-      const businessDate = getBusinessDate();
-      console.log('🗓️ Using business date for stock onboarding:', businessDate);
+      const businessDateDisplay = getBusinessDate();
+      // Convert DD-MM-YYYY to YYYY-MM-DD for API
+      const businessDateForAPI = businessDateDisplay.split('-').reverse().join('-');
+      console.log('🗓️ Using business date for stock onboarding:', businessDateForAPI);
 
       const response = await apiPost('/api/stock-onboarding/save', {
         products: selectedProducts,
-        businessDate: businessDate
+        businessDate: businessDateForAPI
       });
 
       if (response.ok) {

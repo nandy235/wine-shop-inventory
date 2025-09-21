@@ -62,6 +62,13 @@
 .date-selectors { display: flex; flex-wrap: wrap; gap: 1rem; }
 .selector-group { display: flex; align-items: center; gap: 0.5rem; }
 .date-input, .year-select, .month-select, .week-select { padding: 0.4rem 0.6rem; border: 1px solid #cbd5e0; border-radius: 8px; }
+
+.date-error {
+  color: #e53e3e;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+  font-weight: 500;
+}
 .report-title-section h3 { margin: 1rem 0 0 0; color: #2d3748; }
 
 .summary-section { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }

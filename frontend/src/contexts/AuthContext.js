@@ -41,6 +41,28 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Silent auth check that doesn't trigger loading state - for tab switching
+  const checkAuthStatusSilently = async () => {
+    try {
+      const isAuth = await checkAuthStatus();
+      if (isAuth) {
+        // Get CSRF token if authenticated
+        const token = await getCSRFTokenFromServer();
+        if (token) {
+          setCSRFToken(token);
+        }
+      }
+      setIsAuthenticated(isAuth);
+    } catch (error) {
+      console.error('Silent auth check failed:', error);
+      // Only clear auth if we get a definitive unauthorized response
+      if (error.message && error.message.includes('401')) {
+        setIsAuthenticated(false);
+        setError('Session expired');
+      }
+    }
+  };
+
   const handleLogin = async (credentials) => {
     if (!credentials) {
       return { success: false, error: 'Credentials are required' };
@@ -109,12 +131,12 @@ export const AuthProvider = ({ children }) => {
     checkAuthStatusOnLoad();
   }, []);
 
-  // Add session validation on window focus
+  // Add session validation on window focus - using silent check to avoid page refresh
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (!document.hidden && isAuthenticated) {
-        // Re-validate session when user returns to tab
-        checkAuthStatusOnLoad();
+        // Re-validate session when user returns to tab (silently, no loading state)
+        checkAuthStatusSilently();
       }
     };
 

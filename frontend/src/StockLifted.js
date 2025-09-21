@@ -3,27 +3,32 @@ import './StockLifted.css';
 import { apiGet } from './apiUtils';
 import { getCurrentUser } from './authUtils';
 
-// Business date helper (11:30 AM IST boundary)
+// Business date helper (11:30 AM IST boundary) - Safari compatible
 const calculateBusinessDate = () => {
   const now = new Date();
-  const istTimeString = now.toLocaleString('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-  const istTime = new Date(istTimeString);
+  
+  // Safari-compatible IST timezone handling
+  // IST is UTC+5:30, so we add 5.5 hours to UTC time
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const istTime = new Date(utcTime + (5.5 * 60 * 60 * 1000));
+  
   const isBeforeStart = istTime.getHours() < 11 || (istTime.getHours() === 11 && istTime.getMinutes() < 30);
+  
   if (isBeforeStart) {
-    const y = new Date(istTime);
-    y.setDate(y.getDate() - 1);
-    return y.toLocaleDateString('en-CA');
+    const yesterday = new Date(istTime);
+    yesterday.setDate(yesterday.getDate() - 1);
+    // Safari-compatible date formatting
+    const year = yesterday.getFullYear();
+    const month = String(yesterday.getMonth() + 1).padStart(2, '0');
+    const day = String(yesterday.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
-  return istTime.toLocaleDateString('en-CA');
+  
+  // Safari-compatible date formatting
+  const year = istTime.getFullYear();
+  const month = String(istTime.getMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const getWeeksInMonth = (year, month) => {
@@ -32,14 +37,23 @@ const getWeeksInMonth = (year, month) => {
   const lastDay = new Date(year, month, 0);
   let currentWeekStart = new Date(firstDay);
   let weekNumber = 1;
+  
+  // Safari-compatible date formatting helper
+  const formatDate = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  
   while (currentWeekStart <= lastDay) {
     const weekEnd = new Date(currentWeekStart);
     weekEnd.setDate(currentWeekStart.getDate() + 6);
     if (weekEnd > lastDay) weekEnd.setTime(lastDay.getTime());
     weeks.push({
       weekNumber,
-      startDate: currentWeekStart.toLocaleDateString('en-CA'),
-      endDate: weekEnd.toLocaleDateString('en-CA'),
+      startDate: formatDate(currentWeekStart),
+      endDate: formatDate(weekEnd),
       label: `Week ${weekNumber} (${currentWeekStart.getDate()}-${weekEnd.getDate()})`
     });
     currentWeekStart.setDate(currentWeekStart.getDate() + 7);
@@ -50,14 +64,29 @@ const getWeeksInMonth = (year, month) => {
 
 const getMonthsInYear = (year) => {
   const months = [];
+  
+  // Safari-compatible date formatting helper
+  const formatDate = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  
+  // Month names for Safari compatibility
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
   for (let i = 1; i <= 12; i++) {
     const mStart = new Date(year, i - 1, 1);
     const mEnd = new Date(year, i, 0);
     months.push({
       monthNumber: i,
-      startDate: mStart.toLocaleDateString('en-CA'),
-      endDate: mEnd.toLocaleDateString('en-CA'),
-      label: mStart.toLocaleDateString('en-US', { month: 'long' })
+      startDate: formatDate(mStart),
+      endDate: formatDate(mEnd),
+      label: monthNames[i - 1]
     });
   }
   return months;
@@ -67,20 +96,40 @@ function StockLifted({ onNavigate, onLogout }) {
   const businessDate = calculateBusinessDate();
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
+  
+  // Fallback date validation - ensure we always have a valid business date
+  const validatedBusinessDate = (() => {
+    if (businessDate && businessDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return businessDate;
+    }
+    // Fallback to today's date in YYYY-MM-DD format if business date calculation fails
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  })();
 
   // Auth and shop
   const user = useMemo(() => getCurrentUser(), []);
   // Token no longer needed - apiUtils handles authentication automatically
   const shopName = user.shopName || 'Liquor Ledger';
 
-  // Controls
+  // Controls - with Safari-compatible date validation
   const [reportType, setReportType] = useState('daily');
-  const [selectedDate, setSelectedDate] = useState(businessDate);
+  const [selectedDate, setSelectedDate] = useState(validatedBusinessDate);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [selectedWeek, setSelectedWeek] = useState(1);
-  const [customStartDate, setCustomStartDate] = useState(businessDate);
-  const [customEndDate, setCustomEndDate] = useState(businessDate);
+  const [customStartDate, setCustomStartDate] = useState(validatedBusinessDate);
+  const [customEndDate, setCustomEndDate] = useState(validatedBusinessDate);
+  
+  // Safari-compatible date validation helper
+  const isValidDate = (dateString) => {
+    if (!dateString) return false;
+    const date = new Date(dateString);
+    return date instanceof Date && !isNaN(date.getTime()) && dateString.match(/^\d{4}-\d{2}-\d{2}$/);
+  };
 
   // Data
   const [rows, setRows] = useState([]);
@@ -132,7 +181,11 @@ function StockLifted({ onNavigate, onLogout }) {
     const c = new Date(start);
     const e = new Date(end);
     while (c <= e) {
-      out.push(c.toLocaleDateString('en-CA'));
+      // Safari-compatible date formatting
+      const year = c.getFullYear();
+      const month = String(c.getMonth() + 1).padStart(2, '0');
+      const day = String(c.getDate()).padStart(2, '0');
+      out.push(`${year}-${month}-${day}`);
       c.setDate(c.getDate() + 1);
     }
     return out;
@@ -144,25 +197,39 @@ function StockLifted({ onNavigate, onLogout }) {
         return { startDate: selectedDate, endDate: selectedDate };
       case 'weekly': {
         const w = weeksInMonth.find(w => w.weekNumber === selectedWeek);
-        if (!w) return { startDate: businessDate, endDate: businessDate };
+        if (!w) return { startDate: validatedBusinessDate, endDate: validatedBusinessDate };
         return { startDate: w.startDate, endDate: w.endDate };
       }
       case 'monthly': {
-        const mStart = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('en-CA');
-        const mEnd = new Date(selectedYear, selectedMonth, 0).toLocaleDateString('en-CA');
-        return { startDate: mStart, endDate: mEnd };
+        const mStart = new Date(selectedYear, selectedMonth - 1, 1);
+        const mEnd = new Date(selectedYear, selectedMonth, 0);
+        // Safari-compatible date formatting
+        const formatDate = (date) => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        return { startDate: formatDate(mStart), endDate: formatDate(mEnd) };
       }
       case 'yearly': {
-        const yStart = new Date(selectedYear, 0, 1).toLocaleDateString('en-CA');
-        const yEnd = new Date(selectedYear, 11, 31).toLocaleDateString('en-CA');
-        return { startDate: yStart, endDate: yEnd };
+        const yStart = new Date(selectedYear, 0, 1);
+        const yEnd = new Date(selectedYear, 11, 31);
+        // Safari-compatible date formatting
+        const formatDate = (date) => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        return { startDate: formatDate(yStart), endDate: formatDate(yEnd) };
       }
       case 'custom':
         return { startDate: customStartDate, endDate: customEndDate };
       default:
-        return { startDate: businessDate, endDate: businessDate };
+        return { startDate: validatedBusinessDate, endDate: validatedBusinessDate };
     }
-  }, [reportType, selectedDate, weeksInMonth, selectedWeek, businessDate, selectedYear, selectedMonth, customStartDate, customEndDate]);
+  }, [reportType, selectedDate, weeksInMonth, selectedWeek, validatedBusinessDate, selectedYear, selectedMonth, customStartDate, customEndDate]);
 
   // Brand base name (group header)
   const getBaseName = (productName) => {
@@ -897,7 +964,20 @@ function StockLifted({ onNavigate, onLogout }) {
             {reportType === 'daily' && (
               <div className="selector-group">
                 <label>Select Date:</label>
-                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="date-input" />
+                <input 
+                  type="date" 
+                  value={selectedDate} 
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    if (isValidDate(newDate)) {
+                      setSelectedDate(newDate);
+                    }
+                  }} 
+                  className="date-input" 
+                />
+                {!isValidDate(selectedDate) && (
+                  <div className="date-error">Invalid date format</div>
+                )}
               </div>
             )}
 
@@ -966,11 +1046,38 @@ function StockLifted({ onNavigate, onLogout }) {
               <>
                 <div className="selector-group">
                   <label>Start Date:</label>
-                  <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} className="date-input" />
+                  <input 
+                    type="date" 
+                    value={customStartDate} 
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      if (isValidDate(newDate)) {
+                        setCustomStartDate(newDate);
+                      }
+                    }} 
+                    className="date-input" 
+                  />
+                  {!isValidDate(customStartDate) && (
+                    <div className="date-error">Invalid start date</div>
+                  )}
                 </div>
                 <div className="selector-group">
                   <label>End Date:</label>
-                  <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="date-input" min={customStartDate} />
+                  <input 
+                    type="date" 
+                    value={customEndDate} 
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      if (isValidDate(newDate)) {
+                        setCustomEndDate(newDate);
+                      }
+                    }} 
+                    className="date-input" 
+                    min={customStartDate} 
+                  />
+                  {!isValidDate(customEndDate) && (
+                    <div className="date-error">Invalid end date</div>
+                  )}
                 </div>
               </>
             )}

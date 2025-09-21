@@ -327,7 +327,7 @@ function UploadInvoice({ onNavigate, onLogout }) {
                   <p><strong>Invoice Value:</strong> {formatCurrency(parsedData.invoiceValue)}</p>
                   <p><strong>MRP Rounding Off:</strong> {formatCurrency(parsedData.mrpRoundingOff)}</p>
                   
-                  <p><strong>Retail Shop Excise Turnover Tax:</strong> {formatCurrency(parsedData.retailExciseTurnoverTax)}</p>
+                  <p><strong>Excise Turnover Tax:</strong> {formatCurrency(parsedData.retailExciseTurnoverTax)}</p>
                   <p><strong>Special Excise Cess:</strong> {formatCurrency(parsedData.specialExciseCess)}</p>
                   <p><strong>TCS:</strong> {formatCurrency(parsedData.tcs)}</p>
                   <p className="total-amount">
@@ -362,6 +362,13 @@ function UploadInvoice({ onNavigate, onLogout }) {
                         <td>{item.totalQuantity}</td>
                       </tr>
                     ))}
+                    {/* Totals Row */}
+                    <tr className="totals-row">
+                      <td colSpan="4" className="totals-label"><strong>TOTAL</strong></td>
+                      <td className="totals-value"><strong>{parsedData.items.reduce((sum, item) => sum + (item.cases || 0), 0)}</strong></td>
+                      <td className="totals-value"><strong>{parsedData.items.reduce((sum, item) => sum + (item.bottles || 0), 0)}</strong></td>
+                      <td className="totals-value"><strong>{parsedData.items.reduce((sum, item) => sum + (item.totalQuantity || 0), 0)}</strong></td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
