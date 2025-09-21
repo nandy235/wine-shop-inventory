@@ -350,13 +350,28 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
         apiGet(`/api/income-expenses/expenses?date=${targetDate}`)
       ]);
 
+      // Check if responses are ok
+      if (!incomeResponse.ok || !expensesResponse.ok) {
+        console.error('API responses not ok:', { income: incomeResponse.status, expenses: expensesResponse.status });
+        dispatch({ type: 'SET_INCOME_DATA', payload: [] });
+        dispatch({ type: 'SET_EXPENSES_DATA', payload: [] });
+        return;
+      }
+
       const incomeResult = await incomeResponse.json();
       const expensesResult = await expensesResponse.json();
 
-      dispatch({ type: 'SET_INCOME_DATA', payload: incomeResult || [] });
-      dispatch({ type: 'SET_EXPENSES_DATA', payload: expensesResult || [] });
+      console.log('Income result:', incomeResult);
+      console.log('Expenses result:', expensesResult);
+
+      // Ensure we always set arrays
+      dispatch({ type: 'SET_INCOME_DATA', payload: Array.isArray(incomeResult) ? incomeResult : [] });
+      dispatch({ type: 'SET_EXPENSES_DATA', payload: Array.isArray(expensesResult) ? expensesResult : [] });
     } catch (error) {
       console.error('Error fetching income/expenses data:', error);
+      // Set empty arrays on error
+      dispatch({ type: 'SET_INCOME_DATA', payload: [] });
+      dispatch({ type: 'SET_EXPENSES_DATA', payload: [] });
     }
   }, [getCurrentDate]);
 
@@ -516,8 +531,33 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
       summaryData: state.summaryData
     });
     
-    const totalIncome = (state.incomeData || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-    const totalExpenses = (state.expensesData || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    // Debug logging to check data types
+    console.log('Debug - state.incomeData type:', typeof state.incomeData);
+    console.log('Debug - state.incomeData:', state.incomeData);
+    console.log('Debug - state.incomeData is array:', Array.isArray(state.incomeData));
+    
+    // Ensure we have arrays before using reduce
+    const incomeArray = Array.isArray(state.incomeData) ? state.incomeData : [];
+    const expensesArray = Array.isArray(state.expensesData) ? state.expensesData : [];
+    
+    console.log('Debug - incomeArray length:', incomeArray.length);
+    console.log('Debug - expensesArray length:', expensesArray.length);
+    
+    const totalIncome = incomeArray.reduce((sum, item) => {
+      if (!item || typeof item !== 'object') {
+        console.warn('Invalid income item:', item);
+        return sum;
+      }
+      return sum + (parseFloat(item.amount) || 0);
+    }, 0);
+    
+    const totalExpenses = expensesArray.reduce((sum, item) => {
+      if (!item || typeof item !== 'object') {
+        console.warn('Invalid expense item:', item);
+        return sum;
+      }
+      return sum + (parseFloat(item.amount) || 0);
+    }, 0);
     
     const cash = state.paymentsData?.cash_amount || 0;
     const upi = state.paymentsData?.upi_amount || 0;
