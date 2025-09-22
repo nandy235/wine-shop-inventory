@@ -3,8 +3,6 @@ import './Login.css';
 import { sanitizeRetailerCode, validateRetailerCode } from './authUtils';
 
 function Login({ onLogin, onSignup }) {
-  console.log('Login component rendered');
-  
   const [retailerCode, setRetailerCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -109,15 +107,6 @@ function Login({ onLogin, onSignup }) {
     const currentRetailerCode = retailerCodeRef.current?.value || retailerCode;
     const currentPassword = passwordRef.current?.value || password;
     
-    // Debug logging
-    console.log('Login attempt:', {
-      stateRetailerCode: retailerCode,
-      refRetailerCode: retailerCodeRef.current?.value,
-      currentRetailerCode,
-      statePassword: password,
-      refPassword: passwordRef.current?.value,
-      currentPassword
-    });
 
     // Client-side validation
     const cleanRetailerCode = sanitizeRetailerCode(currentRetailerCode);
@@ -154,7 +143,6 @@ function Login({ onLogin, onSignup }) {
 
   // Handle form submission for better accessibility
   const handleSubmit = (e) => {
-    console.log('Form submit triggered');
     e.preventDefault();
     if (!loading) {
       handleLogin();
@@ -163,9 +151,7 @@ function Login({ onLogin, onSignup }) {
 
   // Keyboard accessibility - Enter key to login (using modern onKeyDown)
   const handleKeyDown = (e) => {
-    console.log('Key pressed:', e.key, 'KeyCode:', e.keyCode, 'Which:', e.which);
     if ((e.key === 'Enter' || e.key === 'Unidentified' || e.keyCode === 13 || e.which === 13) && !loading) {
-      console.log('Enter key detected, calling handleLogin');
       e.preventDefault();
       handleLogin();
     }
