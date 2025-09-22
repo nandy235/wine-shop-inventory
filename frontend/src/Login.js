@@ -15,12 +15,12 @@ function Login({ onLogin, onSignup }) {
   // Effect to detect auto-fill and update state
   React.useEffect(() => {
     const checkAutoFill = () => {
-      if (retailerCodeRef.current?.value && !retailerCode) {
-        const sanitized = sanitizeRetailerCode(retailerCodeRef.current.value);
+      if (retailerCodeRef.current?.value !== retailerCode) {
+        const sanitized = sanitizeRetailerCode(retailerCodeRef.current?.value || '');
         setRetailerCode(sanitized);
       }
-      if (passwordRef.current?.value && !password) {
-        setPassword(passwordRef.current.value);
+      if (passwordRef.current?.value !== password) {
+        setPassword(passwordRef.current?.value || '');
       }
     };
 
@@ -28,18 +28,76 @@ function Login({ onLogin, onSignup }) {
     checkAutoFill();
 
     // Check periodically for auto-fill
-    const interval = setInterval(checkAutoFill, 100);
+    const interval = setInterval(checkAutoFill, 50);
 
-    // Cleanup after 3 seconds (auto-fill usually happens quickly)
+    // Cleanup after 5 seconds (auto-fill usually happens quickly)
     const timeout = setTimeout(() => {
       clearInterval(interval);
-    }, 3000);
+    }, 5000);
 
     return () => {
       clearInterval(interval);
       clearTimeout(timeout);
     };
   }, [retailerCode, password]);
+
+  // Additional event listeners for auto-fill detection
+  React.useEffect(() => {
+    const handleAutoFill = () => {
+      if (retailerCodeRef.current?.value) {
+        const sanitized = sanitizeRetailerCode(retailerCodeRef.current.value);
+        setRetailerCode(sanitized);
+      }
+      if (passwordRef.current?.value) {
+        setPassword(passwordRef.current.value);
+      }
+    };
+
+    // Listen for various auto-fill events
+    document.addEventListener('animationstart', handleAutoFill);
+    document.addEventListener('input', handleAutoFill);
+    
+    return () => {
+      document.removeEventListener('animationstart', handleAutoFill);
+      document.removeEventListener('input', handleAutoFill);
+    };
+  }, []);
+
+  // Add event listeners directly to input elements
+  React.useEffect(() => {
+    const retailerInput = retailerCodeRef.current;
+    const passwordInput = passwordRef.current;
+
+    const handleInputChange = () => {
+      if (retailerInput?.value) {
+        const sanitized = sanitizeRetailerCode(retailerInput.value);
+        setRetailerCode(sanitized);
+      }
+      if (passwordInput?.value) {
+        setPassword(passwordInput.value);
+      }
+    };
+
+    if (retailerInput) {
+      retailerInput.addEventListener('input', handleInputChange);
+      retailerInput.addEventListener('change', handleInputChange);
+    }
+    if (passwordInput) {
+      passwordInput.addEventListener('input', handleInputChange);
+      passwordInput.addEventListener('change', handleInputChange);
+    }
+
+    return () => {
+      if (retailerInput) {
+        retailerInput.removeEventListener('input', handleInputChange);
+        retailerInput.removeEventListener('change', handleInputChange);
+      }
+      if (passwordInput) {
+        passwordInput.removeEventListener('input', handleInputChange);
+        passwordInput.removeEventListener('change', handleInputChange);
+      }
+    };
+  }, []);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -48,6 +106,16 @@ function Login({ onLogin, onSignup }) {
     // Get values from refs (for auto-fill) or state
     const currentRetailerCode = retailerCodeRef.current?.value || retailerCode;
     const currentPassword = passwordRef.current?.value || password;
+    
+    // Debug logging
+    console.log('Login attempt:', {
+      stateRetailerCode: retailerCode,
+      refRetailerCode: retailerCodeRef.current?.value,
+      currentRetailerCode,
+      statePassword: password,
+      refPassword: passwordRef.current?.value,
+      currentPassword
+    });
 
     // Client-side validation
     const cleanRetailerCode = sanitizeRetailerCode(currentRetailerCode);
