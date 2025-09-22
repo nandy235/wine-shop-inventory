@@ -163,8 +163,8 @@ function Login({ onLogin, onSignup }) {
 
   // Keyboard accessibility - Enter key to login (using modern onKeyDown)
   const handleKeyDown = (e) => {
-    console.log('Key pressed:', e.key);
-    if (e.key === 'Enter' && !loading) {
+    console.log('Key pressed:', e.key, 'KeyCode:', e.keyCode, 'Which:', e.which);
+    if ((e.key === 'Enter' || e.key === 'Unidentified' || e.keyCode === 13 || e.which === 13) && !loading) {
       console.log('Enter key detected, calling handleLogin');
       e.preventDefault();
       handleLogin();
