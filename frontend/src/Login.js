@@ -8,19 +8,56 @@ function Login({ onLogin, onSignup }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Refs to access input values directly (for auto-fill detection)
+  const retailerCodeRef = React.useRef(null);
+  const passwordRef = React.useRef(null);
+
+  // Effect to detect auto-fill and update state
+  React.useEffect(() => {
+    const checkAutoFill = () => {
+      if (retailerCodeRef.current?.value && !retailerCode) {
+        const sanitized = sanitizeRetailerCode(retailerCodeRef.current.value);
+        setRetailerCode(sanitized);
+      }
+      if (passwordRef.current?.value && !password) {
+        setPassword(passwordRef.current.value);
+      }
+    };
+
+    // Check immediately
+    checkAutoFill();
+
+    // Check periodically for auto-fill
+    const interval = setInterval(checkAutoFill, 100);
+
+    // Cleanup after 3 seconds (auto-fill usually happens quickly)
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [retailerCode, password]);
+
   const handleLogin = async () => {
     setLoading(true);
     setError('');
 
+    // Get values from refs (for auto-fill) or state
+    const currentRetailerCode = retailerCodeRef.current?.value || retailerCode;
+    const currentPassword = passwordRef.current?.value || password;
+
     // Client-side validation
-    const cleanRetailerCode = sanitizeRetailerCode(retailerCode);
+    const cleanRetailerCode = sanitizeRetailerCode(currentRetailerCode);
     if (!validateRetailerCode(cleanRetailerCode)) {
       setError('Retailer code must be exactly 7 digits');
       setLoading(false);
       return;
     }
 
-    if (!password || password.length < 1) {
+    if (!currentPassword || currentPassword.length < 1) {
       setError('Password is required');
       setLoading(false);
       return;
@@ -30,7 +67,7 @@ function Login({ onLogin, onSignup }) {
       // Pass credentials to AuthContext for actual login
       const loginResult = await onLogin({
         retailerCode: cleanRetailerCode,
-        password: password.trim()
+        password: currentPassword.trim()
       });
       
       if (!loginResult.success) {
@@ -70,6 +107,7 @@ function Login({ onLogin, onSignup }) {
           <div className="form-group">
           <label className="form-label">Retailer Code:</label>
           <input 
+            ref={retailerCodeRef}
             type="text" 
             className="form-input" 
             value={retailerCode}
@@ -93,6 +131,7 @@ function Login({ onLogin, onSignup }) {
         <div className="form-group">
           <label className="form-label">Password:</label>
           <input 
+            ref={passwordRef}
             type="password" 
             className="form-input" 
             value={password}
