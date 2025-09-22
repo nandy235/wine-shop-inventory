@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import './Dashboard.css';
+import './Home.css';
 import { apiGet, apiPost } from './apiUtils';
 import { getCurrentUser } from './authUtils';
 import Navigation from './components/Navigation';
@@ -33,7 +33,7 @@ function getBusinessDate() {
   }
 }
 
-function Dashboard({ onNavigate, onLogout }) {
+function Home({ onNavigate, onLogout }) {
   const [dashboardData, setDashboardData] = useState({
     stockValue: 0,
     stockLiftedInvoiceValue: 0,
@@ -160,7 +160,7 @@ function Dashboard({ onNavigate, onLogout }) {
       
       <main className="dashboard-content">
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 className="page-title">Dashboard Overview</h2>
+          <h2 className="page-title">Overview</h2>
           <p className="business-date-right" style={{ margin: 0, marginRight: '20px', fontSize: '16px', fontWeight: 'bold' }}>Business Date: {formatBusinessDate()}</p>
         </div>
         
@@ -267,4 +267,4 @@ function Dashboard({ onNavigate, onLogout }) {
   );
 }
 
-export default Dashboard;
+export default Home;

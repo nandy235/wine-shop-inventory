@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Login from './Login';
 import Signup from './Signup';
-import Dashboard from './Dashboard';
+import Home from './Home';
 import StockOnboarding from './StockOnboarding';
 import ManageStock from './ManageStock';
 import UploadInvoice from './UploadInvoice';
@@ -71,7 +71,7 @@ function AppContent() {
     <UserProvider isAuthenticated={isAuthenticated} onAuthError={handleAuthError}>
       <div className="App">
         {currentView === 'dashboard' && (
-          <Dashboard 
+          <Home 
             onNavigate={handleNavigate} 
             onLogout={handleLogout} 
           />

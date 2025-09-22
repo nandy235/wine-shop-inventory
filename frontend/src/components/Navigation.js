@@ -3,7 +3,7 @@ import './Navigation.css';
 
 function Navigation({ currentPage, onNavigate, onLogout, shopName, onBack }) {
   const navItems = [
-    { key: 'dashboard', label: 'Dashboard' },
+    { key: 'dashboard', label: 'Home' },
     { key: 'stockOnboarding', label: 'Stock Onboarding' },
     { key: 'manageStock', label: 'Manage Stock' },
     { key: 'sheets', label: 'Sheets' },

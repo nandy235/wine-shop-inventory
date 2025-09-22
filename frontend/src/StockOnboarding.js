@@ -329,6 +329,15 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       grouped[brandKey].items.push(item);
     });
     
+    // Sort items within each brand group by size (ml) in descending order
+    Object.values(grouped).forEach(brandGroup => {
+      brandGroup.items.sort((a, b) => {
+        const sizeA = parseFloat(a.size) || 0;
+        const sizeB = parseFloat(b.size) || 0;
+        return sizeB - sizeA; // Descending order (largest first)
+      });
+    });
+    
     return Object.values(grouped);
   };
 
@@ -574,7 +583,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                           <td className="variant-stock-cell">
                             <div className="stock-quantity">
                               <span className="quantity-value">{item.quantity}</span>
-                              <span className="quantity-unit">units</span>
                             </div>
                           </td>
                           <td className="variant-updated-cell">
