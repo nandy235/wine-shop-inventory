@@ -45,17 +45,18 @@ function Login({ onLogin, onSignup }) {
     setLoading(false);
   };
 
-  // Keyboard accessibility - Enter key to login (using modern onKeyDown)
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !loading) {
-      handleLogin();
-    }
-  };
-
   // Handle form submission for better accessibility
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!loading) {
+      handleLogin();
+    }
+  };
+
+  // Keyboard accessibility - Enter key to login (using modern onKeyDown)
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !loading) {
+      e.preventDefault();
       handleLogin();
     }
   };
