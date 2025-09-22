@@ -3,6 +3,8 @@ import './Login.css';
 import { sanitizeRetailerCode, validateRetailerCode } from './authUtils';
 
 function Login({ onLogin, onSignup }) {
+  console.log('Login component rendered');
+  
   const [retailerCode, setRetailerCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -152,6 +154,7 @@ function Login({ onLogin, onSignup }) {
 
   // Handle form submission for better accessibility
   const handleSubmit = (e) => {
+    console.log('Form submit triggered');
     e.preventDefault();
     if (!loading) {
       handleLogin();
@@ -160,7 +163,9 @@ function Login({ onLogin, onSignup }) {
 
   // Keyboard accessibility - Enter key to login (using modern onKeyDown)
   const handleKeyDown = (e) => {
+    console.log('Key pressed:', e.key);
     if (e.key === 'Enter' && !loading) {
+      console.log('Enter key detected, calling handleLogin');
       e.preventDefault();
       handleLogin();
     }
