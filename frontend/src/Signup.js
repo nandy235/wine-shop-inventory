@@ -13,6 +13,17 @@ function Signup({ onLogin }) {
   const [licenseNumber, setLicenseNumber] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordFocus, setPasswordFocus] = useState(false);
+
+  // Password validation helper
+  const getPasswordValidation = (pwd) => {
+    return {
+      length: pwd.length >= 8,
+      lowercase: /(?=.*[a-z])/.test(pwd),
+      uppercase: /(?=.*[A-Z])/.test(pwd),
+      number: /(?=.*\d)/.test(pwd)
+    };
+  };
 
   const handleSignup = async () => {
     setLoading(true);
@@ -39,8 +50,27 @@ function Signup({ onLogin }) {
       return;
     }
     
-    if (!password || password.length < 6) {
-      setError('Password must be at least 6 characters');
+    // Enhanced password validation to match server requirements
+    if (!password || password.length < 8) {
+      setError('Password must be at least 8 characters');
+      setLoading(false);
+      return;
+    }
+    
+    if (!/(?=.*[a-z])/.test(password)) {
+      setError('Password must contain at least one lowercase letter');
+      setLoading(false);
+      return;
+    }
+    
+    if (!/(?=.*[A-Z])/.test(password)) {
+      setError('Password must contain at least one uppercase letter');
+      setLoading(false);
+      return;
+    }
+    
+    if (!/(?=.*\d)/.test(password)) {
+      setError('Password must contain at least one number');
       setLoading(false);
       return;
     }
@@ -58,7 +88,7 @@ function Signup({ onLogin }) {
     }
 
     try {
-      await apiPost('/api/register', { 
+      const response = await apiPost('/api/register', { 
         name: cleanName, 
         email: cleanEmail, 
         password, 
@@ -68,8 +98,14 @@ function Signup({ onLogin }) {
         licenseNumber: cleanLicenseNumber 
       });
 
-      alert('Account created successfully! Please login.');
-      onLogin();
+      if (response.ok) {
+        alert('Account created successfully! Please login.');
+        onLogin();
+      } else {
+        // Handle HTTP error responses
+        const errorData = await response.json();
+        setError(errorData.message || `Registration failed (${response.status})`);
+      }
     } catch (err) {
       setError(err.message || 'Network error. Please try again.');
     }
@@ -107,7 +143,43 @@ function Signup({ onLogin }) {
             className="form-input" 
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onFocus={() => setPasswordFocus(true)}
+            onBlur={() => setPasswordFocus(false)}
+            placeholder="Enter a strong password"
           />
+          {(passwordFocus || password) && (
+            <div style={{ 
+              marginTop: '8px', 
+              padding: '10px', 
+              backgroundColor: '#f8f9fa', 
+              border: '1px solid #e9ecef', 
+              borderRadius: '4px',
+              fontSize: '14px'
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#495057' }}>
+                Password Requirements:
+              </div>
+              {(() => {
+                const validation = getPasswordValidation(password);
+                return (
+                  <>
+                    <div style={{ color: validation.length ? '#28a745' : '#dc3545' }}>
+                      {validation.length ? '✓' : '✗'} At least 8 characters
+                    </div>
+                    <div style={{ color: validation.lowercase ? '#28a745' : '#dc3545' }}>
+                      {validation.lowercase ? '✓' : '✗'} One lowercase letter (a-z)
+                    </div>
+                    <div style={{ color: validation.uppercase ? '#28a745' : '#dc3545' }}>
+                      {validation.uppercase ? '✓' : '✗'} One uppercase letter (A-Z)
+                    </div>
+                    <div style={{ color: validation.number ? '#28a745' : '#dc3545' }}>
+                      {validation.number ? '✓' : '✗'} One number (0-9)
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
         <div className="form-group">
           <label className="form-label">Shop Name:</label>
