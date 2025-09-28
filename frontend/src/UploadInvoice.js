@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import './UploadInvoice.css';
-import { apiPost, secureFileUpload } from './apiUtils';
+import { apiPost, apiPostLongRunning, secureFileUpload } from './apiUtils';
 import { getCurrentUser } from './authUtils';
 import Navigation from './components/Navigation';
 
@@ -144,12 +144,21 @@ function UploadInvoice({ onNavigate, onLogout }) {
       const businessDate = getBusinessDate();
       console.log('🗓️ Using business date:', businessDate);
       
-      const response = await apiPost('/api/invoice/confirm', {
+      // Show processing message for large invoices
+      const itemCount = parsedData.items?.length || 0;
+      if (itemCount > 50) {
+        console.log(`📦 Processing large invoice with ${itemCount} items - this may take up to 60 seconds...`);
+      }
+      
+      const response = await apiPostLongRunning('/api/invoice/confirm', {
         tempId: parsedData.tempId,
         businessDate: businessDate
       });
-      const result = await response.json();
-      alert(`✅ Stock updated successfully!\n${result.updatedCount} items added to received stock.`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        const processingTime = result.processingTime ? ` (${Math.round(result.processingTime / 1000)}s)` : '';
+        alert(`✅ Invoice confirmed successfully!${processingTime}\nInvoice: ${result.invoiceNumber}\nValue: ₹${result.totalValue}\nItems: ${result.matchedItemsCount} matched`);
         
         // Reset form
         setSelectedFile(null);
@@ -157,9 +166,29 @@ function UploadInvoice({ onNavigate, onLogout }) {
         
         // Navigate to view stock
         onNavigate('manageStock');
+      } else {
+        // Handle HTTP error responses
+        const errorData = await response.json();
+        console.error('Invoice confirmation failed:', errorData);
+        
+        // Handle specific error cases
+        if (errorData.code === 'INVOICE_EXPIRED') {
+          alert(`❌ Invoice data expired. Please upload the invoice again.\n\nThis happens when more than 30 minutes pass between upload and confirmation.`);
+        } else if (errorData.code === 'INVOICE_ALREADY_PROCESSED') {
+          alert(`❌ This invoice has already been processed.\n\nEach invoice can only be confirmed once per shop.`);
+        } else {
+          alert(`❌ Invoice confirmation failed: ${errorData.message || `Server error (${response.status})`}`);
+        }
+      }
     } catch (error) {
       console.error('Error confirming invoice:', error);
-      alert(`❌ Error processing invoice: ${error.message || 'Network error'}`);
+      
+      // Handle timeout specifically
+      if (error.message.includes('timeout')) {
+        alert(`❌ Invoice processing timed out.\n\nThis can happen with large invoices. Please try again.\n\nIf the problem persists, the invoice may have been processed successfully - check your stock records.`);
+      } else {
+        alert(`❌ Error processing invoice: ${error.message || 'Network error'}`);
+      }
     }
     setProcessing(false);
   };
@@ -378,7 +407,13 @@ function UploadInvoice({ onNavigate, onLogout }) {
                   onClick={handleConfirmAndAdd}
                   disabled={processing}
                 >
-                  {processing ? 'Processing...' : 'Confirm & Add to Stock'}
+                  {processing ? 
+                    (parsedData?.items?.length > 50 ? 
+                      'Processing (may take up to 60s)...' : 
+                      'Processing...'
+                    ) : 
+                    'Confirm & Add to Stock'
+                  }
                 </button>
               </div>
             </div>

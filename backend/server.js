@@ -1198,6 +1198,7 @@ app.post('/api/invoice/upload', requireAuth, (req, res, next) => {
 
 // Confirm and add parsed invoice data to stock
 app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
+  const startTime = Date.now();
   try {
     console.log('\n🔄 Invoice confirmation started...');
     console.log('📦 Request body:', req.body);
@@ -1221,11 +1222,13 @@ app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
     console.log(`🔍 Looking for tempId: ${tempId}`);
     
     // Retrieve stored invoice data from database
+    const dbQueryStart = Date.now();
     const result = await pool.query(`
       SELECT * FROM invoice_staging 
       WHERE temp_id = $1 AND user_id = $2 AND shop_id = $3 
       AND expires_at > CURRENT_TIMESTAMP
     `, [tempId, userId, shopId]);
+    console.log(`⏱️ Database query took: ${Date.now() - dbQueryStart}ms`);
     
     if (result.rows.length === 0) {
       console.error(`❌ Invoice data not found for tempId: ${tempId}`);
@@ -1259,9 +1262,10 @@ app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
     
     console.log('📅 Final business date being used:', finalBusinessDate);
     console.log('📅 Today fallback date:', today);
-
+    console.log(`📦 Processing ${invoiceData.items.length} items...`);
 
     // Save invoice using the database service
+    const saveStart = Date.now();
     const savedInvoice = await dbService.saveInvoiceWithItems({
       userId,
       shopId,
@@ -1279,12 +1283,16 @@ app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
       itemsCount: invoiceData.items.length,
       processedItemsCount: invoiceData.items.filter(item => item.masterBrandId).length
     }, invoiceData.items);
+    console.log(`⏱️ Invoice save took: ${Date.now() - saveStart}ms`);
 
     console.log(`✅ Invoice saved successfully with ID: ${savedInvoice.id}`);
 
     // Clean up the temporary data from invoice_staging table
     await pool.query('DELETE FROM invoice_staging WHERE temp_id = $1', [tempId]);
     console.log(`🗑️ Cleaned up tempId: ${tempId}`);
+
+    const totalTime = Date.now() - startTime;
+    console.log(`⏱️ Total invoice confirmation took: ${totalTime}ms`);
 
     res.json({
       success: true,
@@ -1294,7 +1302,8 @@ app.post('/api/invoice/confirm', requireAuth, async (req, res) => {
       totalValue: savedInvoice.total_value,
       date: savedInvoice.date,
       itemsCount: savedInvoice.itemsCount,
-      matchedItemsCount: savedInvoice.matchedItemsCount
+      matchedItemsCount: savedInvoice.matchedItemsCount,
+      processingTime: totalTime
     });
 
   } catch (error) {
@@ -2242,6 +2251,34 @@ app.get('/api/summary', requireAuth, async (req, res) => {
     res.json(summary);
   } catch (error) {
     console.error('Error getting summary:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get shop signup date for date picker validation
+app.get('/api/shop/signup-date', requireAuth, async (req, res) => {
+  try {
+    const shopId = parseInt(req.user.shopId);
+    
+    if (!shopId) {
+      return res.status(400).json({ message: 'Shop ID not found in token' });
+    }
+    
+    const query = `
+      SELECT created_at::date as signup_date
+      FROM shops 
+      WHERE id = $1
+    `;
+    
+    const result = await pool.query(query, [shopId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Shop not found' });
+    }
+    
+    res.json({ signupDate: result.rows[0].signup_date });
+  } catch (error) {
+    console.error('Error getting shop signup date:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -3564,6 +3601,45 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Database health endpoints (admin only)
+app.get('/api/admin/sequence-health', requireAuth, async (req, res) => {
+  try {
+    const issues = await dbService.checkSequenceHealth();
+    
+    res.json({
+      healthy: issues.length === 0,
+      issues,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error checking sequence health:', error);
+    res.status(500).json({ 
+      error: 'Failed to check sequence health',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/admin/fix-sequences', requireAuth, async (req, res) => {
+  try {
+    const result = await dbService.fixAllSequences();
+    
+    res.json({
+      success: true,
+      fixed: result.fixed,
+      issues: result.issues,
+      fixedTables: result.fixedTables,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error fixing sequences:', error);
+    res.status(500).json({ 
+      error: 'Failed to fix sequences',
+      message: error.message 
+    });
+  }
+});
+
 // Handle 404 for undefined routes
 app.use((req, res) => {
   res.status(404).json({
@@ -3591,6 +3667,13 @@ const server = app.listen(PORT, '0.0.0.0', () => {
       
       // Load master brands from database
       await loadMasterBrandsFromDB();
+      
+      // Perform database health check and fix sequences
+      console.log('🔍 Performing database health check...');
+      const sequenceResult = await dbService.fixAllSequences();
+      if (sequenceResult.fixed > 0) {
+        console.log(`🔧 Fixed ${sequenceResult.fixed} sequence issue(s) on startup`);
+      }
       
       console.log('App initialized with PostgreSQL');
       console.log('Server connected to PostgreSQL database');

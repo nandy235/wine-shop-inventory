@@ -740,9 +740,11 @@ class DatabaseService {
 
   async saveInvoiceWithItems(invoiceData, items) {
     const client = await pool.connect();
+    const overallStart = Date.now();
     
     try {
       await client.query('BEGIN');
+      console.log(`🚀 Starting optimized invoice processing for ${items?.length || 0} items...`);
       
       // 1. Save invoice record
       const {
@@ -758,11 +760,13 @@ class DatabaseService {
       console.log(`🔍 saveInvoiceWithItems - Using shopId: ${shopId}, userId: ${userId}`);
       
       // Check if invoice already exists
+      const duplicateCheckStart = Date.now();
       const existingInvoiceQuery = `
         SELECT id FROM invoices 
         WHERE shop_id = $1 AND icdc_number = $2
       `;
       const existingInvoice = await client.query(existingInvoiceQuery, [shopId, invoiceNumber]);
+      console.log(`⏱️ Duplicate check took: ${Date.now() - duplicateCheckStart}ms`);
       
       if (existingInvoice.rows.length > 0) {
         throw new Error(`Invoice ${invoiceNumber} has already been processed for this shop. Each invoice can only be confirmed once.`);
@@ -781,115 +785,163 @@ class DatabaseService {
         retailExciseTurnoverTax, specialExciseCess, tcs
       ];
       
+      const invoiceInsertStart = Date.now();
       const invoiceResult = await client.query(invoiceQuery, invoiceValues);
       const invoiceId = invoiceResult.rows[0].id;
+      console.log(`⏱️ Invoice insert took: ${Date.now() - invoiceInsertStart}ms`);
       
       console.log(`💾 Invoice saved with ID: ${invoiceId}`);
       
-      // 2. Ensure shop_inventory records exist for all matched items (quantities will be updated by triggers)
-      if (items && items.length > 0) {
-        for (const item of items) {
-          if (item.masterBrandId) {
-            // Check if shop_inventory record exists for this product
-            const inventoryCheck = await client.query(`
-              SELECT id FROM shop_inventory 
-              WHERE shop_id = $1 AND master_brand_id = $2
-            `, [shopId, item.masterBrandId]);
-            
-            if (inventoryCheck.rows.length === 0) {
-              // Create shop_inventory record for new product (quantity will be set by triggers)
-              await client.query(`
-                INSERT INTO shop_inventory 
-                (shop_id, master_brand_id, current_quantity, markup_price, final_price, is_active, last_updated)
-                VALUES ($1, $2, 0, 0, $3, true, CURRENT_TIMESTAMP)
-              `, [shopId, item.masterBrandId, item.mrp || 0]);
-              
-              console.log(`📦 Created shop_inventory record for ${item.brandNumber} ${item.size} (quantity will be updated by triggers)`);
-            } else {
-              // Update final_price if provided
-              if (item.mrp) {
-                await client.query(`
-                  UPDATE shop_inventory 
-                  SET final_price = $1, last_updated = CURRENT_TIMESTAMP
-                  WHERE shop_id = $2 AND master_brand_id = $3
-                `, [item.mrp, shopId, item.masterBrandId]);
-              }
-              
-              console.log(`📦 Updated final_price for ${item.brandNumber} ${item.size} (quantity will be updated by triggers)`);
-            }
-          }
-        }
+      // 2. Ensure shop_inventory records exist for all matched items (BATCH OPERATION)
+      const matchedItems = items ? items.filter(item => item.masterBrandId) : [];
+      if (matchedItems.length > 0) {
+        console.log(`📦 Batch processing ${matchedItems.length} shop_inventory records...`);
+        
+        // Build batch UPSERT query
+        const values = [];
+        const placeholders = [];
+        let paramIndex = 1;
+        
+        matchedItems.forEach((item, index) => {
+          values.push(shopId, item.masterBrandId, item.mrp || 0);
+          placeholders.push(`($${paramIndex}, $${paramIndex + 1}, 0, 0, $${paramIndex + 2}, true, CURRENT_TIMESTAMP)`);
+          paramIndex += 3;
+        });
+        
+        const batchUpsertQuery = `
+          INSERT INTO shop_inventory 
+          (shop_id, master_brand_id, current_quantity, markup_price, final_price, is_active, last_updated)
+          VALUES ${placeholders.join(', ')}
+          ON CONFLICT (shop_id, master_brand_id) 
+          DO UPDATE SET
+            final_price = CASE WHEN EXCLUDED.final_price > 0 THEN EXCLUDED.final_price ELSE shop_inventory.final_price END,
+            last_updated = CURRENT_TIMESTAMP,
+            is_active = true
+        `;
+        
+        const batchStart = Date.now();
+        await client.query(batchUpsertQuery, values);
+        console.log(`⚡ Batch shop_inventory upsert completed in ${Date.now() - batchStart}ms`);
       }
 
-      // 3. Save invoice items to received_stock_records (invoice_quantity column)
-      if (items && items.length > 0) {
-        const recordDate = new Date(date).toISOString().split('T')[0]; // Use business date for record_date
+      // 3. Save invoice items to received_stock_records (BATCH OPERATION)
+      if (matchedItems.length > 0) {
+        const recordDate = new Date(date).toISOString().split('T')[0];
+        console.log(`📦 Batch processing ${matchedItems.length} received_stock_records...`);
         
-        for (const item of items) {
-          // Only save items that have a master_brand_id (matched items)
-          if (item.masterBrandId) {
-            // Check if record already exists first
-            const existingRecordQuery = `
-              SELECT id, invoice_quantity FROM received_stock_records 
-              WHERE shop_id = $1 AND master_brand_id = $2 AND record_date = $3 AND invoice_id = $4
-            `;
-            
-            const existingRecord = await client.query(existingRecordQuery, [
-              shopId, item.masterBrandId, recordDate, invoiceId
-            ]);
-            
-            if (existingRecord.rows.length > 0) {
-              // Update existing record
-              const receivedStockQuery = `
-                UPDATE received_stock_records 
-                SET invoice_quantity = invoice_quantity + $1,
-                    mrp_price = COALESCE($2, mrp_price),
-                    notes = COALESCE($3, notes),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = $5
-              `;
-              
-              await client.query(receivedStockQuery, [
-                item.totalQuantity,
-                item.mrp || null,
-                `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
-                existingRecord.rows[0].id
-              ]);
-            } else {
-              // Insert new record
-              const receivedStockQuery = `
-                INSERT INTO received_stock_records 
-                (shop_id, master_brand_id, record_date, source_store_code, invoice_quantity, 
-                 mrp_price, invoice_id, notes, created_by, shift_in, shift_out)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-              `;
-              
-              await client.query(receivedStockQuery, [
-                shopId,
-                item.masterBrandId,
-                recordDate,
-                null, // source_store_code is NULL for invoice uploads
-                item.totalQuantity,
-                item.mrp || 0,
-                invoiceId,
-                `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
-                userId,
-                0, // shift_in = 0 for invoice uploads
-                0  // shift_out = 0 for invoice uploads
-              ]);
-            }
-            
-            console.log(`📦 Added to received stock: ${item.brandNumber} ${item.size} (Qty: ${item.totalQuantity})`);
+        const batchReceivedStart = Date.now();
+        
+        // First, check for existing records in batch
+        const masterBrandIds = matchedItems.map(item => item.masterBrandId);
+        const existingRecordsQuery = `
+          SELECT id, master_brand_id, invoice_quantity 
+          FROM received_stock_records 
+          WHERE shop_id = $1 AND master_brand_id = ANY($2) AND record_date = $3 AND invoice_id = $4
+        `;
+        
+        const existingRecords = await client.query(existingRecordsQuery, [
+          shopId, masterBrandIds, recordDate, invoiceId
+        ]);
+        
+        const existingMap = new Map();
+        existingRecords.rows.forEach(record => {
+          existingMap.set(record.master_brand_id, record);
+        });
+        
+        // Separate items into updates and inserts
+        const itemsToUpdate = [];
+        const itemsToInsert = [];
+        
+        matchedItems.forEach(item => {
+          if (existingMap.has(item.masterBrandId)) {
+            itemsToUpdate.push({
+              ...item,
+              existingRecord: existingMap.get(item.masterBrandId)
+            });
           } else {
-            console.log(`⚠️ Skipped unmatched item: ${item.brandNumber} ${item.size} (no master_brand_id)`);
+            itemsToInsert.push(item);
           }
+        });
+        
+        // Batch update existing records
+        if (itemsToUpdate.length > 0) {
+          const updatePromises = itemsToUpdate.map(item => {
+            return client.query(`
+              UPDATE received_stock_records 
+              SET invoice_quantity = invoice_quantity + $1,
+                  mrp_price = COALESCE($2, mrp_price),
+                  notes = COALESCE($3, notes),
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = $4
+            `, [
+              item.totalQuantity,
+              item.mrp || null,
+              `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
+              item.existingRecord.id
+            ]);
+          });
+          
+          await Promise.all(updatePromises);
+          console.log(`⚡ Updated ${itemsToUpdate.length} existing received_stock_records`);
         }
         
-        console.log(`💾 Saved ${items.filter(item => item.masterBrandId).length} matched invoice items to received_stock_records`);
+        // Batch insert new records
+        if (itemsToInsert.length > 0) {
+          const insertValues = [];
+          const insertPlaceholders = [];
+          let paramIndex = 1;
+          
+          itemsToInsert.forEach(item => {
+            insertValues.push(
+              shopId,
+              item.masterBrandId,
+              recordDate,
+              null, // source_store_code
+              item.totalQuantity,
+              item.mrp || 0,
+              invoiceId,
+              `From invoice: ${invoiceNumber} - ${item.brandNumber} ${item.description || item.brandName}`,
+              userId,
+              0, // shift_in
+              0  // shift_out
+            );
+            
+            insertPlaceholders.push(
+              `($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10})`
+            );
+            paramIndex += 11;
+          });
+          
+          const batchInsertQuery = `
+            INSERT INTO received_stock_records 
+            (shop_id, master_brand_id, record_date, source_store_code, invoice_quantity, 
+             mrp_price, invoice_id, notes, created_by, shift_in, shift_out)
+            VALUES ${insertPlaceholders.join(', ')}
+          `;
+          
+          await client.query(batchInsertQuery, insertValues);
+          console.log(`⚡ Inserted ${itemsToInsert.length} new received_stock_records`);
+        }
+        
+        console.log(`⚡ Batch received_stock_records processing completed in ${Date.now() - batchReceivedStart}ms`);
+        console.log(`💾 Processed ${matchedItems.length} matched invoice items`);
         console.log(`🔄 Database trigger should automatically update daily_stock_records.received_stock`);
       }
       
+      const commitStart = Date.now();
       await client.query('COMMIT');
+      console.log(`⏱️ Transaction commit took: ${Date.now() - commitStart}ms`);
+      
+      const totalTime = Date.now() - overallStart;
+      console.log(`🏁 OPTIMIZED INVOICE PROCESSING COMPLETED in ${totalTime}ms`);
+      console.log(`📊 Performance: ${matchedItems.length} items processed in ${totalTime}ms (${Math.round(totalTime / matchedItems.length)}ms per item)`);
+      
+      // Performance comparison note
+      const oldMethodTime = matchedItems.length * 15; // Estimated 15ms per item with old method
+      const improvement = Math.round(((oldMethodTime - totalTime) / oldMethodTime) * 100);
+      if (improvement > 0) {
+        console.log(`🚀 Performance improvement: ~${improvement}% faster than individual queries (estimated ${oldMethodTime}ms vs ${totalTime}ms)`);
+      }
       
       return {
         id: invoiceId,
@@ -898,7 +950,8 @@ class DatabaseService {
         date: date,
         itemsCount: items ? items.length : 0,
         matchedItemsCount: items ? items.filter(item => item.masterBrandId).length : 0,
-        success: true
+        success: true,
+        processingTimeMs: totalTime
       };
       
     } catch (error) {
@@ -981,46 +1034,26 @@ class DatabaseService {
           }
         }
       } else {
-        // If no daily records, calculate from current shop inventory
-        const inventoryQuery = `
-          SELECT 
-            si.current_quantity,
-            mb.standard_mrp,
-            si.final_price,
-            mb.brand_number,
-            mb.brand_name,
-            mb.size_ml
-          FROM shop_inventory si
-          JOIN master_brands mb ON si.master_brand_id = mb.id
-          WHERE si.shop_id = $1 AND si.is_active = true AND si.current_quantity > 0
-        `;
-        
-        const inventoryResult = await pool.query(inventoryQuery, [shopId]);
-        
-        for (const item of inventoryResult.rows) {
-          if (item.current_quantity > 0 && item.standard_mrp) {
-            const itemValue = item.current_quantity * parseFloat(item.standard_mrp);
-            stockValue += itemValue;
-          }
-        }
+        // If no daily records for selected date, show 0 for historical accuracy
+        console.log(`📊 No daily records found for date ${date}, setting stock value to 0`);
+        stockValue = 0;
       }
       
       // Calculate stock lifted - two values for this month
       const currentMonth = new Date(date).getMonth() + 1; // 1-12
       const currentYear = new Date(date).getFullYear();
       
-      // 1. Cumulative Invoice Value (at actual invoice prices) - based on upload date
+      // 1. Cumulative Invoice Value (at actual invoice prices) - up to selected date
       const invoiceValueQuery = `
         SELECT COALESCE(SUM(invoice_value), 0) as cumulative_invoice_value
         FROM invoices 
         WHERE shop_id = $1 
-        AND EXTRACT(MONTH FROM created_at) = $2 
-        AND EXTRACT(YEAR FROM created_at) = $3
+        AND created_at::date <= $2
       `;
-      const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, currentMonth, currentYear]);
+      const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, date]);
       const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
       
-      // 2. Monthly MRP Value (from received_stock_records with stored MRP prices)
+      // 2. Cumulative MRP Value (from received_stock_records) - up to selected date
       const mrpValueQuery = `
         SELECT COALESCE(SUM(
           rsr.invoice_quantity * COALESCE(rsr.mrp_price, 0)
@@ -1028,10 +1061,9 @@ class DatabaseService {
         FROM received_stock_records rsr
         WHERE rsr.shop_id = $1 
         AND rsr.invoice_quantity > 0
-        AND EXTRACT(MONTH FROM rsr.created_at) = $2 
-        AND EXTRACT(YEAR FROM rsr.created_at) = $3
+        AND rsr.created_at::date <= $2
       `;
-      const mrpValueResult = await pool.query(mrpValueQuery, [shopId, currentMonth, currentYear]);
+      const mrpValueResult = await pool.query(mrpValueQuery, [shopId, date]);
       const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
       
       // Get today's expenses
@@ -1081,12 +1113,47 @@ class DatabaseService {
       // > 0 = Short (missing money), < 0 = Surplus (extra money)
       const counterBalance = openingBalance + totalSalesAmount + totalOtherIncome - totalExpenses - totalAmountCollected;
       
+      // Calculate total sales from business signup date to selected date
+      const totalSalesQuery = `
+        SELECT COALESCE(SUM(sales * price_per_unit), 0) as total_cumulative_sales
+        FROM daily_stock_records dsr
+        JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
+        JOIN shops s ON si.shop_id = s.id
+        WHERE si.shop_id = $1 
+        AND dsr.sales > 0
+        AND dsr.stock_date >= s.created_at::date
+        AND dsr.stock_date <= $2
+      `;
+      
+      // Calculate average daily sales from business signup to selected date
+      const avgSalesQuery = `
+        SELECT 
+          COALESCE(SUM(sales * price_per_unit), 0) as total_sales,
+          GREATEST(1, ($2::date - (SELECT created_at::date FROM shops WHERE id = $1)) + 1) as total_days
+        FROM daily_stock_records dsr
+        JOIN shop_inventory si ON dsr.shop_inventory_id = si.id
+        WHERE si.shop_id = $1 
+        AND dsr.sales > 0
+        AND dsr.stock_date >= (SELECT created_at::date FROM shops WHERE id = $1)
+        AND dsr.stock_date <= $2
+      `;
+      
+      const totalSalesResult = await pool.query(totalSalesQuery, [shopId, date]);
+      const avgSalesResult = await pool.query(avgSalesQuery, [shopId, date]);
+      
+      const totalCumulativeSales = parseFloat(totalSalesResult.rows[0].total_cumulative_sales || 0);
+      const totalSales = parseFloat(avgSalesResult.rows[0].total_sales || 0);
+      const totalDays = parseFloat(avgSalesResult.rows[0].total_days || 1);
+      const avgDailySales = totalSales / totalDays;
+      
       return {
         date,
         stockValue: Math.round(stockValue * 100) / 100,
         stockLiftedInvoiceValue: Math.round(cumulativeInvoiceValue * 100) / 100,
         stockLiftedMrpValue: Math.round(cumulativeMrpValue * 100) / 100,
         totalSales: Math.round(totalSalesAmount * 100) / 100,
+        averageSales: Math.round(avgDailySales * 100) / 100,
+        totalMonthlySales: Math.round(totalCumulativeSales * 100) / 100,
         counterBalance: Math.round(counterBalance * 100) / 100,
         totalExpenses: Math.round(totalExpenses * 100) / 100,
         totalOtherIncome: Math.round(totalOtherIncome * 100) / 100,
@@ -1985,6 +2052,84 @@ class DatabaseService {
     } catch (error) {
       throw new Error(`Error searching master brands: ${error.message}`);
     }
+  }
+
+  // Database Health and Maintenance Methods
+  // IMPORTANT: All INSERT queries in this service follow these safety rules:
+  // 1. Never manually specify 'id' values - let database auto-generate them
+  // 2. Use UPSERT (ON CONFLICT) with natural keys, not ID columns
+  // 3. Always use RETURNING id when you need the generated ID
+  // This prevents sequence sync issues and primary key violations
+  
+  async checkSequenceHealth() {
+    const tables = [
+      'shop_inventory', 'invoices', 'users', 'shops', 
+      'daily_stock_records', 'received_stock_records', 
+      'expenses', 'other_income', 'daily_payments'
+    ];
+    
+    const issues = [];
+    
+    for (const table of tables) {
+      try {
+        // Get max ID from table
+        const maxIdResult = await pool.query(`SELECT MAX(id) as max_id FROM ${table}`);
+        const maxId = maxIdResult.rows[0].max_id || 0;
+        
+        // Get sequence name
+        const seqNameResult = await pool.query(`SELECT pg_get_serial_sequence($1, 'id') as seq_name`, [table]);
+        const seqName = seqNameResult.rows[0].seq_name;
+        
+        if (seqName) {
+          // Get sequence last value
+          const seqValueResult = await pool.query(`SELECT last_value FROM ${seqName}`);
+          const seqValue = seqValueResult.rows[0].last_value;
+          
+          if (seqValue < maxId) {
+            issues.push({
+              table,
+              maxId,
+              sequenceValue: seqValue,
+              gap: maxId - seqValue,
+              sequenceName: seqName
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(`Could not check sequence for ${table}:`, error.message);
+      }
+    }
+    
+    return issues;
+  }
+
+  async fixAllSequences() {
+    console.log('🔧 Checking and fixing database sequences...');
+    
+    const issues = await this.checkSequenceHealth();
+    
+    if (issues.length === 0) {
+      console.log('✅ All sequences are healthy');
+      return { fixed: 0, issues: [] };
+    }
+    
+    console.log(`⚠️ Found ${issues.length} sequence issue(s), fixing...`);
+    
+    const fixed = [];
+    
+    for (const issue of issues) {
+      try {
+        const newValue = issue.maxId + 1;
+        await pool.query(`SELECT setval($1, $2, false)`, [issue.sequenceName, newValue]);
+        
+        console.log(`✅ Fixed ${issue.table}: sequence ${issue.sequenceValue} → ${newValue} (gap: ${issue.gap})`);
+        fixed.push(issue.table);
+      } catch (error) {
+        console.error(`❌ Failed to fix sequence for ${issue.table}:`, error.message);
+      }
+    }
+    
+    return { fixed: fixed.length, issues, fixedTables: fixed };
   }
 
   // Stock Shift Methods

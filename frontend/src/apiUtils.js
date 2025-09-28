@@ -130,6 +130,51 @@ export const apiDelete = async (endpoint) => {
 };
 
 /**
+ * Long-running API call for operations that may take more time (like invoice processing)
+ * Uses 60-second timeout instead of the default 10 seconds
+ */
+export const apiPostLongRunning = async (endpoint, data) => {
+  // Setup request timeout - 60 seconds for long operations
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      signal: controller.signal,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(csrfToken && { 'X-CSRF-Token': csrfToken })
+      },
+      body: JSON.stringify(data)
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Handle auth errors
+    if (response.status === 401) {
+      const refreshSuccess = await handleTokenRefresh();
+      if (refreshSuccess) {
+        // Retry once after token refresh
+        return apiPostLongRunning(endpoint, data);
+      }
+    }
+    
+    return response;
+  } catch (networkError) {
+    clearTimeout(timeoutId);
+    
+    if (networkError.name === 'AbortError') {
+      throw new Error('Request timeout - operation took longer than expected. Please try again.');
+    }
+    
+    throw new Error(`Network error: ${networkError.message}`);
+  }
+};
+
+/**
  * File upload with timeout, retry logic, and proper error handling
  * Properly separates auth retries from network retries
  */
