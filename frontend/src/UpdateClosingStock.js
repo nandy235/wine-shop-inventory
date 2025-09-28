@@ -49,42 +49,61 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
    return `${day}-${month}-${year}`;
  };
 
- // Group inventory items by brand name for rowspan display
- const getGroupedInventoryForDisplay = () => {
-   const groups = {};
-   const result = [];
-   
-   // First, group items by brand name
-   filteredData.forEach((item, originalIndex) => {
-     const brandName = item.brandName;
-     if (!groups[brandName]) {
-       groups[brandName] = [];
-     }
-     groups[brandName].push({
-       ...item,
-       originalIndex
-     });
-   });
-   
-   // Convert to display format with rowspan info
-   let serialNumber = 1;
-   Object.keys(groups).forEach(brandName => {
-     const variants = groups[brandName];
-     variants.forEach((variant, variantIndex) => {
-       result.push({
-         ...variant,
-         brandName,
-         isFirstVariant: variantIndex === 0,
-         isLastVariant: variantIndex === variants.length - 1,
-         variantCount: variants.length,
-         serialNumber: variantIndex === 0 ? serialNumber : null
-       });
-     });
-     serialNumber++;
-   });
-   
-   return result;
- };
+// Group inventory items by brand name for rowspan display and add pack type indicators
+const getGroupedInventoryForDisplay = () => {
+  const groups = {};
+  const result = [];
+  
+  // First, identify products that have multiple pack types for the same size code
+  const sizeCodePackTypes = {};
+  filteredData.forEach(item => {
+    const key = `${item.brandName}_${item.size}`;
+    if (!sizeCodePackTypes[key]) {
+      sizeCodePackTypes[key] = new Set();
+    }
+    sizeCodePackTypes[key].add(item.packType);
+  });
+  
+  // Group items by brand name
+  filteredData.forEach((item, originalIndex) => {
+    const brandName = item.brandName;
+    if (!groups[brandName]) {
+      groups[brandName] = [];
+    }
+    
+    // Determine if we need to show pack type indicator
+    const sizeKey = `${item.brandName}_${item.size}`;
+    const hasMultiplePackTypes = sizeCodePackTypes[sizeKey].size > 1;
+    const displaySize = hasMultiplePackTypes 
+      ? `${item.size} (${item.packType})`
+      : item.size;
+    
+    groups[brandName].push({
+      ...item,
+      displaySize,
+      originalIndex
+    });
+  });
+  
+  // Convert to display format with rowspan info
+  let serialNumber = 1;
+  Object.keys(groups).forEach(brandName => {
+    const variants = groups[brandName];
+    variants.forEach((variant, variantIndex) => {
+      result.push({
+        ...variant,
+        brandName,
+        isFirstVariant: variantIndex === 0,
+        isLastVariant: variantIndex === variants.length - 1,
+        variantCount: variants.length,
+        serialNumber: variantIndex === 0 ? serialNumber : null
+      });
+    });
+    serialNumber++;
+  });
+  
+  return result;
+};
 
 
  useEffect(() => {
@@ -127,6 +146,7 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
           brandName: item.name,
           brandNumber: item.brandNumber,
           size: `${item.sizeCode}(${item.size}ml)`,
+          packType: item.packType,
           openingStock: openingStock,
           received: receivedStock,
           total: totalStock,
@@ -356,7 +376,7 @@ return (
                    )}
                    
                    {/* Size - individual for each variant */}
-                   <td>{item.size}</td>
+                   <td>{item.displaySize}</td>
                    
                    {/* Opening Stock - individual for each variant */}
                    <td>{item.openingStock}</td>

@@ -265,6 +265,7 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
             brandNumber: item.brandNumber,
             brandName: item.name,
             sizeCode: item.sizeCode,
+            packType: item.packType,
             openingStock,
             receivedStock,
             totalStock,
@@ -315,6 +316,7 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
               brandNumber: startItem.brandNumber,
               brandName: startItem.name,
               sizeCode: startItem.sizeCode,
+              packType: startItem.packType,
               openingStock,
               receivedStock,
               totalStock,
@@ -588,11 +590,33 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
 
     // Generate table rows
     const generateTableRows = (data) => {
-      return data.map(item => `
+      // First, identify brand+size combinations that have multiple products with different pack types
+      const brandSizeGroups = {};
+      data.forEach(item => {
+        const key = `${item.brandNumber}_${item.sizeCode}`;
+        if (!brandSizeGroups[key]) {
+          brandSizeGroups[key] = new Set();
+        }
+        if (item.packType) {
+          brandSizeGroups[key].add(item.packType);
+        }
+      });
+      
+      return data.map(item => {
+        // Only add pack type indicator if this brand+size combination has multiple different pack types
+        let displaySizeCode = item.sizeCode;
+        const key = `${item.brandNumber}_${item.sizeCode}`;
+        if (brandSizeGroups[key] && brandSizeGroups[key].size > 1 && item.packType) {
+          // Add pack type in brackets: P for Pieces, G for Grams
+          const packTypeIndicator = item.packType === 'P' ? 'P' : 'G';
+          displaySizeCode = `${item.sizeCode}(${packTypeIndicator})`;
+        }
+        
+        return `
         <tr>
           <td class="center">${item.serialNo}</td>
           <td class="brand-name">${item.brandName}(${item.brandNumber})</td>
-          <td class="center">${item.sizeCode}</td>
+          <td class="center">${displaySizeCode}</td>
           <td class="number">${item.openingStock}</td>
           <td class="number">${item.receivedStock}</td>
           <td class="number">${item.totalStock}</td>
@@ -601,7 +625,8 @@ function DownloadSaleSheet({ onNavigate, onLogout }) {
           <td class="number">${Math.round(item.price)}</td>
           <td class="number">${formatCurrency(item.salesValue || 0)}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     };
 
     const generateTotalRow = (data) => {

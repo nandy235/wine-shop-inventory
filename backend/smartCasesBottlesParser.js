@@ -18,7 +18,6 @@ class SmartCasesBottlesParser {
    */
   parseCasesBottles(concatenated, packQty, productType, context = {}) {
     if (this.debugMode) {
-      console.log(`\n🔍 PARSING: "${concatenated}" for ${productType} (pack: ${packQty})`);
     }
 
     const strategies = [
@@ -37,7 +36,6 @@ class SmartCasesBottlesParser {
       if (result) {
         results.push(result);
         if (this.debugMode) {
-          console.log(`  ✅ ${result.strategy}: ${result.cases}c + ${result.bottles}b (confidence: ${result.confidence})`);
         }
       }
     }
@@ -52,8 +50,6 @@ class SmartCasesBottlesParser {
     );
 
     if (this.debugMode) {
-      console.log(`  🎯 SELECTED: ${bestResult.cases} cases + ${bestResult.bottles} bottles`);
-      console.log(`  📝 REASONING: ${bestResult.reasoning}`);
     }
 
     return {
@@ -84,19 +80,39 @@ class SmartCasesBottlesParser {
     }
 
     if (validOptions.length > 1) {
-      // Prefer the option where bottles are closer to 0 or pack quantity
-      const scored = validOptions.map(opt => ({
-        ...opt,
-        score: opt.bottles === 0 ? 10 : (packQty - Math.abs(packQty/2 - opt.bottles))
-      }));
+      // Prefer reasonable bottle remainders and logical case/bottle combinations
+      const scored = validOptions.map(opt => {
+        let score = 0;
+        
+        // Prefer bottles that are either 0 or close to pack quantity (typical remainders)
+        if (opt.bottles === 0) {
+          score += 15; // Full cases are common
+        } else if (opt.bottles >= packQty * 0.8) {
+          score += 10; // Near-full remainder is realistic (like 47/48)
+        } else if (opt.bottles <= packQty * 0.2) {
+          score += 5; // Small remainder is also realistic
+        }
+        
+        // Slightly prefer smaller case counts when bottles are reasonable (but don't penalize large counts)
+        if (opt.cases <= 50 && opt.bottles < packQty) {
+          score += Math.max(0, 10 - Math.floor(opt.cases / 10));
+        }
+        
+        return { ...opt, score };
+      });
       
       const best = scored.reduce((a, b) => a.score > b.score ? a : b);
+      
+      if (this.debugMode) {
+        scored.forEach(opt => {
+        });
+      }
       
       return {
         ...best,
         confidence: 0.8,
         strategy: 'Business Logic',
-        reasoning: `Best business logic fit: bottles=${best.bottles} for pack=${packQty}`
+        reasoning: `Best business logic fit: ${best.cases} cases + ${best.bottles} bottles (score: ${best.score})`
       };
     }
 
@@ -179,14 +195,23 @@ class SmartCasesBottlesParser {
 
     const options = this.generateOptions(concatenated);
     
-    for (const option of options) {
+    // FIXED: Only test options that pass basic business logic (bottles <= packQty)
+    const validOptions = options.filter(opt => opt.bottles <= packQty);
+    
+    let bestMatch = null;
+    let smallestDifference = Infinity;
+    
+    for (const option of validOptions) {
       const calculatedAmount = (option.cases * context.ratePerCase) + 
                               (option.bottles * (context.ratePerCase / packQty));
       
+      const difference = Math.abs(calculatedAmount - context.totalAmount);
       const tolerance = context.totalAmount * 0.05; // 5% tolerance
       
-      if (Math.abs(calculatedAmount - context.totalAmount) <= tolerance) {
-        return {
+      // Find the closest match within tolerance
+      if (difference <= tolerance && difference < smallestDifference) {
+        smallestDifference = difference;
+        bestMatch = {
           ...option,
           confidence: 0.88,
           strategy: 'Amount Validation',
@@ -195,7 +220,7 @@ class SmartCasesBottlesParser {
       }
     }
 
-    return null;
+    return bestMatch;
   }
 
   /**
@@ -285,7 +310,6 @@ class SmartCasesBottlesParser {
    * Fallback parsing when all strategies fail
    */
   fallbackParsing(concatenated, packQty) {
-    console.log(`⚠️  FALLBACK: Using default logic for "${concatenated}"`);
     
     if (concatenated.length <= 2) {
       return {
@@ -311,8 +335,6 @@ class SmartCasesBottlesParser {
 
 // Test with ICDC 3 data
 async function testICDC3Parsing() {
-  console.log('🧪 TESTING ICDC 3 PARSING LOGIC');
-  console.log('='.repeat(50));
 
   const parser = new SmartCasesBottlesParser();
 
@@ -362,11 +384,6 @@ async function testICDC3Parsing() {
       test.context
     );
 
-    console.log(`\n📊 RESULT for "${test.concatenated}":`);
-    console.log(`   Cases: ${result.cases}, Bottles: ${result.bottles}`);
-    console.log(`   Total bottles: ${result.totalBottles}`);
-    console.log(`   Confidence: ${result.confidence}`);
-    console.log(`   Reasoning: ${result.reasoning}`);
   }
 }
 

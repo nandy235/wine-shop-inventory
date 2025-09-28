@@ -19,14 +19,9 @@
 
 .manage-stock-container .main-title {
   font-size: 36px;
-  color: #333;
+  color: #2d3748;
   margin: 0;
   font-weight: 700;
-  padding: 15px 30px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  display: inline-block;
-  background-color: #fafafa;
 }
 
 .manage-stock-container .subtitle {

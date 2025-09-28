@@ -6,7 +6,7 @@
 }
 
 /* Header Styles */
-.sale-sheet-header {
+.download-sale-sheet-container .sale-sheet-header {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   padding: 1rem 2rem;
@@ -49,13 +49,13 @@
 /* Navigation header styles removed - now using shared Navigation component */
 
 /* Main Content */
-.sale-sheet-content {
+.download-sale-sheet-container .sale-sheet-content {
   padding: 2rem;
   max-width: 1400px;
   margin: 0 auto;
 }
 
-.page-title-section {
+.download-sale-sheet-container .page-title-section {
   text-align: center;
   margin-bottom: 2rem;
 }
@@ -76,7 +76,7 @@
 }
 
 /* Controls Section - Professional Date Organization */
-.controls-section {
+.download-sale-sheet-container .controls-section {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -90,7 +90,7 @@
   text-align: center;
 }
 
-.date-controls {
+.download-sale-sheet-container .date-controls {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -98,14 +98,14 @@
   margin-bottom: 1.5rem;
 }
 
-.date-mode-selector {
+.download-sale-sheet-container .date-mode-selector {
   display: flex;
   gap: 2rem;
   justify-content: center;
   align-items: center;
 }
 
-.radio-label {
+.download-sale-sheet-container .radio-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -121,24 +121,24 @@
   justify-content: center;
 }
 
-.radio-label:hover {
+.download-sale-sheet-container .radio-label:hover {
   background: rgba(102, 126, 234, 0.1);
   border-color: rgba(102, 126, 234, 0.2);
 }
 
-.radio-label input[type="radio"] {
+.download-sale-sheet-container .radio-label input[type="radio"] {
   width: 18px;
   height: 18px;
   accent-color: #667eea;
 }
 
-.radio-label input[type="radio"]:checked + span {
+.download-sale-sheet-container .radio-label input[type="radio"]:checked + span {
   color: #667eea;
   font-weight: 700;
 }
 
-.single-date-input,
-.date-range-inputs {
+.download-sale-sheet-container .single-date-input,
+.download-sale-sheet-container .date-range-inputs {
   display: flex;
   gap: 1rem;
   align-items: center;
@@ -150,7 +150,7 @@
   border: 2px solid rgba(102, 126, 234, 0.1);
 }
 
-.single-date-input {
+.download-sale-sheet-container .single-date-input {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -158,14 +158,14 @@
   width: 100%;
 }
 
-.single-date-input .date-label {
+.download-sale-sheet-container .single-date-input .date-label {
   font-weight: 600;
   color: #4a5568;
   font-size: 1rem;
   margin: 0;
 }
 
-.single-date-input .date-input-wrapper {
+.download-sale-sheet-container .single-date-input .date-input-wrapper {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -177,12 +177,12 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.single-date-input .date-input-wrapper:focus-within {
+.download-sale-sheet-container .single-date-input .date-input-wrapper:focus-within {
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.single-date-input .date-input-wrapper input {
+.download-sale-sheet-container .single-date-input .date-input-wrapper input {
   border: none;
   outline: none;
   font-size: 1rem;
@@ -191,14 +191,14 @@
   background: transparent;
 }
 
-.date-range-inputs {
+.download-sale-sheet-container .date-range-inputs {
   display: flex;
   justify-content: center;
   align-items: center;
   width: 100%;
 }
 
-.date-range-inputs .date-inputs-row {
+.download-sale-sheet-container .date-range-inputs .date-inputs-row {
   display: flex;
   gap: 1rem;
   align-items: center;
@@ -206,7 +206,7 @@
   flex-wrap: wrap;
 }
 
-.date-input-group {
+.download-sale-sheet-container .date-input-group {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -214,14 +214,14 @@
   min-width: 200px;
 }
 
-.date-input-group label {
+.download-sale-sheet-container .date-input-group label {
   font-weight: 600;
   color: #4a5568;
   font-size: 0.9rem;
   text-align: center;
 }
 
-.single-date-input label {
+.download-sale-sheet-container .single-date-input label {
   font-weight: 600;
   color: #4a5568;
   font-size: 0.9rem;
@@ -229,8 +229,8 @@
   margin-bottom: 0.5rem;
 }
 
-.single-date-input input,
-.date-input-group input {
+.download-sale-sheet-container .single-date-input input,
+.download-sale-sheet-container .date-input-group input {
   padding: 0.75rem 1rem;
   border: 2px solid #e2e8f0;
   border-radius: 10px;
@@ -241,50 +241,50 @@
   text-align: center;
 }
 
-.single-date-input input:focus,
-.date-input-group input:focus {
+.download-sale-sheet-container .single-date-input input:focus,
+.download-sale-sheet-container .date-input-group input:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   transform: translateY(-1px);
 }
 
-.validation-status {
+.download-sale-sheet-container .validation-status {
   margin-top: 1.5rem;
   display: flex;
   justify-content: center;
   width: 100%;
 }
 
-.status-indicator {
+.download-sale-sheet-container .status-indicator {
   padding: 0.75rem 1rem;
   border-radius: 10px;
   font-weight: 600;
   text-align: center;
 }
 
-.status-indicator.valid {
+.download-sale-sheet-container .status-indicator.valid {
   background: rgba(72, 187, 120, 0.1);
   color: #38a169;
   border: 2px solid rgba(72, 187, 120, 0.3);
 }
 
-.status-indicator.invalid {
+.download-sale-sheet-container .status-indicator.invalid {
   background: rgba(245, 101, 101, 0.1);
   color: #e53e3e;
   border: 2px solid rgba(245, 101, 101, 0.3);
 }
 
 /* Preview Section */
-.preview-section {
+.download-sale-sheet-container .preview-section {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
   margin-bottom: 2rem;
 }
 
-.data-summary,
-.download-options {
+.download-sale-sheet-container .data-summary,
+.download-sale-sheet-container .download-options {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -293,21 +293,21 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.data-summary h3,
-.download-options h3 {
+.download-sale-sheet-container .data-summary h3,
+.download-sale-sheet-container .download-options h3 {
   margin: 0 0 1.5rem 0;
   color: #2d3748;
   font-size: 1.3rem;
   font-weight: 700;
 }
 
-.summary-stats {
+.download-sale-sheet-container .summary-stats {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.stat-item {
+.download-sale-sheet-container .stat-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -317,26 +317,26 @@
   border-left: 4px solid #667eea;
 }
 
-.stat-label {
+.download-sale-sheet-container .stat-label {
   font-weight: 600;
   color: #4a5568;
 }
 
-.stat-value {
+.download-sale-sheet-container .stat-value {
   font-weight: 700;
   color: #2d3748;
   font-size: 1.1rem;
 }
 
 /* Download Options */
-.multiple-formats,
-.single-format {
+.download-sale-sheet-container .multiple-formats,
+.download-sale-sheet-container .single-format {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.download-btn {
+.download-sale-sheet-container .download-btn {
   padding: 1rem 2rem;
   border: none;
   border-radius: 12px;
@@ -348,35 +348,35 @@
   overflow: hidden;
 }
 
-.download-btn:disabled {
+.download-sale-sheet-container .download-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none !important;
 }
 
-.download-btn.primary {
+.download-sale-sheet-container .download-btn.primary {
   background: #4f46e5;
   color: white;
   box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
 }
 
-.download-btn.primary:hover:not(:disabled) {
+.download-sale-sheet-container .download-btn.primary:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
 }
 
-.download-btn.secondary {
+.download-sale-sheet-container .download-btn.secondary {
   background: linear-gradient(135deg, #48bb78, #38a169);
   color: white;
   box-shadow: 0 4px 15px rgba(72, 187, 120, 0.4);
 }
 
-.download-btn.secondary:hover:not(:disabled) {
+.download-sale-sheet-container .download-btn.secondary:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(72, 187, 120, 0.6);
 }
 
-.format-info {
+.download-sale-sheet-container .format-info {
   font-size: 0.9rem;
   color: #718096;
   margin: 0;
@@ -384,13 +384,13 @@
 }
 
 /* Info Section */
-.info-section {
+.download-sale-sheet-container .info-section {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
 }
 
-.info-card {
+.download-sale-sheet-container .info-card {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -399,31 +399,31 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.info-card h4 {
+.download-sale-sheet-container .info-card h4 {
   margin: 0 0 1rem 0;
   color: #2d3748;
   font-size: 1.2rem;
   font-weight: 700;
 }
 
-.info-card ul {
+.download-sale-sheet-container .info-card ul {
   margin: 0;
   padding-left: 1.5rem;
   color: #4a5568;
   line-height: 1.6;
 }
 
-.info-card li {
+.download-sale-sheet-container .info-card li {
   margin-bottom: 0.5rem;
 }
 
-.info-card strong {
+.download-sale-sheet-container .info-card strong {
   color: #2d3748;
   font-weight: 600;
 }
 
 /* Loading State */
-.loading-container {
+.download-sale-sheet-container .loading-container {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -546,11 +546,11 @@
 }
 
 /* Animation for generating state */
-.download-btn:disabled {
+.download-sale-sheet-container .download-btn:disabled {
   position: relative;
 }
 
-.download-btn:disabled::after {
+.download-sale-sheet-container .download-btn:disabled::after {
   content: '';
   position: absolute;
   top: 50%;

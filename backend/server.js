@@ -1987,15 +1987,14 @@ app.get('/api/shop/products', requireAuth, async (req, res) => {
       shiftOutReceivedToday: receivedQuantitiesMap.get(product.master_brand_id)?.shiftOut || 0
     }));
     
-    // Aggregate products by brandNumber + sizeCode (combine pack types)
-    const aggregatedProducts = aggregateProductsByBrandAndSize(productsWithReceived);
-    console.log(`📊 Aggregated to ${aggregatedProducts.length} display products with received quantities`);
+    // Don't aggregate - display each pack type separately
+    console.log(`📊 Returning ${productsWithReceived.length} products without aggregation`);
     
     // Apply search filter if provided
-    let filteredProducts = aggregatedProducts;
+    let filteredProducts = productsWithReceived;
     if (search && search.trim().length > 0) {
       const searchTerm = search.trim().toLowerCase();
-      filteredProducts = aggregatedProducts.filter(product => {
+      filteredProducts = productsWithReceived.filter(product => {
         const brandName = (product.brand_name || product.name || '').toLowerCase();
         const brandNumber = (product.brand_number || product.brandNumber || '').toString();
         return brandName.includes(searchTerm) || brandNumber.includes(searchTerm);

@@ -514,7 +514,7 @@ function IncomeExpensesReport({ onNavigate, onLogout }) {
           <p className="app-subtitle">Inventory Management</p>
         </div>
         <nav className="navigation">
-          <button className="nav-btn" onClick={() => onNavigate('dashboard')}>Dashboard</button>
+          <button className="nav-btn" onClick={() => onNavigate('home')}>Home</button>
           <button className="nav-btn" onClick={() => onNavigate('stockOnboarding')}>Stock Onboarding</button>
           <button className="nav-btn" onClick={() => onNavigate('manageStock')}>Manage Stock</button>
           <button className="nav-btn" onClick={() => onNavigate('sheets')}>Sheets</button>

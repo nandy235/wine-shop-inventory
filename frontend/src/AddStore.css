@@ -42,26 +42,26 @@
   margin: 0 auto;
 }
 
-.page-title-section {
+.add-store-container .page-title-section {
   text-align: center;
   margin-bottom: 2rem;
 }
 
-.main-title {
+.add-store-container .main-title {
   font-size: 2.5rem;
   font-weight: 700;
   color: #333;
   margin: 0 0 0.5rem 0;
 }
 
-.subtitle {
+.add-store-container .subtitle {
   font-size: 1.1rem;
   color: #666;
   margin: 0;
   font-weight: 400;
 }
 
-.error-message, .success-message {
+.add-store-container .error-message, .add-store-container .success-message {
   padding: 1rem;
   border-radius: 8px;
   margin-bottom: 1.5rem;
@@ -69,13 +69,13 @@
   text-align: center;
 }
 
-.error-message {
+.add-store-container .error-message {
   background: #fee;
   color: #c53030;
   border: 1px solid #feb2b2;
 }
 
-.success-message {
+.add-store-container .success-message {
   background: #f0fff4;
   color: #38a169;
   border: 1px solid #9ae6b4;
@@ -96,28 +96,28 @@
   gap: 1.5rem;
 }
 
-.form-row {
+.add-store-container .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
 }
 
-.form-group {
+.add-store-container .form-group {
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
-.form-group.full-width {
+.add-store-container .form-group.full-width {
   grid-column: 1 / -1;
 }
 
-.form-group.checkbox-group {
+.add-store-container .form-group.checkbox-group {
   justify-content: center;
   align-items: center;
 }
 
-.form-group label {
+.add-store-container .form-group label {
   font-weight: 600;
   color: #333;
   margin-bottom: 0.5rem;
@@ -127,7 +127,7 @@
   width: 100%;
 }
 
-.checkbox-label {
+.add-store-container .checkbox-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -136,9 +136,9 @@
   margin-bottom: 0 !important;
 }
 
-.form-group input,
-.form-group select,
-.form-group textarea {
+.add-store-container .form-group input,
+.add-store-container .form-group select,
+.add-store-container .form-group textarea {
   padding: 0.8rem;
   border: 2px solid #e2e8f0;
   border-radius: 8px;
@@ -150,21 +150,21 @@
   text-align: center;
 }
 
-.form-group input::placeholder {
+.add-store-container .form-group input::placeholder {
   color: #a0aec0;
   font-style: italic;
   opacity: 0.8;
 }
 
-.form-group input:focus,
-.form-group select:focus,
-.form-group textarea:focus {
+.add-store-container .form-group input:focus,
+.add-store-container .form-group select:focus,
+.add-store-container .form-group textarea:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.form-group input[type="checkbox"] {
+.add-store-container .form-group input[type="checkbox"] {
   width: auto;
   margin: 0;
 }
@@ -186,7 +186,7 @@
   margin-top: 1rem;
 }
 
-.btn-primary, .btn-secondary {
+.add-store-container .btn-primary, .add-store-container .btn-secondary {
   padding: 0.8rem 2rem;
   border: none;
   border-radius: 8px;
@@ -196,30 +196,30 @@
   font-size: 1rem;
 }
 
-.btn-primary {
+.add-store-container .btn-primary {
   background: #4f46e5;
   color: white;
   box-shadow: 0 2px 8px rgba(79, 70, 229, 0.2);
 }
 
-.btn-primary:hover:not(:disabled) {
+.add-store-container .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
 }
 
-.btn-primary:disabled {
+.add-store-container .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
 }
 
-.btn-secondary {
+.add-store-container .btn-secondary {
   background: #f7fafc;
   color: #4a5568;
   border: 2px solid #e2e8f0;
 }
 
-.btn-secondary:hover:not(:disabled) {
+.add-store-container .btn-secondary:hover:not(:disabled) {
   background: #edf2f7;
   border-color: #cbd5e0;
 }
@@ -232,7 +232,7 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
-.section-title {
+.add-store-container .section-title {
   font-size: 1.5rem;
   font-weight: 700;
   color: #333;
@@ -240,7 +240,7 @@
   text-align: center;
 }
 
-.loading-message, .empty-message {
+.add-store-container .loading-message, .add-store-container .empty-message {
   text-align: center;
   padding: 2rem;
   color: #666;
@@ -415,16 +415,16 @@
     padding: 1rem;
   }
 
-  .main-title {
+  .add-store-container .main-title {
     font-size: 2rem;
   }
 
-  .form-row {
+  .add-store-container .form-row {
     grid-template-columns: 1fr;
     gap: 1rem;
   }
 
-  .form-actions {
+  .add-store-container .form-actions {
     flex-direction: column;
   }
 
@@ -449,7 +449,7 @@
 }
 
 @media (max-width: 480px) {
-  .main-title {
+  .add-store-container .main-title {
     font-size: 1.8rem;
   }
 

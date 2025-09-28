@@ -513,11 +513,6 @@ function IndentEstimate({ onNavigate, onBack, onLogout }) {
 
       <main className="indent-estimate-content">
         <div className="indent-estimate-title-section">
-          <div className="back-button-container">
-            <button className="back-button" onClick={onBack}>
-              ← Back to Manage Stock
-            </button>
-          </div>
           <h2 className="indent-estimate-main-title">Indent Estimate</h2>
         </div>
 

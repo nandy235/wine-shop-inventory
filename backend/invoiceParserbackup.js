@@ -22,12 +22,15 @@ class HybridInvoiceParser {
   }
 
   async parseInvoiceWithValidation(pdfBuffer, masterBrands = []) {
+    console.log('\n🚀 COMPREHENSIVE PARSER STARTED');
+    console.log('📚 Master brands loaded:', masterBrands.length);
     
     try {
       // Extract text
       const pdfData = await pdfParse(pdfBuffer);
       const text = pdfData.text;
       
+      console.log('✅ Text extracted:', text.length, 'characters');
       
       // Extract basic info
       const invoiceNumber = this.extractInvoiceNumber(text);
@@ -36,11 +39,14 @@ class HybridInvoiceParser {
       
       // Extract summary totals for smart parsing validation
       const summaryTotals = this.extractSummaryTotals(text);
+      console.log('📊 Summary totals:', summaryTotals);
       
+      console.log('📄 Invoice:', invoiceNumber, ', Date:', date);
       
       // Extract products using comprehensive method with summary totals
       const products = this.extractProductsComprehensive(text, summaryTotals);
       
+      console.log('📦 Products found:', products.length);
       
       if (products.length === 0) {
         return {
@@ -61,6 +67,7 @@ class HybridInvoiceParser {
         // Extract numeric size from "650ml" -> 650
         const numericSize = parseInt(normalizedSize.replace('ml', ''));
         
+        console.log(`🔍 Attempting to match: ${product.brandNumber} ${numericSize}ml ${product.packType} ${product.packQty}`);
         
         const matchingBrand = masterBrands.find(brand => 
           brand.brandNumber === product.brandNumber && 
@@ -87,6 +94,7 @@ class HybridInvoiceParser {
           };
           
           validatedItems.push(enrichedItem);
+          console.log('✅ Matched:', product.brandNumber, numericSize + 'ml', product.packType, product.packQty, '→', matchingBrand.name);
         } else {
           const productKey = `${product.brandNumber} ${numericSize}ml ${product.packType} ${product.packQty}`;
           const skippedItem = {
@@ -97,15 +105,20 @@ class HybridInvoiceParser {
           
           skippedItems.push(skippedItem);
           warnings.push('Skipped: ' + productKey + ' - not in master brands');
+          console.log('⭐️ Skipped:', product.brandNumber, numericSize + 'ml', product.packType, product.packQty, '- not in master brands');
           
           // Debug: Show what master brands exist for this brand number
           const availableVariants = masterBrands.filter(brand => brand.brandNumber === product.brandNumber);
           if (availableVariants.length > 0) {
+            console.log(`   Available variants for ${product.brandNumber}:`);
             availableVariants.slice(0, 3).forEach(variant => {
+              console.log(`   - ${variant.size}ml ${variant.packType} ${variant.packQuantity} (${variant.name})`);
             });
             if (availableVariants.length > 3) {
+              console.log(`   ... and ${availableVariants.length - 3} more variants`);
             }
           } else {
+            console.log(`   No variants found for brand ${product.brandNumber} in master brands`);
           }
         }
       });
@@ -152,6 +165,10 @@ class HybridInvoiceParser {
       }
       financialData.totalAmount = Math.round(((financialData.invoiceValue || 0) + (financialData.mrpRoundingOff || 0) + (financialData.retailExciseTurnoverTax || 0) + (financialData.specialExciseCess || 0) + (financialData.tcs || 0)) * 100) / 100;
 
+      console.log('\n📊 Validation Results:');
+      console.log('   ✅ Validated:', validatedItems.length);
+      console.log('   ⭐️ Skipped:', skippedItems.length);
+      console.log('   📈 Match Rate:', (validatedItems.length / Math.max(products.length, 1) * 100).toFixed(1) + '%');
       
       return {
         success: true,
@@ -190,6 +207,7 @@ class HybridInvoiceParser {
     const lines = text.split('\n');
     for (const line of lines) {
       if (line.includes('Total (Cases/Btls):')) {
+        console.log('📊 Found summary line:', line);
         const cleanLine = line.replace('Total (Cases/Btls):', '').trim();
         const numbers = cleanLine.match(/\d+/g);
         if (numbers && numbers.length === 4) {
@@ -198,6 +216,7 @@ class HybridInvoiceParser {
             beer: { cases: parseInt(numbers[1]), bottles: 0 },
             total: { cases: parseInt(numbers[2]), bottles: parseInt(numbers[3]) }
           };
+          console.log('📊 Parsed summary totals:', result);
           return result;
         }
       }
@@ -239,27 +258,33 @@ class HybridInvoiceParser {
   }
 
   extractProductsComprehensive(text, summaryTotals = null) {
+    console.log('\n📦 === COMPREHENSIVE PRODUCT EXTRACTION ===');
     
     const products = [];
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
     const processedBrands = new Set();
     
     // Format 1: Table-based extraction (cleanest format)
+    console.log('🔍 Format 1: Table-based extraction...');
     this.extractTableFormat(lines, products, processedBrands, summaryTotals);
     
     // Format 2: Compact single-line format 
+    console.log('🔍 Format 2: Compact single-line format...');
     this.extractCompactFormat(lines, products, processedBrands, summaryTotals);
     
     // Format 3: Vertical multi-line format (with parentheses)
+    console.log('🔍 Format 3: Vertical multi-line format...');
     this.extractVerticalFormat(lines, products, processedBrands, summaryTotals);
     
     // Format 4: Standalone brand format (no parentheses)
+    console.log('🔍 Format 4: Standalone brand format...');
     this.extractStandaloneFormat(lines, products, processedBrands, summaryTotals);
     
 
     // Sort products by serial number to maintain invoice order
     products.sort((a, b) => (a.serial || 999) - (b.serial || 999));
     
+    console.log('📦 Total products extracted:', products.length);
     return products;
   }
 
@@ -306,6 +331,7 @@ class HybridInvoiceParser {
             
             products.push(product);
             processedBrands.add(brandKey);
+            console.log('✅ Table: ' + serial + ' - ' + brandNumber + ' ' + sizeML + 'ml - Qty: ' + product.totalQuantity);
             break;
           }
         }
@@ -335,6 +361,7 @@ class HybridInvoiceParser {
           const casesBottles = match[8];     // 1000 (concatenated cases+bottles)
           
           // ENHANCED: Use smart parser for cases/bottles resolution
+          console.log(`🧠 Smart parsing: "${casesBottles}" for ${productType} (pack: ${packQty})`);
           
           const context = this.buildParsingContext(line, lines, index, summaryTotals, products);
           const smartResult = this.smartParser.parseCasesBottles(
@@ -346,6 +373,9 @@ class HybridInvoiceParser {
           
           const cases = smartResult.cases;
           const bottles = smartResult.bottles;
+          
+          console.log(`✅ Smart parsed ${brandNumber}: "${casesBottles}" → Cases: ${cases}, Bottles: ${bottles}`);
+          console.log(`   Confidence: ${smartResult.confidence}, Reasoning: ${smartResult.reasoning}`);
           
           const brandKey = brandNumber + '_' + sizeML + 'ml';
           
@@ -369,6 +399,7 @@ class HybridInvoiceParser {
             
             products.push(product);
             processedBrands.add(brandKey);
+            console.log('✅ Compact: ' + serial + ' - ' + brandNumber + ' ' + sizeML + 'ml - Cases: ' + cases + ', Bottles: ' + bottles + ', Total: ' + product.totalQuantity);
             break;
           }
         }
@@ -479,6 +510,7 @@ class HybridInvoiceParser {
             
             products.push(product);
             processedBrands.add(brandKey);
+            console.log('✅ Vertical: ' + serial + ' - ' + brandNumber + ' ' + sizeML + 'ml - "' + productName.trim() + '" - Qty: ' + product.totalQuantity);
           }
         }
       }
@@ -530,7 +562,11 @@ class HybridInvoiceParser {
             sizeML = detailMatch[4];
             const casesBottles = detailMatch[5]; // Concatenated cases+bottles
             
+            console.log(`🔍 Debug standalone ${brandNumber}: raw="${casesBottles}" length=${casesBottles.length}`);
+            
             // ENHANCED: Use smart parser for vertical format cases/bottles resolution
+            console.log(`🧠 Smart parsing (vertical): "${casesBottles}" for ${productType} (pack: ${packQty})`);
+            
             const context = this.buildParsingContext(line, lines, j, summaryTotals, products);
             const smartResult = this.smartParser.parseCasesBottles(
               casesBottles,
@@ -538,6 +574,9 @@ class HybridInvoiceParser {
               productType,
               context
             );
+            
+            console.log(`✅ Smart parsed vertical ${brandNumber}: "${casesBottles}" → Cases: ${smartResult.cases}, Bottles: ${smartResult.bottles}`);
+            console.log(`   Confidence: ${smartResult.confidence}, Reasoning: ${smartResult.reasoning}`);
             
             cases = smartResult.cases.toString();
             bottles = smartResult.bottles.toString();
@@ -565,6 +604,7 @@ class HybridInvoiceParser {
             
             products.push(product);
             processedBrands.add(brandKey);
+            console.log('✅ Standalone: ' + serial + ' - ' + brandNumber + ' ' + sizeML + 'ml - "' + productName.trim() + '" - Qty: ' + product.totalQuantity);
           }
         }
       }
@@ -588,6 +628,7 @@ class HybridInvoiceParser {
   }
 
   extractFinancialValues(text) {
+    console.log('\n💰 === COMPREHENSIVE FINANCIAL VALUES EXTRACTION ===');
     
     const result = { 
       invoiceValue: 0, 
@@ -601,6 +642,14 @@ class HybridInvoiceParser {
     const lines = text.split('\n').map(line => line.trim());
     
     // COMPREHENSIVE EXTRACTION - Handle all PDF formats
+    console.log('🔍 Starting multi-format extraction...');
+    console.log('📋 Will try 5 different pattern detection methods:');
+    console.log('   1️⃣ Same-line patterns (e.g., "Retail Excise Turnover Tax:1,30,944.00")');
+    console.log('   2️⃣ Block format patterns (labels first, then amounts in block)');
+    console.log('   3️⃣ Split-line patterns (label on one line, value on next)');
+    console.log('   4️⃣ Interleaved patterns (labels and amounts mixed together)');
+    console.log('   5️⃣ Standalone amounts format (regex-based extraction)');
+    console.log('');
     
     // Method 1: Same-line patterns
     this.extractSameLineValues(lines, result);
@@ -621,6 +670,14 @@ class HybridInvoiceParser {
     result.totalAmount = result.invoiceValue + result.mrpRoundingOff + 
                         result.retailExciseTurnoverTax + result.specialExciseCess + result.tcs;
     
+    console.log('\n💰 Final Financial Summary:');
+    console.log(`  Invoice Value: ${result.invoiceValue}`);
+    console.log(`  MRP Rounding Off: ${result.mrpRoundingOff}`);
+    console.log(`  Net Invoice Value: ${result.netInvoiceValue}`);
+    console.log(`  Retail Excise Turnover Tax: ${result.retailExciseTurnoverTax}`);
+    console.log(`  Special Excise Cess: ${result.specialExciseCess}`);
+    console.log(`  TCS: ${result.tcs}`);
+    console.log(`  Total Amount: ${result.totalAmount}`);
     
     return result;
   }
@@ -628,6 +685,10 @@ class HybridInvoiceParser {
 
   // Method 1: Extract values on same line as labels
   extractSameLineValues(lines, result) {
+    console.log('1️⃣ METHOD 1: SAME-LINE PATTERN DETECTION');
+    console.log('   Looking for: "Label: Amount" on same line');
+    console.log('   Examples: "Special Excise Cess:1,91,760.00", "TCS:15,162.00"');
+    
     let patternsFound = [];
     
     for (let i = 0; i < lines.length; i++) {
@@ -635,35 +696,62 @@ class HybridInvoiceParser {
       
       // Pattern: "Retail Shop Excise Turnover Tax:1,30,944.00" or "Bar Excise Turnover Tax:59,854.00"
       if ((line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && result.retailExciseTurnoverTax === 0) {
+        console.log(`🔍 PATTERN DETECTED: Excise Turnover Tax (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /(Retail|Bar).*?Excise.*?Turnover.*?Tax:\\s*([\\d,]+\\.?\\d*)/i`);
+        
         const match = line.match(/(Retail|Bar).*?Excise.*?Turnover.*?Tax:\s*([\d,]+\.?\d*)/i);
         if (match) {
           result.retailExciseTurnoverTax = this.parseAmount(match[2]);
+          console.log(`   ✅ EXTRACTED: "${match[2]}" → ${result.retailExciseTurnoverTax}`);
           patternsFound.push('Excise Turnover Tax');
+        } else {
+          console.log(`   ❌ REGEX FAILED: No match found`);
         }
       }
       
       // Pattern: "Special Excise Cess:1,91,760.00"
       if (line.includes('Special Excise Cess:') && result.specialExciseCess === 0) {
+        console.log(`🔍 PATTERN DETECTED: Special Excise Cess (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /Special\\s+Excise\\s+Cess:\\s*([\\d,]+\\.?\\d*)/i`);
+        
         const match = line.match(/Special\s+Excise\s+Cess:\s*([\d,]+\.?\d*)/i);
         if (match) {
           result.specialExciseCess = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.specialExciseCess}`);
           patternsFound.push('Special Excise Cess');
+        } else {
+          console.log(`   ❌ REGEX FAILED: No match found`);
         }
       }
       
       // Pattern: "TCS:15,162.00"
       if (line.includes('TCS:') && result.tcs === 0) {
+        console.log(`🔍 PATTERN DETECTED: TCS (same-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Regex: /TCS:\\s*([\\d,]+\\.?\\d*)/i`);
+        
         const match = line.match(/TCS:\s*([\d,]+\.?\d*)/i);
         if (match) {
           result.tcs = this.parseAmount(match[1]);
+          console.log(`   ✅ EXTRACTED: "${match[1]}" → ${result.tcs}`);
           patternsFound.push('TCS');
+        } else {
+          console.log(`   ❌ REGEX FAILED: No match found`);
         }
       }
     }
+    
+    console.log(`📊 METHOD 1 SUMMARY: Found ${patternsFound.length} same-line patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
   }
 
   // Method 2: Extract from block format (labels first, amounts in separate block)
   extractBlockFormatValues(lines, result) {
+    console.log('2️⃣ METHOD 2: BLOCK FORMAT PATTERN DETECTION');
+    console.log('   Looking for: Fragmented labels followed by amounts in separate block');
+    console.log('   Example: "Invoice" "Value:" "MRP" "Rounding" "Off:" then "13,09,438.00" "75,794.40" "13,85,232.40"');
     
     // Look for fragmented financial labels pattern
     let financialBlockStart = -1;
@@ -681,6 +769,15 @@ class HybridInvoiceParser {
           line2.includes('Value:') &&
           (line3.includes('MRP') || line3.includes('Rounding'))) {
         
+        console.log(`🔍 PATTERN DETECTED: Fragmented financial labels (block format)`);
+        console.log(`   Starting at line ${i + 1}`);
+        console.log(`   Label sequence:`);
+        console.log(`     Line ${i + 1}: "${line1}"`);
+        console.log(`     Line ${i + 2}: "${line2}"`);
+        console.log(`     Line ${i + 3}: "${line3}"`);
+        console.log(`     Line ${i + 4}: "${line4}"`);
+        console.log(`     Line ${i + 5}: "${line5}"`);
+        console.log(`   Detection logic: line1.includes('Invoice') && line2.includes('Value:') && line3.includes('MRP')`);
         
         financialBlockStart = i;
         break;
@@ -688,54 +785,70 @@ class HybridInvoiceParser {
     }
     
     if (financialBlockStart !== -1) {
+      console.log(`   ✅ FRAGMENTED LABELS FOUND! Now looking for amounts...`);
       
       // Look for 3 consecutive amounts after the fragmented labels
       const amountPattern = /^[\d,]+\.?\d{0,2}$/;
+      console.log(`   Amount regex pattern: /^[\\d,]+\\.?\\d{0,2}$/`);
       
       const amounts = [];
       
       // Start looking for amounts after the label block (usually 6-8 lines after start)
+      console.log(`   Searching for amounts from line ${financialBlockStart + 7} to ${financialBlockStart + 15}...`);
       
       for (let i = financialBlockStart + 6; i < Math.min(financialBlockStart + 15, lines.length); i++) {
         const line = lines[i];
+        console.log(`     Line ${i + 1}: "${line}" → Regex match: ${!!line.match(amountPattern)}`);
         
         if (line.match(amountPattern)) {
           amounts.push({ line: line, value: this.parseAmount(line), index: i });
+          console.log(`     💰 AMOUNT FOUND: "${line}" → ${this.parseAmount(line)}`);
           
           // Stop after finding 3 consecutive amounts
           if (amounts.length >= 3) {
+            console.log(`     ✅ Found 3 amounts, stopping search`);
             break;
           }
         } else if (amounts.length > 0) {
+          console.log(`     ⏹️  Hit non-amount line after finding ${amounts.length} amounts, stopping`);
           break;
         }
       }
       
       // Map the first 3 amounts to Invoice Value, MRP Rounding Off, Net Invoice Value
       if (amounts.length >= 3) {
+        console.log(`   📊 MAPPING ${amounts.length} AMOUNTS TO FIELDS:`);
         
         if (result.invoiceValue === 0) {
           result.invoiceValue = amounts[0].value;
+          console.log(`     ✅ Invoice Value = amounts[0] = ${result.invoiceValue}`);
         }
         
         if (result.mrpRoundingOff === 0) {
           result.mrpRoundingOff = amounts[1].value;
+          console.log(`     ✅ MRP Rounding Off = amounts[1] = ${result.mrpRoundingOff}`);
         }
         
         if (result.netInvoiceValue === 0) {
           result.netInvoiceValue = amounts[2].value;
+          console.log(`     ✅ Net Invoice Value = amounts[2] = ${result.netInvoiceValue}`);
         }
       } else {
+        console.log(`   ❌ INSUFFICIENT AMOUNTS: Found only ${amounts.length} amounts, need 3`);
       }
     } else {
+      console.log(`   ❌ NO FRAGMENTED LABELS FOUND, trying fallback...`);
       // Fallback to original logic for other PDF formats
       this.extractBlockFormatFallback(lines, result);
     }
     
+    console.log(`📊 METHOD 2 SUMMARY: Block format processing complete`);
+    console.log('');
   }
 
   // Fallback method for other PDF formats
   extractBlockFormatFallback(lines, result) {
+    console.log('📋 Method 2b: Trying fallback block format detection...');
     
     let invoiceValueIndex = -1;
     let mrpRoundingOffIndex = -1;
@@ -756,6 +869,7 @@ class HybridInvoiceParser {
     }
     
     if (invoiceValueIndex !== -1 || mrpRoundingOffIndex !== -1 || netInvoiceValueIndex !== -1) {
+      console.log(`📍 Fallback block format labels found - Invoice: ${invoiceValueIndex}, MRP: ${mrpRoundingOffIndex}, Net: ${netInvoiceValueIndex}`);
       
       const lastLabelIndex = Math.max(invoiceValueIndex, mrpRoundingOffIndex, netInvoiceValueIndex);
       const amountPattern = /^[\d,]+\.?\d{0,2}$/;
@@ -765,6 +879,7 @@ class HybridInvoiceParser {
         const line = lines[i];
         if (line.match(amountPattern)) {
           amounts.push(this.parseAmount(line));
+          console.log(`💰 Fallback block amount found: ${line} → ${this.parseAmount(line)}`);
         } else if (amounts.length > 0) {
           break;
         }
@@ -774,20 +889,26 @@ class HybridInvoiceParser {
       
       if (invoiceValueIndex !== -1 && result.invoiceValue === 0 && amountIndex < amounts.length) {
         result.invoiceValue = amounts[amountIndex++];
+        console.log(`✅ Invoice Value (fallback): ${result.invoiceValue}`);
       }
       
       if (mrpRoundingOffIndex !== -1 && result.mrpRoundingOff === 0 && amountIndex < amounts.length) {
         result.mrpRoundingOff = amounts[amountIndex++];
+        console.log(`✅ MRP Rounding Off (fallback): ${result.mrpRoundingOff}`);
       }
       
       if (netInvoiceValueIndex !== -1 && result.netInvoiceValue === 0 && amountIndex < amounts.length) {
         result.netInvoiceValue = amounts[amountIndex++];
+        console.log(`✅ Net Invoice Value (fallback): ${result.netInvoiceValue}`);
       }
     }
   }
 
   // Method 3: Extract from split-line format (label on one line, value on next)
   extractSplitLineValues(lines, result) {
+    console.log('3️⃣ METHOD 3: SPLIT-LINE PATTERN DETECTION');
+    console.log('   Looking for: Label on one line, amount on next line');
+    console.log('   Example: "Retail Shop Excise Turnover Tax:" followed by "1,30,944.00"');
     
     let patternsFound = [];
     
@@ -799,20 +920,32 @@ class HybridInvoiceParser {
       if ((line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && line.includes('Tax:') && 
           !line.match(/[\d,]+/) && result.retailExciseTurnoverTax === 0) {
         
+        console.log(`🔍 PATTERN DETECTED: Excise Turnover Tax (split-line)`);
+        console.log(`   Line ${i + 1}: "${line}"`);
+        console.log(`   Line ${i + 2}: "${nextLine}"`);
+        console.log(`   Detection logic: (line.includes('Retail') || line.includes('Bar')) && line.includes('Excise') && line.includes('Turnover') && !line.match(/[\\d,]+/)`);
+        console.log(`   Next line regex: /^([\\d,]+\\.?\\d*)$/`);
         
         const nextLineMatch = nextLine.match(/^([\d,]+\.?\d*)$/);
         if (nextLineMatch) {
           result.retailExciseTurnoverTax = this.parseAmount(nextLineMatch[1]);
+          console.log(`   ✅ EXTRACTED: "${nextLineMatch[1]}" → ${result.retailExciseTurnoverTax}`);
           patternsFound.push('Excise Turnover Tax');
         } else {
+          console.log(`   ❌ REGEX FAILED: Next line "${nextLine}" doesn't match amount pattern`);
         }
       }
     }
     
+    console.log(`📊 METHOD 3 SUMMARY: Found ${patternsFound.length} split-line patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
   }
 
   // Method 4: Extract from interleaved format (labels and amounts mixed together)
   extractInterleavedValues(lines, result) {
+    console.log('4️⃣ METHOD 4: INTERLEAVED PATTERN DETECTION');
+    console.log('   Looking for: Labels and amounts mixed together in sequence');
+    console.log('   Example: "Invoice" "Value:" "24,13,858.92" "MRP" "Rounding" "Off:" "1,52,598.60" "Net" "Invoice" "Value:" "25,66,457.52"');
     
     let patternsFound = [];
     
@@ -828,8 +961,14 @@ class HybridInvoiceParser {
           line3.match(/^[\d,]+\.?\d{0,2}$/) &&
           result.invoiceValue === 0) {
         
+        console.log(`🔍 PATTERN DETECTED: Invoice Value (interleaved)`);
+        console.log(`   Line ${i + 1}: "${line1}"`);
+        console.log(`   Line ${i + 2}: "${line2}"`);
+        console.log(`   Line ${i + 3}: "${line3}"`);
+        console.log(`   Detection logic: line1.includes('Invoice') && line2.includes('Value:') && line3.match(/^[\\d,]+\\.?\\d{0,2}$/)`);
         
         result.invoiceValue = this.parseAmount(line3);
+        console.log(`   ✅ EXTRACTED: "${line3}" → ${result.invoiceValue}`);
         patternsFound.push('Invoice Value');
       }
     }
@@ -848,8 +987,14 @@ class HybridInvoiceParser {
           line4.match(/^[\d,]+\.?\d{0,2}$/) &&
           result.mrpRoundingOff === 0) {
         
+        console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (interleaved - direct)`);
+        console.log(`   Line ${i + 1}: "${line1}"`);
+        console.log(`   Line ${i + 2}: "${line2}"`);
+        console.log(`   Line ${i + 3}: "${line3}"`);
+        console.log(`   Line ${i + 4}: "${line4}"`);
         
         result.mrpRoundingOff = this.parseAmount(line4);
+        console.log(`   ✅ EXTRACTED: "${line4}" → ${result.mrpRoundingOff}`);
         patternsFound.push('MRP Rounding Off');
       }
       
@@ -868,8 +1013,12 @@ class HybridInvoiceParser {
             if (j + 1 < lines.length && lines[j + 1].match(/^[\d,]+\.?\d{0,2}$/)) {
               const mrpAmount = lines[j + 1];
               
+              console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (interleaved - before Net)`);
+              console.log(`   MRP sequence: "${line1}" "${line2}" "${line3}" "${line4}"`);
+              console.log(`   Amount found at line ${j + 2}: "${mrpAmount}"`);
               
               result.mrpRoundingOff = this.parseAmount(mrpAmount);
+              console.log(`   ✅ EXTRACTED: "${mrpAmount}" → ${result.mrpRoundingOff}`);
               patternsFound.push('MRP Rounding Off');
               break;
             }
@@ -898,8 +1047,13 @@ class HybridInvoiceParser {
           if (amountLine.match(/^[\d,]+\.?\d{0,2}$/)) {
             amountsFound++;
             if (amountsFound === 2) { // Take the second amount (Net Invoice Value)
+              console.log(`🔍 PATTERN DETECTED: Net Invoice Value (interleaved - second amount)`);
+              console.log(`   Net sequence: "${line1}" "${line2}" "${line3}"`);
+              console.log(`   Second amount found at line ${j + 1}: "${amountLine}"`);
+              console.log(`   Detection logic: Found 2nd amount after Net Invoice Value sequence`);
               
               result.netInvoiceValue = this.parseAmount(amountLine);
+              console.log(`   ✅ EXTRACTED: "${amountLine}" → ${result.netInvoiceValue}`);
               patternsFound.push('Net Invoice Value');
               break;
             }
@@ -920,18 +1074,29 @@ class HybridInvoiceParser {
             i + 2 < lines.length && 
             lines[i + 2].includes('Net')) {
           
+          console.log(`🔍 PATTERN DETECTED: MRP Rounding Off (alternative interleaved)`);
+          console.log(`   Line ${i + 1}: "${line}"`);
+          console.log(`   Line ${i + 2}: "${nextLine}"`);
+          console.log(`   Line ${i + 3}: "${lines[i + 2]}"`);
+          console.log(`   Detection logic: line.includes('Off:') && nextLine.match(/^[\\d,]+\\.?\\d{0,2}$/) && lines[i+2].includes('Net')`);
           
           result.mrpRoundingOff = this.parseAmount(nextLine);
+          console.log(`   ✅ EXTRACTED: "${nextLine}" → ${result.mrpRoundingOff}`);
           patternsFound.push('MRP Rounding Off');
           break;
         }
       }
     }
     
+    console.log(`📊 METHOD 4 SUMMARY: Found ${patternsFound.length} interleaved patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
   }
 
   // Method 5: Extract from standalone amounts format using regex patterns
   extractStandaloneAmountsRegex(lines, result) {
+    console.log('5️⃣ METHOD 5: STANDALONE AMOUNTS REGEX PATTERN DETECTION');
+    console.log('   Looking for: Regex patterns for standalone financial amounts');
+    console.log('   Target amounts: Invoice Value, MRP Rounding Off, Net Invoice Value, Retail Excise Turnover Tax, Special Excise Cess, TCS');
     
     let patternsFound = [];
     
@@ -948,6 +1113,7 @@ class HybridInvoiceParser {
       smallAmount: /(\d{1,2},\d{3}\.\d{2})/g
     };
     
+    console.log('   🔍 Collecting all potential financial amounts...');
     
     // Collect all potential amounts with their characteristics
     const potentialAmounts = [];
@@ -968,7 +1134,9 @@ class HybridInvoiceParser {
             type: 'largeWithDecimals',
             hasDecimals: true
           });
+          console.log(`   💰 Large amount with decimals at line ${i + 1}: "${match[1]}" → ${amount}`);
         } else {
+          console.log(`   ⚠️  Skipping oversized amount at line ${i + 1}: "${match[1]}" → ${amount} (too large for DB)`);
         }
       }
       
@@ -984,6 +1152,7 @@ class HybridInvoiceParser {
             type: 'mediumRound',
             hasDecimals: false
           });
+          console.log(`   💰 Medium round amount at line ${i + 1}: "${match[1]}" → ${amount}`);
         }
       }
       
@@ -999,12 +1168,15 @@ class HybridInvoiceParser {
             type: 'small',
             hasDecimals: true
           });
+          console.log(`   💰 Small amount at line ${i + 1}: "${match[1]}" → ${amount}`);
         }
       }
     }
     
+    console.log(`   📊 Found ${potentialAmounts.length} potential financial amounts`);
     
     if (potentialAmounts.length >= 6) {
+      console.log('   🎯 Sufficient amounts found, applying intelligent mapping...');
       
       // Sort amounts by value (descending) to identify the largest amounts first
       const sortedAmounts = [...potentialAmounts].sort((a, b) => b.amount - a.amount);
@@ -1014,78 +1186,99 @@ class HybridInvoiceParser {
       const summaryStart = Math.floor(documentLength * 0.6);
       const summaryAmounts = sortedAmounts.filter(item => item.index >= summaryStart);
       
+      console.log(`   📍 Found ${summaryAmounts.length} amounts in financial summary section (after line ${summaryStart})`);
       
       if (summaryAmounts.length >= 6) {
         // Apply intelligent mapping based on amount characteristics
         this.mapAmountsIntelligently(summaryAmounts, result, patternsFound);
       } else {
+        console.log('   ⚠️  Using all amounts for mapping due to insufficient summary amounts');
         this.mapAmountsIntelligently(sortedAmounts, result, patternsFound);
       }
     } else {
+      console.log('   ❌ Insufficient amounts found for standalone amounts mapping');
     }
     
+    console.log(`📊 METHOD 5 SUMMARY: Found ${patternsFound.length} standalone amounts regex patterns: [${patternsFound.join(', ')}]`);
+    console.log('');
   }
 
   // Helper method for intelligent amount mapping using mathematical relationships
   mapAmountsIntelligently(amounts, result, patternsFound) {
+    console.log('   🧠 Applying relationship-based mapping logic...');
+    console.log('   📐 Using relationships: Net = Invoice + MRP, Turnover Tax = 10% of Invoice, TCS = ~1.175% of Invoice');
+    console.log('   📋 Expected sequence: Invoice → MRP → Net → Turnover Tax → Special Excise Cess → TCS');
     
     // Get all amounts sorted by value (descending)
     const allAmounts = [...amounts].sort((a, b) => b.amount - a.amount);
+    console.log(`   📊 Total amounts to analyze: ${allAmounts.length}`);
     
     // Try different combinations to find the best fit based on mathematical relationships
     let bestMatch = null;
     let bestScore = 0;
     
+    console.log('   🔍 Testing different combinations for mathematical relationships...');
     
     // Test each potential invoice value (try largest amounts first)
     for (let i = 0; i < Math.min(allAmounts.length, 5); i++) {
       const potentialInvoice = allAmounts[i];
+      console.log(`   🧪 Testing Invoice Value candidate: ${potentialInvoice.amount} (line ${potentialInvoice.index + 1})`);
       
       const testResult = this.testAmountCombination(potentialInvoice, allAmounts);
       
       if (testResult.score > bestScore) {
         bestMatch = testResult;
         bestScore = testResult.score;
+        console.log(`   ⭐ New best match found with score: ${bestScore}`);
       }
     }
     
     if (bestMatch && bestScore >= 3) { // Require at least 3 relationships to match
+      console.log(`   🎯 Best combination found with score ${bestScore}:`);
       
       if (bestMatch.invoiceValue && result.invoiceValue === 0) {
         result.invoiceValue = bestMatch.invoiceValue.amount;
+        console.log(`   ✅ Invoice Value: ${result.invoiceValue} (line ${bestMatch.invoiceValue.index + 1})`);
         patternsFound.push('Invoice Value');
       }
       
       if (bestMatch.mrpRounding && result.mrpRoundingOff === 0) {
         result.mrpRoundingOff = bestMatch.mrpRounding.amount;
+        console.log(`   ✅ MRP Rounding Off: ${result.mrpRoundingOff} (line ${bestMatch.mrpRounding.index + 1})`);
         patternsFound.push('MRP Rounding Off');
       }
       
       if (bestMatch.netInvoice && result.netInvoiceValue === 0) {
         result.netInvoiceValue = bestMatch.netInvoice.amount;
+        console.log(`   ✅ Net Invoice Value: ${result.netInvoiceValue} (line ${bestMatch.netInvoice.index + 1})`);
         patternsFound.push('Net Invoice Value');
       }
       
       if (bestMatch.turnoverTax && result.retailExciseTurnoverTax === 0) {
         result.retailExciseTurnoverTax = bestMatch.turnoverTax.amount;
+        console.log(`   ✅ Retail Excise Turnover Tax: ${result.retailExciseTurnoverTax} (line ${bestMatch.turnoverTax.index + 1})`);
         patternsFound.push('Retail Excise Turnover Tax');
       }
       
       if (bestMatch.tcs && result.tcs === 0) {
         result.tcs = bestMatch.tcs.amount;
+        console.log(`   ✅ TCS: ${result.tcs} (line ${bestMatch.tcs.index + 1})`);
         patternsFound.push('TCS');
       }
       
       if (bestMatch.specialCess && result.specialExciseCess === 0) {
         result.specialExciseCess = bestMatch.specialCess.amount;
+        console.log(`   ✅ Special Excise Cess: ${result.specialExciseCess} (line ${bestMatch.specialCess.index + 1})`);
         patternsFound.push('Special Excise Cess');
       }
       
     } else {
+      console.log(`   ❌ No valid combination found (best score: ${bestScore})`);
       // Fallback to simple largest amount mapping
       this.fallbackMapping(allAmounts, result, patternsFound);
     }
     
+    console.log('   🎯 Relationship-based mapping completed');
   }
 
   // Test a specific amount combination for mathematical relationships
@@ -1094,6 +1287,7 @@ class HybridInvoiceParser {
     let score = 0;
     const result = { invoiceValue: potentialInvoice };
     
+    console.log(`     📐 Testing relationships for invoice: ${invoiceAmount}`);
     
     // Look for MRP Rounding Off and Net Invoice Value that satisfy: Net = Invoice + MRP
     for (let j = 0; j < allAmounts.length; j++) {
@@ -1112,6 +1306,7 @@ class HybridInvoiceParser {
           result.mrpRounding = potentialMRP;
           result.netInvoice = potentialNet;
           score += 2; // High score for this critical relationship
+          console.log(`     ✅ Net = Invoice + MRP relationship found: ${potentialNet.amount} ≈ ${invoiceAmount} + ${potentialMRP.amount}`);
           break;
         }
       }
@@ -1132,6 +1327,7 @@ class HybridInvoiceParser {
     if (turnoverCandidate) {
       result.turnoverTax = turnoverCandidate;
       score += 1;
+      console.log(`     ✅ Turnover Tax (10% of invoice) found: ${turnoverCandidate.amount} ≈ ${expectedTurnover}`);
     }
     
     // TCS will be handled later based on position after Special Excise Cess
@@ -1153,7 +1349,9 @@ class HybridInvoiceParser {
       (turnoverTaxIndex === -1 || a.index > turnoverTaxIndex) // Must come after turnover tax
     ).sort((a, b) => a.index - b.index); // Sort by position in document
     
+    console.log(`     🔍 Found ${remainingAmounts.length} candidates after turnover tax:`);
     remainingAmounts.forEach(a => {
+      console.log(`       Line ${a.index + 1}: ${a.amount}`);
     });
     
     // Special Excise Cess should be the first large amount after turnover tax
@@ -1161,6 +1359,7 @@ class HybridInvoiceParser {
     if (cessCandidate) {
       result.specialCess = cessCandidate;
       score += 1;
+      console.log(`     ✅ Special Excise Cess (first large amount after turnover tax) found: ${cessCandidate.amount}`);
       usedAmounts.add(cessCandidate.amount);
     }
     
@@ -1174,14 +1373,17 @@ class HybridInvoiceParser {
     if (tcsCandidate) {
       result.tcs = tcsCandidate;
       score += 1;
+      console.log(`     ✅ TCS (smaller amount after Special Excise Cess) found: ${tcsCandidate.amount}`);
     }
     
+    console.log(`     📊 Combination score: ${score}`);
     result.score = score;
     return result;
   }
 
   // Fallback mapping when relationships don't work
   fallbackMapping(allAmounts, result, patternsFound) {
+    console.log('   🔄 Applying fallback mapping...');
     
     const largeAmountsWithDecimals = allAmounts.filter(a => a.type === 'largeWithDecimals');
     const mediumRoundAmounts = allAmounts.filter(a => a.type === 'mediumRound');
@@ -1189,11 +1391,13 @@ class HybridInvoiceParser {
     
     if (largeAmountsWithDecimals.length > 0 && result.invoiceValue === 0) {
       result.invoiceValue = largeAmountsWithDecimals[0].amount;
+      console.log(`   ✅ Fallback Invoice Value: ${result.invoiceValue}`);
       patternsFound.push('Invoice Value');
     }
     
     if (mediumRoundAmounts.length > 0 && result.specialExciseCess === 0) {
       result.specialExciseCess = mediumRoundAmounts[0].amount;
+      console.log(`   ✅ Fallback Special Excise Cess: ${result.specialExciseCess}`);
       patternsFound.push('Special Excise Cess');
     }
   }

@@ -24,43 +24,43 @@
 
 .sales-report-content { padding: 2rem; max-width: 1200px; margin: 0 auto; }
 
-.page-title-section { text-align: center; margin-bottom: 2rem; }
-.main-title { font-size: 2rem; font-weight: 700; color: #2d3748; margin: 0 0 0.5rem 0; }
-.subtitle { font-size: 1rem; color: #718096; margin: 0; }
+.sales-report-container .page-title-section { text-align: center; margin-bottom: 2rem; }
+.sales-report-container .main-title { font-size: 2rem; font-weight: 700; color: #2d3748; margin: 0 0 0.5rem 0; }
+.sales-report-container .subtitle { font-size: 1rem; color: #718096; margin: 0; }
 
-.controls-section { background: white; border-radius: 12px; padding: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
-.report-type-selector { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
-.type-option { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.7rem; border: 1px solid #e2e8f0; border-radius: 999px; cursor: pointer; }
-.type-option.active { background: #eef2ff; border-color: #667eea; color: #3730a3; }
-.date-selectors { display: flex; flex-wrap: wrap; gap: 1rem; }
-.selector-group { display: flex; align-items: center; gap: 0.5rem; }
-.date-input, .year-select, .month-select, .week-select { padding: 0.4rem 0.6rem; border: 1px solid #cbd5e0; border-radius: 8px; }
+.sales-report-container .controls-section { background: white; border-radius: 12px; padding: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+.sales-report-container .report-type-selector { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+.sales-report-container .type-option { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.7rem; border: 1px solid #e2e8f0; border-radius: 999px; cursor: pointer; }
+.sales-report-container .type-option.active { background: #eef2ff; border-color: #667eea; color: #3730a3; }
+.sales-report-container .date-selectors { display: flex; flex-wrap: wrap; gap: 1rem; }
+.sales-report-container .selector-group { display: flex; align-items: center; gap: 0.5rem; }
+.sales-report-container .date-input, .sales-report-container .year-select, .sales-report-container .month-select, .sales-report-container .week-select { padding: 0.4rem 0.6rem; border: 1px solid #cbd5e0; border-radius: 8px; }
 .report-title-section h3 { margin: 1rem 0 0 0; color: #2d3748; }
 
-.summary-section { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.summary-cards { display: flex; gap: 1rem; flex-wrap: wrap; }
-.summary-card { background: white; padding: 1rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); display: flex; align-items: center; gap: 0.75rem; min-width: 260px; }
-.card-icon { font-size: 1.5rem; }
-.amount { font-weight: 700; text-align: right; }
-.pdf-section .generate-pdf-btn { background: #667eea; color: white; border: none; padding: 0.6rem 1rem; border-radius: 8px; cursor: pointer; }
+.sales-report-container .summary-section { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.sales-report-container .summary-cards { display: flex; gap: 1rem; flex-wrap: wrap; }
+.sales-report-container .summary-card { background: white; padding: 1rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); display: flex; align-items: center; gap: 0.75rem; min-width: 260px; }
+.sales-report-container .card-icon { font-size: 1.5rem; }
+.sales-report-container .amount { font-weight: 700; text-align: right; }
+.sales-report-container .pdf-section .generate-pdf-btn { background: #667eea; color: white; border: none; padding: 0.6rem 1rem; border-radius: 8px; cursor: pointer; }
 
-.data-tables { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-.table-section h3 { margin: 0 0 0.5rem 0; color: #2d3748; }
-.table-container { background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: auto; }
-.data-table { width: 100%; border-collapse: collapse; }
-.data-table th, .data-table td { border-bottom: 1px solid #edf2f7; padding: 10px; }
+.sales-report-container .data-tables { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.sales-report-container .table-section h3 { margin: 0 0 0.5rem 0; color: #2d3748; }
+.sales-report-container .table-container { background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: auto; }
+.sales-report-container .data-table { width: 100%; border-collapse: collapse; }
+.sales-report-container .data-table th, .sales-report-container .data-table td { border-bottom: 1px solid #edf2f7; padding: 10px; }
 .data-table th { background: #f8fafc; text-align: left; color: #2d3748; }
 .data-table td.amount { text-align: right; }
 .data-table td.center { text-align: center; }
-.no-data { text-align: center; color: #718096; padding: 20px; }
-.total-row { background: #f8fafc; font-weight: 700; }
+.sales-report-container .no-data { text-align: center; color: #718096; padding: 20px; }
+.sales-report-container .total-row { background: #f8fafc; font-weight: 700; }
 
-.loading-display { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; }
-.loading-spinner { width: 20px; height: 20px; border: 2px solid #667eea; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+.sales-report-container .loading-display { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; }
+.sales-report-container .loading-spinner { width: 20px; height: 20px; border: 2px solid #667eea; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-.error-display { padding: 16px; border: 2px solid #ff6b6b; border-radius: 8px; background: #ffe0e0; margin-bottom: 1rem; }
-.retry-btn { background: #dc3545; color: white; border: none; padding: 0.5rem 0.8rem; border-radius: 6px; cursor: pointer; }
+.sales-report-container .error-display { padding: 16px; border: 2px solid #ff6b6b; border-radius: 8px; background: #ffe0e0; margin-bottom: 1rem; }
+.sales-report-container .retry-btn { background: #dc3545; color: white; border: none; padding: 0.5rem 0.8rem; border-radius: 6px; cursor: pointer; }
 
 @media (max-width: 768px) {
   .sales-report-content { padding: 1rem; }

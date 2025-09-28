@@ -386,9 +386,11 @@
 /* ===== INVENTORY TABLE ===== */
 .stock-onboarding-container .inventory-table {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 600px; /* Set max height to enable vertical scrolling */
   border-radius: 12px;
   border: 2px solid #64748b;
-  overflow: hidden;
+  position: relative;
 }
 
 .stock-onboarding-container .inventory-table table {
@@ -442,6 +444,39 @@
   align-items: center;
   justify-content: center;
   min-height: 24px;
+}
+
+/* Auto-scroll zones for drag and drop */
+.stock-onboarding-container .inventory-table::before,
+.stock-onboarding-container .inventory-table::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50px;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 12px 12px 0 0;
+}
+
+.stock-onboarding-container .inventory-table::before {
+  top: 0;
+  background: linear-gradient(to bottom, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.stock-onboarding-container .inventory-table::after {
+  bottom: 0;
+  background: linear-gradient(to top, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%);
+  border-radius: 0 0 12px 12px;
+}
+
+/* Show scroll zones when dragging */
+.stock-onboarding-container .inventory-table.dragging-active::before,
+.stock-onboarding-container .inventory-table.dragging-active::after {
+  opacity: 1;
 }
 
 .stock-onboarding-container .serial-number {
@@ -565,16 +600,28 @@
 
 /* Brand group separation - very subtle like regular borders */
 .stock-onboarding-container .inventory-table .brand-group-end td {
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 2px solid #94a3b8;
 }
 
 .stock-onboarding-container .inventory-table .brand-group-end {
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 2px solid #94a3b8;
 }
 
 /* Ensure all variant rows in a group have consistent styling */
 .stock-onboarding-container .inventory-table .inventory-row.brand-group-end td {
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 2px solid #94a3b8;
+}
+
+/* Enhanced drag over styling for brand groups */
+.stock-onboarding-container .inventory-table .inventory-row.drag-over {
+  background: #eff6ff;
+  border-top: 3px solid #3b82f6;
+}
+
+/* Special styling for brand group boundaries during drag */
+.stock-onboarding-container .inventory-table .inventory-row.brand-group-end.drag-over td {
+  border-bottom: 3px solid #3b82f6;
+  background: #eff6ff;
 }
 
 /* ===== SELECTED PRODUCTS TABLE ===== */

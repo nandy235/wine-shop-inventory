@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Login from './Login';
 import Signup from './Signup';
 import Home from './Home';
@@ -26,16 +26,97 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('login');
   const { isAuthenticated, loading, handleLogin, handleLogout, handleAuthError } = useAuthContext();
 
+  // Initialize view from URL on app load
+  useEffect(() => {
+    const path = window.location.pathname;
+    const viewFromPath = getViewFromPath(path);
+    if (viewFromPath && viewFromPath !== currentView) {
+      setCurrentView(viewFromPath);
+    } else if (!viewFromPath && path !== '/') {
+      // If URL doesn't match any known route, redirect to home if authenticated, login if not
+      const defaultView = isAuthenticated ? 'home' : 'login';
+      handleNavigate(defaultView);
+    }
+  }, [isAuthenticated]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = (event) => {
+      const path = window.location.pathname;
+      const viewFromPath = getViewFromPath(path);
+      if (viewFromPath) {
+        setCurrentView(viewFromPath);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Helper function to map URL paths to views
+const getViewFromPath = (path) => {
+const pathMap = {
+      '/': 'home',
+      '/login': 'login',
+      '/signup': 'signup',
+      '/home': 'home',
+      '/dashboard': 'home', // Keep for backward compatibility
+      '/stock-onboarding': 'stockOnboarding',
+      '/manage-stock': 'manageStock',
+      '/upload-invoice': 'uploadInvoice',
+      '/sheets': 'sheets',
+      '/update-closing-stock': 'updateClosingStock',
+      '/income-expenses': 'incomeExpenses',
+      '/income-expenses-report': 'incomeExpensesReport',
+      '/track-payments': 'trackPayments',
+      '/download-sale-sheet': 'downloadSaleSheet',
+      '/reports': 'reports',
+      '/stock-lifted': 'stockLifted',
+      '/sales-report': 'brandWiseSales',
+      '/add-store': 'addStore',
+      '/shift-transfer': 'shiftTransfer',
+      '/stock-transfer-report': 'stockTransferReport'
+    };
+    return pathMap[path] || null;
+  };
+
+  // Helper function to map views to URL paths
+  const getPathFromView = (view) => {
+    const viewMap = {
+      'login': '/login',
+      'signup': '/signup',
+      'home': '/home',
+      'stockOnboarding': '/stock-onboarding',
+      'manageStock': '/manage-stock',
+      'uploadInvoice': '/upload-invoice',
+      'sheets': '/sheets',
+      'updateClosingStock': '/update-closing-stock',
+      'incomeExpenses': '/income-expenses',
+      'incomeExpensesReport': '/income-expenses-report',
+      'trackPayments': '/track-payments',
+      'downloadSaleSheet': '/download-sale-sheet',
+      'reports': '/reports',
+      'stockLifted': '/stock-lifted',
+      'brandWiseSales': '/sales-report',
+      'addStore': '/add-store',
+      'shiftTransfer': '/shift-transfer',
+      'stockTransferReport': '/stock-transfer-report'
+    };
+    return viewMap[view] || '/home';
+  };
+
   const handleNavigate = (view) => {
+    const path = getPathFromView(view);
+    window.history.pushState({ view }, '', path);
     setCurrentView(view);
   };
 
   // Update view based on authentication status
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated && currentView === 'login') {
-      setCurrentView('dashboard');
+      handleNavigate('home');
     } else if (!isAuthenticated && currentView !== 'login' && currentView !== 'signup') {
-      setCurrentView('login');
+      handleNavigate('login');
     }
   }, [isAuthenticated, currentView]);
 
@@ -54,13 +135,13 @@ function AppContent() {
         {currentView === 'login' && (
           <Login 
             onLogin={handleLogin} 
-            onSignup={() => setCurrentView('signup')} 
+            onSignup={() => handleNavigate('signup')} 
           />
         )}
         {currentView === 'signup' && (
           <Signup 
-            onLogin={() => setCurrentView('login')} 
-            onSignup={() => setCurrentView('login')} 
+            onLogin={() => handleNavigate('login')} 
+            onSignup={() => handleNavigate('login')} 
           />
         )}
       </div>
@@ -70,7 +151,7 @@ function AppContent() {
   return (
     <UserProvider isAuthenticated={isAuthenticated} onAuthError={handleAuthError}>
       <div className="App">
-        {currentView === 'dashboard' && (
+        {currentView === 'home' && (
           <Home 
             onNavigate={handleNavigate} 
             onLogout={handleLogout} 

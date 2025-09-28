@@ -129,14 +129,10 @@ function StockReceived({ onNavigate, onBack, onLogout }) {
 
       <main className="stock-received-content">
         <div className="title-section">
-          <button className="back-button" onClick={onBack}>
-            ← Back to Manage Stock
-          </button>
           <div className="title-content">
             <h2 className="main-title">Stock Received</h2>
             <p className="subtitle">View received stock records</p>
           </div>
-          <div className="spacer"></div>
         </div>
         {error && (
           <div className="error-message">
