@@ -1048,7 +1048,7 @@ class DatabaseService {
         SELECT COALESCE(SUM(invoice_value), 0) as cumulative_invoice_value
         FROM invoices 
         WHERE shop_id = $1 
-        AND created_at::date <= $2
+        AND invoice_date <= $2
       `;
       const invoiceValueResult = await pool.query(invoiceValueQuery, [shopId, date]);
       const cumulativeInvoiceValue = parseFloat(invoiceValueResult.rows[0].cumulative_invoice_value || 0);
@@ -1061,7 +1061,7 @@ class DatabaseService {
         FROM received_stock_records rsr
         WHERE rsr.shop_id = $1 
         AND rsr.invoice_quantity > 0
-        AND rsr.created_at::date <= $2
+        AND rsr.record_date <= $2
       `;
       const mrpValueResult = await pool.query(mrpValueQuery, [shopId, date]);
       const cumulativeMrpValue = parseFloat(mrpValueResult.rows[0].cumulative_mrp_value || 0);
