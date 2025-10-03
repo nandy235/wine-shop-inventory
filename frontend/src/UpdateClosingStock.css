@@ -163,6 +163,62 @@
   font-weight: 600;
 }
 
+/* Progress indicator styles */
+.save-progress-container {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.save-progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.save-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.save-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.save-progress-text {
+  font-size: 0.875rem;
+  color: #4a5568;
+  text-align: center;
+  font-weight: 500;
+}
+
+.retry-indicator {
+  color: #fd7e14;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
 .update-closing-stock-table-container {
   background: white;
   border-radius: 12px;
@@ -242,6 +298,18 @@
 .update-closing-stock-input.not-set:focus {
   border-color: #ffc107;
   box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.2);
+}
+
+/* Ensure zero values are properly displayed */
+.update-closing-stock-input:not(.not-set) {
+  background-color: white;
+  color: #2d3748;
+}
+
+/* Style for when input has been manually set */
+.update-closing-stock-input:not(.not-set):focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
 .update-closing-stock-sales {

@@ -31,10 +31,13 @@ function UpdateClosingStock({ onNavigate, onLogout }) {
  const [loading, setLoading] = useState(true);
  const [searchTerm, setSearchTerm] = useState('');
  const [saving, setSaving] = useState(false);
+ const [saveProgress, setSaveProgress] = useState(0);
+ const [saveStatus, setSaveStatus] = useState('');
  const [editingValues, setEditingValues] = useState({});
  const [closingStockStatus, setClosingStockStatus] = useState(null);
  const [businessDate, setBusinessDate] = useState(getBusinessDate());
  const [originalValues, setOriginalValues] = useState({});
+ const [retryCount, setRetryCount] = useState(0);
 
  const user = getCurrentUser();
   // Token no longer needed - apiUtils handles authentication automatically
@@ -174,7 +177,16 @@ const getGroupedInventoryForDisplay = () => {
  };
 
  const handleClosingStockChange = (id, value) => {
-  const numValue = parseInt(value) || 0;
+  // Handle empty string or invalid input
+  let numValue;
+  if (value === '' || value === null || value === undefined) {
+    numValue = 0;
+  } else {
+    numValue = parseInt(value);
+    if (isNaN(numValue) || numValue < 0) {
+      numValue = 0;
+    }
+  }
   
   // Find the item to get its total (TTL) value
   const currentItem = stockData.find(item => item.id === id);
@@ -196,7 +208,8 @@ const getGroupedInventoryForDisplay = () => {
       return {
         ...item,
         closingStock: newClosingStock,
-        sales: newSales
+        sales: newSales,
+        isClosingStockSet: true // Mark as manually set
       };
     }
     return item;
@@ -212,7 +225,8 @@ const getGroupedInventoryForDisplay = () => {
       return {
         ...item,
         closingStock: newClosingStock,
-        sales: newSales
+        sales: newSales,
+        isClosingStockSet: true // Mark as manually set
       };
     }
     return item;
@@ -255,35 +269,101 @@ const getGroupedInventoryForDisplay = () => {
    }
  };
 
- const handleSave = async () => {
+ const handleSaveWithRetry = async (attemptCount = 0) => {
+   const maxRetries = 2;
    setSaving(true);
+   setSaveProgress(0);
+   setSaveStatus('Preparing to save...');
+   setRetryCount(attemptCount);
+   
    try {
      // Use business date instead of regular date
      const targetDate = businessDate || getBusinessDate();
+     const stockUpdates = stockData.map(item => ({
+       id: item.id,
+       closingStock: item.closingStock
+     }));
+     
+     setSaveStatus(`Saving ${stockUpdates.length} products...`);
+     setSaveProgress(25);
      
      const response = await apiPost('/api/closing-stock/update', {
        date: targetDate,
-       stockUpdates: stockData.map(item => ({
-         id: item.id,
-         closingStock: item.closingStock
-       }))
+       stockUpdates: stockUpdates
      });
 
-         if (response.ok) {
-      alert('Closing stock updated successfully!');
-      setEditingValues({});
-      // Refresh the stock data to update the save status
-      fetchTodayStock();
-    } else {
-      const error = await response.json();
-      alert(`Error: ${error.message}`);
-    }
+     setSaveProgress(75);
+     setSaveStatus('Processing response...');
+
+     if (response.ok) {
+       const result = await response.json();
+       setSaveProgress(100);
+       setSaveStatus('Save completed successfully!');
+       
+       // Enhanced success message with batch processing details
+       const successMessage = result.performance?.batchProcessing 
+         ? `✅ Closing stock updated successfully!\n\n📊 Batch Processing Results:\n• ${result.updatedCount} total records processed\n• ${result.existingUpdated || 0} existing records updated\n• ${result.newRecordsCreated || 0} new records created\n\n⚡ Performance: Optimized batch operation`
+         : `✅ Closing stock updated successfully!\n${result.updatedCount} products updated`;
+       
+       alert(successMessage);
+       setEditingValues({});
+       setRetryCount(0);
+       
+       // Refresh the stock data to update the save status
+       setTimeout(() => {
+         setSaveStatus('');
+         setSaveProgress(0);
+         fetchTodayStock();
+       }, 1500);
+     } else {
+       const error = await response.json();
+       throw new Error(error.message || 'Server error occurred');
+     }
    } catch (error) {
      console.error('Error saving closing stock:', error);
-     alert('Network error while saving');
+     setSaveProgress(0);
+     
+     // Enhanced error handling with retry logic
+     if (attemptCount < maxRetries && (
+       error.message.includes('timeout') || 
+       error.message.includes('network') ||
+       error.message.includes('connection')
+     )) {
+       setSaveStatus(`Save failed, retrying... (${attemptCount + 1}/${maxRetries + 1})`);
+       console.log(`🔄 Retrying save attempt ${attemptCount + 1}/${maxRetries + 1}...`);
+       
+       // Wait before retry with exponential backoff
+       const retryDelay = Math.min(2000 * Math.pow(2, attemptCount), 8000);
+       setTimeout(() => {
+         handleSaveWithRetry(attemptCount + 1);
+       }, retryDelay);
+       return;
+     }
+     
+     // Final failure
+     setSaveStatus('Save failed');
+     setRetryCount(0);
+     
+     let errorMessage = 'Network error while saving';
+     if (error.message.includes('timeout')) {
+       errorMessage = '⏱️ Save operation timed out.\n\nThis might be due to a large number of products. The save might still be processing in the background.\n\nPlease wait a moment and refresh the page to check if your changes were saved.';
+     } else if (error.message.includes('batch')) {
+       errorMessage = `❌ Batch processing error: ${error.message}\n\nPlease try again or contact support if the issue persists.`;
+     } else {
+       errorMessage = `❌ Error: ${error.message}`;
+     }
+     
+     alert(errorMessage);
+     
+     setTimeout(() => {
+       setSaveStatus('');
+     }, 3000);
    }
    setSaving(false);
  };
+
+ // Wrapper function for backward compatibility
+ const handleSave = () => handleSaveWithRetry(0);
 
  if (loading) {
    return (
@@ -327,6 +407,22 @@ return (
           >
             {getButtonText()}
           </button>
+          {/* Progress indicator for save operations */}
+          {saving && (
+            <div className="save-progress-container">
+              <div className="save-progress-bar">
+                <div 
+                  className="save-progress-fill" 
+                  style={{ width: `${saveProgress}%` }}
+                ></div>
+              </div>
+              <div className="save-progress-text">
+                {saveStatus}
+                {retryCount > 0 && <span className="retry-indicator"> (Retry {retryCount}/3)</span>}
+              </div>
+            </div>
+          )}
+          
           {closingStockStatus && (
             <div className="save-status-info">
               {closingStockStatus.savedProducts} of {closingStockStatus.totalProducts} products saved
@@ -392,7 +488,7 @@ return (
                      <input
                        type="number"
                        className={`update-closing-stock-input zero-ph ${!item.isClosingStockSet ? 'not-set' : ''}`}
-                       value={item.closingStock === 0 ? '' : item.closingStock}
+                       value={item.closingStock}
                        onChange={(e) => handleClosingStockChange(item.id, e.target.value)}
                        onWheel={(e) => e.target.blur()}
                        onFocus={(e) => e.target.select()}

@@ -875,10 +875,10 @@ app.post('/api/stock-shift', requireAuth, async (req, res) => {
 
 // ===== CLOSING STOCK UPDATE ENDPOINT =====
 
-// Update closing stock for multiple products
+// Update closing stock for multiple products (Enhanced with batch processing)
 app.post('/api/closing-stock/update', requireAuth, async (req, res) => {
   try {
-    console.log('\n📦 Closing stock update started...');
+    console.log('\n📦 Closing stock batch update started...');
     
     const { date, stockUpdates } = req.body;
     const userId = parseInt(req.user.userId);
@@ -894,43 +894,31 @@ app.post('/api/closing-stock/update', requireAuth, async (req, res) => {
     
     console.log(`👤 User: ${userId}, Shop: ${shopId}`);
     console.log(`📅 Date: ${date}`);
-    console.log(`📊 Updating ${stockUpdates.length} products`);
+    console.log(`📊 Batch updating ${stockUpdates.length} products`);
 
-    let updatedCount = 0;
+    // Use batch processing for better performance
+    const result = await dbService.batchUpdateClosingStock(stockUpdates, date);
     
-    // Process each stock update
-    for (const update of stockUpdates) {
-      try {
-        const { id, closingStock } = update;
-        
-        if (typeof id === 'undefined' || typeof closingStock === 'undefined') {
-          console.warn(`⚠️ Skipping invalid update:`, update);
-          continue;
-        }
-
-        // Update closing stock specifically
-        await dbService.updateClosingStock(id, date, parseInt(closingStock));
-        
-        updatedCount++;
-        
-      } catch (error) {
-        console.error(`❌ Error updating stock for product ${update.id}:`, error);
-        // Continue with other updates even if one fails
-      }
-    }
-    
-    console.log(`✅ Successfully updated ${updatedCount} products`);
+    console.log(`✅ Batch update completed: ${result.updatedCount} total records processed`);
+    console.log(`📈 Details: ${result.existingUpdated} updated, ${result.newRecordsCreated} created`);
     
     res.json({
-      message: 'Closing stock updated successfully',
-      updatedCount: updatedCount,
-      totalRequested: stockUpdates.length
+      message: 'Closing stock updated successfully via batch processing',
+      updatedCount: result.updatedCount,
+      existingUpdated: result.existingUpdated,
+      newRecordsCreated: result.newRecordsCreated,
+      totalRequested: stockUpdates.length,
+      errors: result.errors,
+      performance: {
+        batchProcessing: true,
+        processingTime: 'Optimized batch operation'
+      }
     });
 
   } catch (error) {
-    console.error('❌ Closing stock update error:', error);
+    console.error('❌ Closing stock batch update error:', error);
     res.status(500).json({ 
-      message: 'Server error during closing stock update', 
+      message: 'Server error during closing stock batch update', 
       error: error.message 
     });
   }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './StockOnboarding.css';
 import { useUserContext } from './contexts/UserContext';
-import { apiGet, apiPost } from './apiUtils';
+import { apiGet, apiPost, apiPut } from './apiUtils';
 import { getCurrentUser } from './authUtils';
 import Navigation from './components/Navigation';
 
@@ -14,15 +14,11 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draggedItem, setDraggedItem] = useState(null);
-  const [draggedOver, setDraggedOver] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
+  // Removed drag and drop state - using up arrow buttons instead
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedItems, setEditedItems] = useState({});
   const searchContainerRef = useRef(null);
-  const inventoryTableRef = useRef(null);
-  const autoScrollIntervalRef = useRef(null);
-  const dragTimeoutRef = useRef(null);
+  // Removed inventory table ref - no longer needed without drag and drop
 
   // Get user data from server when needed, with authUtils fallback
   const { user, loading: userLoading, error: userError, shopName: contextShopName } = useUserContext();
@@ -142,10 +138,22 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   const fetchShopInventory = async () => {
     try {
+      console.log('🔄 Fetching shop inventory...');
       const response = await apiGet('/api/shop/products');
       const data = await response.json();
-      setShopInventory(data.products || []);
-      console.log('Loaded shop inventory:', data.products?.length || 0);
+      const products = data.products || [];
+      
+      console.log('📦 Loaded shop inventory:', products.length, 'items');
+      
+      // Debug: Show sort_order values for first few items
+      if (products.length > 0) {
+        console.log('🔍 First 3 items with sort_order:');
+        products.slice(0, 3).forEach((item, index) => {
+          console.log(`  ${index + 1}. ${item.name} - sort_order: ${item.sort_order}, id: ${item.id}`);
+        });
+      }
+      
+      setShopInventory(products);
     } catch (error) {
       console.error('Error fetching shop inventory:', error);
     }
@@ -404,6 +412,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   // Helper function to group inventory items by brand name (aggregated display)
   const groupInventoryByBrand = (inventory) => {
+    console.log('🔍 groupInventoryByBrand called with', inventory.length, 'items');
     const grouped = {};
     let serialCounter = 1;
     
@@ -443,202 +452,94 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
     return Object.values(grouped);
   };
 
-  // Auto-scroll functionality for drag and drop
-  const startAutoScroll = (direction, speed = 2) => {
-    if (autoScrollIntervalRef.current) {
-      clearInterval(autoScrollIntervalRef.current);
-    }
-    
-    autoScrollIntervalRef.current = setInterval(() => {
-      if (inventoryTableRef.current) {
-        const scrollContainer = inventoryTableRef.current;
-        const maxScrollTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-        
-        if (direction === 'up') {
-          const newScrollTop = Math.max(0, scrollContainer.scrollTop - speed);
-          scrollContainer.scrollTop = newScrollTop;
-        } else if (direction === 'down') {
-          const newScrollTop = Math.min(maxScrollTop, scrollContainer.scrollTop + speed);
-          scrollContainer.scrollTop = newScrollTop;
-          
-          // Additional check to ensure we're actually scrolling down
-          if (scrollContainer.scrollTop >= maxScrollTop) {
-            // We've reached the bottom, stop scrolling
-            clearInterval(autoScrollIntervalRef.current);
-            autoScrollIntervalRef.current = null;
-          }
-        }
-      }
-    }, 16); // ~60fps
-  };
+  // Removed drag and drop auto-scroll functions - no longer needed with up arrow buttons
 
-  const stopAutoScroll = () => {
-    if (autoScrollIntervalRef.current) {
-      clearInterval(autoScrollIntervalRef.current);
-      autoScrollIntervalRef.current = null;
-    }
-  };
-
-  const checkAutoScroll = (e) => {
-    if (!inventoryTableRef.current || !draggedItem) return;
+  // Move item to top function
+  const moveToTop = (itemId) => {
+    console.log('🔝 Moving item to top:', itemId);
     
-    const scrollContainer = inventoryTableRef.current;
-    const rect = scrollContainer.getBoundingClientRect();
-    const mouseY = e.clientY;
-    const scrollThreshold = 60; // pixels from edge to trigger scroll (increased for better detection)
-    const fastScrollThreshold = 25; // pixels from edge for faster scroll
+    const currentInventory = [...(shopInventory || [])];
+    const itemIndex = currentInventory.findIndex(item => item.id === itemId);
     
-    // Check if container is scrollable
-    const canScrollUp = scrollContainer.scrollTop > 0;
-    const maxScrollTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-    const canScrollDown = scrollContainer.scrollTop < maxScrollTop - 1; // Add 1px buffer for better detection
-    
-    // Calculate distance from edges for more responsive scrolling
-    const distanceFromTop = mouseY - rect.top;
-    const distanceFromBottom = rect.bottom - mouseY;
-    
-    // Check if mouse is near top edge and can scroll up
-    if (distanceFromTop < scrollThreshold && canScrollUp) {
-      // Progressive speed based on distance from edge
-      const speedMultiplier = Math.max(0.3, (scrollThreshold - distanceFromTop) / scrollThreshold);
-      const speed = Math.ceil(speedMultiplier * 12); // Max speed of 12px per frame
-      startAutoScroll('up', speed);
-    }
-    // Check if mouse is near bottom edge and can scroll down
-    else if (distanceFromBottom < scrollThreshold && canScrollDown) {
-      // Progressive speed based on distance from edge
-      const speedMultiplier = Math.max(0.3, (scrollThreshold - distanceFromBottom) / scrollThreshold);
-      const speed = Math.ceil(speedMultiplier * 12); // Max speed of 12px per frame
-      startAutoScroll('down', speed);
-    }
-    // Stop auto-scroll if mouse is in middle area or can't scroll in that direction
-    else {
-      stopAutoScroll();
-    }
-  };
-
-  // Drag and Drop functionality
-  const handleDragStart = (e, item, index) => {
-    setDraggedItem({ item, index });
-    setIsDragging(true);
-    e.dataTransfer.effectAllowed = 'move';
-    e.target.style.opacity = '0.5';
-    
-    // Set a safety timeout to stop dragging after 10 seconds
-    dragTimeoutRef.current = setTimeout(() => {
-      setDraggedItem(null);
-      setDraggedOver(null);
-      setIsDragging(false);
-      stopAutoScroll();
-    }, 10000);
-  };
-
-  const handleDragEnd = (e) => {
-    e.target.style.opacity = '1';
-    setDraggedItem(null);
-    setDraggedOver(null);
-    setIsDragging(false);
-    stopAutoScroll(); // Stop auto-scroll when drag ends
-    
-    // Clear the safety timeout
-    if (dragTimeoutRef.current) {
-      clearTimeout(dragTimeoutRef.current);
-      dragTimeoutRef.current = null;
-    }
-  };
-
-  const handleDragOver = (e, index) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDraggedOver(index);
-    
-    // Only check auto-scroll if we're dragging and over the table
-    if (isDragging && inventoryTableRef.current) {
-      checkAutoScroll(e);
-    }
-  };
-
-  const handleDragLeave = (e) => {
-    setDraggedOver(null);
-    
-    // Stop auto-scroll if leaving the table container entirely
-    if (inventoryTableRef.current && !inventoryTableRef.current.contains(e.relatedTarget)) {
-      stopAutoScroll();
-    }
-  };
-
-  const handleDrop = (e, dropIndex) => {
-    e.preventDefault();
-    
-    // Stop auto-scroll immediately when drop occurs
-    stopAutoScroll();
-    
-    if (!draggedItem || draggedItem.index === dropIndex) {
-      // Reset drag state even if no actual drop occurs
-      setDraggedItem(null);
-      setDraggedOver(null);
-      setIsDragging(false);
+    if (itemIndex === -1) {
+      console.error('❌ Item not found:', itemId);
       return;
     }
-
-    const newInventory = [...(shopInventory || [])];
-    const draggedItemData = newInventory[draggedItem.index];
     
-    // Find the brand group of the dragged item
-    const brandGroups = groupInventoryByBrand(newInventory);
-    const draggedBrandGroup = brandGroups.find(group => 
-      group.items.some(item => item.id === draggedItemData.id)
-    );
-    
-    // Find the brand group of the drop target
-    const dropTargetItem = newInventory[dropIndex];
-    const dropTargetBrandGroup = brandGroups.find(group => 
-      group.items.some(item => item.id === dropTargetItem.id)
-    );
-    
-    // Brand group reorder - move entire brand group
-    if (draggedBrandGroup) {
-      // Get all items in the dragged brand group
-      const brandItems = draggedBrandGroup.items.map(item => 
-        newInventory.find(invItem => invItem.id === item.id)
-      ).filter(Boolean);
-      
-      // Remove all items of the dragged brand from their current positions
-      brandItems.forEach(item => {
-        const index = newInventory.findIndex(invItem => invItem.id === item.id);
-        if (index !== -1) {
-          newInventory.splice(index, 1);
-        }
-      });
-      
-      // Find the new insertion point (adjust for removed items)
-      let adjustedDropIndex = dropIndex;
-      brandItems.forEach(item => {
-        const originalIndex = (shopInventory || []).findIndex(invItem => invItem.id === item.id);
-        if (originalIndex < dropIndex) {
-          adjustedDropIndex--;
-        }
-      });
-      
-      // Insert all brand items at the new position
-      brandItems.forEach((item, index) => {
-        newInventory.splice(adjustedDropIndex + index, 0, item);
-      });
+    if (itemIndex === 0) {
+      console.log('ℹ️ Item is already at the top');
+      return;
     }
     
-    setShopInventory(newInventory);
+    // Remove item from current position
+    const [movedItem] = currentInventory.splice(itemIndex, 1);
     
-    // Reset all drag-related state
-    setDraggedItem(null);
-    setDraggedOver(null);
-    setIsDragging(false);
+    // Add item to the beginning
+    currentInventory.unshift(movedItem);
     
-    // Clear the safety timeout
-    if (dragTimeoutRef.current) {
-      clearTimeout(dragTimeoutRef.current);
-      dragTimeoutRef.current = null;
+    console.log('📦 Updated inventory order');
+    setShopInventory(currentInventory);
+    
+    // Save the new sort order to the backend
+    console.log('💾 Saving new sort order after move to top...');
+    saveSortOrder(currentInventory);
+  };
+
+  // Save sort order to backend
+  const saveSortOrder = async (inventory) => {
+    try {
+      console.log('🔄 Starting saveSortOrder with inventory length:', inventory.length);
+      
+      // Quick test to see if we can reach the API
+      console.log('🧪 Testing API connectivity...');
+      try {
+        const testResponse = await apiGet('/api/auth/status');
+        console.log('🧪 API test response status:', testResponse.status);
+      } catch (testError) {
+        console.error('🧪 API test failed:', testError);
+      }
+      
+      // Group inventory by brand and create the sorted brand groups structure
+      const brandGroups = groupInventoryByBrand(inventory);
+      console.log('📊 Brand groups created:', brandGroups.length);
+      
+      const sortedBrandGroups = brandGroups.map((brandGroup, groupIndex) => ({
+        brandName: brandGroup.brandName,
+        productIds: brandGroup.items.map(item => item.id),
+        groupOrder: groupIndex + 1
+      }));
+
+      console.log('🔄 Saving sort order for', sortedBrandGroups.length, 'brand groups');
+      console.log('📋 Sort order data:', JSON.stringify(sortedBrandGroups, null, 2));
+
+      // Use apiPut with extended timeout (handled in apiUtils)
+      const response = await apiPut('/api/shop/update-sort-order', {
+        sortedBrandGroups: sortedBrandGroups
+      });
+
+      console.log('📡 API Response status:', response.status);
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Sort order saved successfully:', result.message, `(${result.totalUpdated} items updated)`);
+        
+        // Refresh inventory to reflect the new sort order from database
+        console.log('🔄 Refreshing inventory to reflect new sort order...');
+        await fetchShopInventory();
+      } else {
+        const error = await response.json();
+        console.error('❌ Failed to save sort order. Status:', response.status);
+        console.error('❌ Error details:', error.message || error);
+        // Don't show alert for sort order errors to avoid disrupting UX
+      }
+    } catch (error) {
+      console.error('❌ Exception in saveSortOrder:', error.message || error);
+      console.error('❌ Full error:', error);
+      // Don't show alert for sort order errors to avoid disrupting UX
     }
   };
+
+  // Removed all drag and drop functionality - replaced with up arrow buttons
 
   // Prevent number input values from changing on scroll and arrow keys
   const handleInputEvents = (e) => {
@@ -685,22 +586,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
     };
   }, [selectedProducts, shopInventory, isEditMode]);
 
-  // Cleanup auto-scroll when dragging state changes
-  useEffect(() => {
-    if (!isDragging) {
-      stopAutoScroll();
-    }
-  }, [isDragging]);
-
-  // Cleanup auto-scroll on component unmount
-  useEffect(() => {
-    return () => {
-      stopAutoScroll();
-      if (dragTimeoutRef.current) {
-        clearTimeout(dragTimeoutRef.current);
-      }
-    };
-  }, []);
+  // Removed drag and drop cleanup useEffects - no longer needed
 
   return (
     <div className="stock-onboarding-container">
@@ -831,7 +717,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                 <p className="empty-message">Use the search above to find and add products to your inventory</p>
               </div>
             ) : (
-              <div className={`inventory-table ${isDragging ? 'dragging-active' : ''}`} ref={inventoryTableRef}>
+              <div className="inventory-table">
                 <table>
                   <thead>
                     <tr>
@@ -857,22 +743,20 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                         return (
                           <tr 
                             key={item.id}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, item, actualIndex)}
-                            onDragEnd={handleDragEnd}
-                            onDragOver={(e) => handleDragOver(e, actualIndex)}
-                            onDragLeave={handleDragLeave}
-                            onDrop={(e) => handleDrop(e, actualIndex)}
-                            className={`inventory-row ${draggedOver === actualIndex ? 'drag-over' : ''} ${draggedItem?.index === actualIndex ? 'dragging' : ''} ${itemIndex === brandGroup.items.length - 1 ? 'brand-group-end' : ''}`}
+                            className={`inventory-row ${itemIndex === brandGroup.items.length - 1 ? 'brand-group-end' : ''}`}
                           >
                             {itemIndex === 0 && (
                               <>
                                 <td className="grouped-serial" rowSpan={brandGroup.items.length}>
-                                  <div className="drag-handle-container">
+                                  <div className="move-controls-container">
                                     <span className="serial-number">{brandGroup.serialNumber}</span>
-                                    <div className="drag-handle" title="Drag to reorder">
-                                      ⋮⋮
-                                    </div>
+                                    <button 
+                                      className="move-to-top-btn" 
+                                      title="Move to top"
+                                      onClick={() => moveToTop(brandGroup.items[0].id)}
+                                    >
+                                      ↑
+                                    </button>
                                   </div>
                                 </td>
                                 <td className="grouped-brand-cell" rowSpan={brandGroup.items.length}>

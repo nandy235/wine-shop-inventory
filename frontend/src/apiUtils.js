@@ -56,9 +56,12 @@ const handleTokenRefresh = async () => {
  * Properly separates auth retries from network retries
  */
 export const secureApiCall = async (endpoint, options = {}, retryCount = 0, maxRetries = 1, authRetried = false) => {
-  // Setup request timeout
+  // Setup request timeout - longer for sort order updates and closing stock
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+  const isLargeUpdate = endpoint.includes('update-sort-order');
+  const isClosingStockUpdate = endpoint.includes('closing-stock/update');
+  const timeoutMs = isClosingStockUpdate ? 60000 : (isLargeUpdate ? 30000 : 10000); // 60s for closing stock, 30s for sort order, 10s for others
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {

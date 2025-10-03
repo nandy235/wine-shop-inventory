@@ -384,24 +384,40 @@ class DatabaseService {
   async updateSortOrder(shopId, sortedBrandGroups) {
     try {
       console.log('🔄 Updating sort order for shop:', shopId);
-      console.log('📋 Sorted groups:', sortedBrandGroups);
+      console.log('📋 Sorted groups:', sortedBrandGroups.length, 'groups');
       
       const client = await pool.connect();
       
       try {
         await client.query('BEGIN');
         
+        // Build batch update data
+        const updates = [];
         let sortOrder = 1;
         
         for (const group of sortedBrandGroups) {
-          // Update sort order for each product in the group
           for (const productId of group.productIds) {
-            await client.query(
-              'UPDATE shop_inventory SET sort_order = $1 WHERE id = $2 AND shop_id = $3',
-              [sortOrder, productId, shopId]
-            );
+            updates.push({ id: productId, sortOrder: sortOrder });
             sortOrder++;
           }
+        }
+        
+        console.log('📊 Total items to update:', updates.length);
+        
+        // Use batch update with CASE statement for better performance
+        if (updates.length > 0) {
+          const ids = updates.map(u => u.id);
+          const caseStatements = updates.map(u => `WHEN ${u.id} THEN ${u.sortOrder}`).join(' ');
+          
+          const batchQuery = `
+            UPDATE shop_inventory 
+            SET sort_order = CASE id ${caseStatements} END,
+                last_updated = CURRENT_TIMESTAMP
+            WHERE id = ANY($1) AND shop_id = $2
+          `;
+          
+          const result = await client.query(batchQuery, [ids, shopId]);
+          console.log('✅ Batch update completed, rows affected:', result.rowCount);
         }
         
         await client.query('COMMIT');
@@ -409,7 +425,7 @@ class DatabaseService {
         
         return { 
           message: 'Sort order updated successfully',
-          totalUpdated: sortOrder - 1
+          totalUpdated: updates.length
         };
         
       } catch (error) {
@@ -563,6 +579,137 @@ class DatabaseService {
       return result;
     } catch (error) {
       throw new Error(`Error updating closing stock: ${error.message}`);
+    }
+  }
+
+  // Batch method for updating multiple closing stock records efficiently
+  async batchUpdateClosingStock(stockUpdates, stockDate) {
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      console.log(`🔄 Starting batch update for ${stockUpdates.length} products`);
+      
+      // Filter out invalid updates
+      const validUpdates = stockUpdates.filter(update => 
+        typeof update.id !== 'undefined' && 
+        typeof update.closingStock !== 'undefined'
+      );
+      
+      if (validUpdates.length === 0) {
+        await client.query('ROLLBACK');
+        return { updatedCount: 0, errors: ['No valid updates provided'] };
+      }
+      
+      // First, try to update existing records
+      const updateCases = validUpdates.map((_, index) => 
+        `WHEN $${index * 2 + 1} THEN $${index * 2 + 2}`
+      ).join(' ');
+      
+      const updateValues = validUpdates.flatMap(update => [update.id, parseInt(update.closingStock)]);
+      const updateIds = validUpdates.map(update => update.id);
+      
+      const batchUpdateQuery = `
+        UPDATE daily_stock_records 
+        SET closing_stock = CASE shop_inventory_id 
+          ${updateCases}
+        END
+        WHERE shop_inventory_id = ANY($${updateValues.length + 1}) 
+        AND stock_date = $${updateValues.length + 2}
+        RETURNING shop_inventory_id
+      `;
+      
+      const updateResult = await client.query(batchUpdateQuery, [
+        ...updateValues, 
+        updateIds, 
+        stockDate
+      ]);
+      
+      const updatedIds = updateResult.rows.map(row => row.shop_inventory_id);
+      const notUpdatedIds = updateIds.filter(id => !updatedIds.includes(id));
+      
+      console.log(`✅ Updated ${updatedIds.length} existing records`);
+      
+      // For records that don't exist, we need to create them
+      let insertedCount = 0;
+      if (notUpdatedIds.length > 0) {
+        console.log(`📝 Creating ${notUpdatedIds.length} new records`);
+        
+        // Get previous closing stock for opening stock calculation
+        const prevStockQuery = `
+          SELECT DISTINCT ON (shop_inventory_id) 
+            shop_inventory_id, 
+            closing_stock 
+          FROM daily_stock_records 
+          WHERE shop_inventory_id = ANY($1) 
+          AND stock_date < $2 
+          ORDER BY shop_inventory_id, stock_date DESC
+        `;
+        
+        const prevStockResult = await client.query(prevStockQuery, [notUpdatedIds, stockDate]);
+        const prevStockMap = {};
+        prevStockResult.rows.forEach(row => {
+          prevStockMap[row.shop_inventory_id] = row.closing_stock || 0;
+        });
+        
+        // Prepare insert data
+        const insertData = notUpdatedIds.map(id => {
+          const update = validUpdates.find(u => u.id === id);
+          const openingStock = prevStockMap[id] || 0;
+          return {
+            shopInventoryId: id,
+            stockDate,
+            openingStock,
+            receivedStock: 0,
+            closingStock: parseInt(update.closingStock)
+          };
+        });
+        
+        // Batch insert new records
+        const insertValues = [];
+        const insertPlaceholders = insertData.map((_, index) => {
+          const base = index * 5;
+          insertValues.push(
+            insertData[index].shopInventoryId,
+            insertData[index].stockDate,
+            insertData[index].openingStock,
+            insertData[index].receivedStock,
+            insertData[index].closingStock
+          );
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+        }).join(', ');
+        
+        const insertQuery = `
+          INSERT INTO daily_stock_records 
+          (shop_inventory_id, stock_date, opening_stock, received_stock, closing_stock)
+          VALUES ${insertPlaceholders}
+        `;
+        
+        const insertResult = await client.query(insertQuery, insertValues);
+        insertedCount = insertResult.rowCount;
+        
+        console.log(`✅ Inserted ${insertedCount} new records`);
+      }
+      
+      await client.query('COMMIT');
+      
+      const totalUpdated = updatedIds.length + insertedCount;
+      console.log(`🎉 Batch update completed: ${totalUpdated} total records processed`);
+      
+      return {
+        updatedCount: totalUpdated,
+        existingUpdated: updatedIds.length,
+        newRecordsCreated: insertedCount,
+        errors: []
+      };
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Batch update failed:', error);
+      throw new Error(`Batch update failed: ${error.message}`);
+    } finally {
+      client.release();
     }
   }
 

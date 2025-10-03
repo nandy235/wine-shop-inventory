@@ -554,88 +554,53 @@
   border-bottom: none;
 }
 
-/* ===== DRAG AND DROP ===== */
-.stock-onboarding-container .drag-handle-container {
+/* ===== MOVE CONTROLS ===== */
+.stock-onboarding-container .move-controls-container {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 24px;
+  gap: 8px;
 }
 
-/* Auto-scroll zones for drag and drop */
-.stock-onboarding-container .inventory-table::before,
-.stock-onboarding-container .inventory-table::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 50px;
-  pointer-events: none;
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  border-radius: 12px 12px 0 0;
-}
-
-.stock-onboarding-container .inventory-table::before {
-  top: 0;
-  background: linear-gradient(to bottom, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%);
-  border-radius: 12px 12px 0 0;
-}
-
-.stock-onboarding-container .inventory-table::after {
-  bottom: 0;
-  background: linear-gradient(to top, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%);
-  border-radius: 0 0 12px 12px;
-}
-
-/* Show scroll zones when dragging */
-.stock-onboarding-container .inventory-table.dragging-active::before,
-.stock-onboarding-container .inventory-table.dragging-active::after {
-  opacity: 1;
-}
+/* Removed drag and drop scroll zones - no longer needed */
 
 .stock-onboarding-container .serial-number {
   font-weight: 600;
   color: #374151;
 }
 
-.stock-onboarding-container .drag-handle {
-  position: absolute;
-  opacity: 0;
-  cursor: grab;
+.stock-onboarding-container .move-to-top-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 6px;
   font-size: 16px;
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 4px 6px;
-  border-radius: 4px;
-  border: 1px solid #d1d5db;
-  transition: opacity 0.2s ease;
-  letter-spacing: -2px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
 }
 
-.stock-onboarding-container .drag-handle:active {
-  cursor: grabbing;
+.stock-onboarding-container .move-to-top-btn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
-.stock-onboarding-container .drag-handle-container:hover .serial-number {
-  opacity: 0.3;
+.stock-onboarding-container .move-to-top-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
 }
 
-.stock-onboarding-container .drag-handle-container:hover .drag-handle {
-  opacity: 1;
-}
-
-.stock-onboarding-container .inventory-row.dragging {
-  opacity: 0.6;
-  background: #f3f4f6;
-}
-
-.stock-onboarding-container .inventory-row.drag-over {
-  border-top: 3px solid #3b82f6;
-  background: #eff6ff;
-}
+/* Removed drag and drop row styles - no longer needed */
 
 /* ===== BRAND GROUPING ===== */
 .stock-onboarding-container .grouped-serial,
