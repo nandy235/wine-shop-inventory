@@ -17,6 +17,8 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
   const [draggedItem, setDraggedItem] = useState(null);
   const [draggedOver, setDraggedOver] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedItems, setEditedItems] = useState({});
   const searchContainerRef = useRef(null);
   const inventoryTableRef = useRef(null);
   const autoScrollIntervalRef = useRef(null);
@@ -178,27 +180,28 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         return matches;
       });
       
-      // Then filter out products that already exist in inventory
+      // Filter out products that have opening stock > 0 (already onboarded)
       const filtered = searchFiltered.filter(brand => {
         // Check if this brand exists in shop inventory (by master_brand_id)
         const inventoryItem = shopInventory.find(inventoryItem => 
           inventoryItem.master_brand_id === brand.id
         );
         
-        const existsInInventory = !!inventoryItem;
+        const hasOpeningStock = inventoryItem?.openingStock > 0;
         
         // Debug logging for all searches to understand filtering
         console.log('🔍 Filtering brand:', {
           name: brand.name,
           packType: brand.packType,
           masterBrandId: brand.id,
-          existsInInventory: existsInInventory,
+          existsInInventory: !!inventoryItem,
           openingStock: inventoryItem?.openingStock || 0,
-          willShow: !existsInInventory,
+          hasOpeningStock: hasOpeningStock,
+          willShow: !hasOpeningStock,
           inventoryLength: shopInventory?.length || 0
         });
         
-        return !existsInInventory; // Only show products NOT in inventory
+        return !hasOpeningStock; // Show products with no opening stock or not in inventory
       });
       
       setFilteredBrands(filtered);
@@ -240,16 +243,102 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
     setSelectedProducts(products => products.filter(p => p.id !== productId));
   };
 
+  // Edit mode functions
+  const toggleEditMode = () => {
+    if (isEditMode) {
+      // Exiting edit mode - reset edited items
+      setEditedItems({});
+    }
+    setIsEditMode(!isEditMode);
+  };
+
+  // Removed quantity editing - only allow markup editing
+  // const handleEditQuantityChange = (itemId, value) => {
+  //   setEditedItems(prev => ({
+  //     ...prev,
+  //     [itemId]: {
+  //       ...prev[itemId],
+  //       quantity: parseInt(value) || 0
+  //     }
+  //   }));
+  // };
+
+  const handleEditMarkupChange = (itemId, value) => {
+    setEditedItems(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        markup: value === '' ? '' : (parseFloat(value) || 0)
+      }
+    }));
+  };
+
+  const saveEditedItems = async () => {
+    const itemsToUpdate = Object.keys(editedItems).filter(itemId => 
+      editedItems[itemId].markup !== undefined
+    );
+
+    if (itemsToUpdate.length === 0) {
+      alert('No price changes to save');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updates = itemsToUpdate.map(itemId => {
+        const item = shopInventory.find(inv => inv.id === parseInt(itemId));
+        const edits = editedItems[itemId];
+        return {
+          shopInventoryId: parseInt(itemId),
+          markup: edits.markup !== undefined ? (edits.markup === '' ? 0 : parseFloat(edits.markup)) : (item.markup_price || 0)
+        };
+      });
+
+      console.log('🔍 Sending price updates:', updates);
+      console.log('🔍 Edited items:', editedItems);
+
+      const response = await apiPost('/api/shop/inventory/price-update', {
+        updates: updates
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Backend response:', result);
+        alert('✅ Prices updated successfully!');
+        setIsEditMode(false);
+        setEditedItems({});
+        console.log('🔄 Refreshing inventory...');
+        // Add a small delay to ensure database transaction is committed
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await fetchShopInventory(); // Refresh inventory
+        console.log('✅ Inventory refreshed');
+      } else {
+        const error = await response.json();
+        console.error('❌ Backend error:', error);
+        alert(`❌ Error: ${error.message || 'Failed to update prices'}`);
+      }
+    } catch (error) {
+      console.error('Error updating prices:', error);
+      alert(`❌ Error: ${error.message || 'Network error during price update'}`);
+    }
+    setSaving(false);
+  };
+
+  const cancelEdit = () => {
+    setEditedItems({});
+    setIsEditMode(false);
+  };
+
   const handleSaveStockOnboarding = async () => {
     if (selectedProducts.length === 0) {
       alert('Please select at least one product to onboard');
       return;
     }
 
-    // Validate all products have quantity > 0
-    const invalidProducts = selectedProducts.filter(p => !p.quantity || p.quantity <= 0);
+    // Validate all products have quantity >= 0 (allow 0 for markup-only updates)
+    const invalidProducts = selectedProducts.filter(p => p.quantity < 0 || isNaN(p.quantity));
     if (invalidProducts.length > 0) {
-      alert('Please enter quantity greater than 0 for all products');
+      alert('Please enter a valid quantity (0 or greater) for all products');
       return;
     }
 
@@ -302,6 +391,15 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+  };
+
+  // Helper function to get markup value safely (handles empty strings)
+  const getMarkupValue = (itemId, fallbackValue = 0) => {
+    const editedMarkup = editedItems[itemId]?.markup;
+    if (editedMarkup !== undefined) {
+      return editedMarkup === '' ? 0 : parseFloat(editedMarkup) || 0;
+    }
+    return parseFloat(fallbackValue) || 0;
   };
 
   // Helper function to group inventory items by brand name (aggregated display)
@@ -558,7 +656,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   // Add event listeners to prevent wheel and arrow key changes
   useEffect(() => {
-    const inputs = document.querySelectorAll('.quantity-input, .markup-input');
+    const inputs = document.querySelectorAll('.quantity-input, .markup-input, .edit-markup-input');
     
     const preventWheel = (e) => {
       e.preventDefault();
@@ -585,7 +683,7 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         input.removeEventListener('keydown', preventArrowKeys);
       });
     };
-  }, [selectedProducts]);
+  }, [selectedProducts, shopInventory, isEditMode]);
 
   // Cleanup auto-scroll when dragging state changes
   useEffect(() => {
@@ -681,15 +779,49 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                 <h3 className="section-title">Current Shop Inventory ({shopInventory?.length || 0})</h3>
                 <p className="inventory-subtitle">Products currently in your inventory</p>
               </div>
-              <div className="inventory-stats">
-                <div className="inventory-value">
-                  <div className="value-label">Total Quantities</div>
-                  <div className="value-amount">{shopInventory?.reduce((sum, item) => sum + item.quantity, 0) || 0}</div>
-                </div>
-                <div className="inventory-value">
-                  <div className="value-label">Total Stock Value</div>
-                  <div className="value-amount">₹{formatNumber(shopInventory?.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0) || 0)}</div>
-                </div>
+              <div className="inventory-controls">
+                {!isEditMode ? (
+                  <div className="inventory-stats">
+                    <div className="inventory-value">
+                      <div className="value-label">Total Quantities</div>
+                      <div className="value-amount">{shopInventory?.reduce((sum, item) => sum + item.quantity, 0) || 0}</div>
+                    </div>
+                    <div className="inventory-value">
+                      <div className="value-label">Total Stock Value</div>
+                      <div className="value-amount">₹{formatNumber(shopInventory?.reduce((sum, item) => sum + parseFloat(item.mrp) * item.quantity, 0) || 0)}</div>
+                    </div>
+                    <button 
+                      className="edit-inventory-btn"
+                      onClick={toggleEditMode}
+                      disabled={!shopInventory || shopInventory.length === 0}
+                    >
+                      💰 Edit Prices
+                    </button>
+                  </div>
+                ) : (
+                  <div className="edit-mode-controls">
+                    <div className="edit-mode-info">
+                      <span className="edit-mode-label">💰 Price Edit Mode</span>
+                      <span className="edit-mode-subtitle">Click on markup values to edit prices</span>
+                    </div>
+                    <div className="edit-action-buttons">
+                      <button 
+                        className="save-edit-btn"
+                        onClick={saveEditedItems}
+                        disabled={saving || Object.keys(editedItems).length === 0}
+                      >
+                        {saving ? 'Saving...' : '✅ Save Prices'}
+                      </button>
+                      <button 
+                        className="cancel-edit-btn"
+                        onClick={cancelEdit}
+                        disabled={saving}
+                      >
+                        ❌ Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {!shopInventory || shopInventory.length === 0 ? (
@@ -706,9 +838,11 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                       <th>S.No</th>
                       <th>Brand Details</th>
                       <th>Pack Info</th>
+                      <th>MRP</th>
+                      <th>Markup</th>
                       <th>
                         <div className="price-header">
-                          <div>PRICE</div>
+                          <div>FINAL PRICE</div>
                           <div className="price-subtitle">(MRP + MARKUP)</div>
                         </div>
                       </th>
@@ -755,7 +889,46 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                                 <div className="pack-type">Type: {item.packType}</div>
                               </div>
                             </td>
-                            <td className="variant-price-cell">₹{formatNumber(parseFloat(item.mrp) + parseFloat(item.markup_price || 0))}</td>
+                            <td className="variant-mrp-cell">₹{formatNumber(parseFloat(item.mrp))}</td>
+                            <td className="variant-markup-cell">
+                              {isEditMode ? (
+                                <input
+                                  type="number"
+                                  value={editedItems[item.id]?.markup !== undefined ? editedItems[item.id].markup : (parseFloat(item.markup_price) > 0 ? item.markup_price : '')}
+                                  onChange={(e) => handleEditMarkupChange(item.id, e.target.value)}
+                                  onFocus={(e) => {
+                                    // Only clear placeholder if the field is actually empty
+                                    if (e.target.value === '') {
+                                      e.target.placeholder = '';
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    if (e.target.value === '') {
+                                      e.target.placeholder = '0';
+                                    }
+                                  }}
+                                  onWheel={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    e.target.blur(); // Remove focus to prevent further wheel events
+                                    setTimeout(() => e.target.focus(), 0); // Restore focus
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                    }
+                                  }}
+                                  min="0"
+                                  step="0.01"
+                                  className="edit-markup-input"
+                                  placeholder="0"
+                                />
+                              ) : (
+                                <span>₹{formatNumber(parseFloat(item.markup_price || 0))}</span>
+                              )}
+                            </td>
+                            <td className="variant-price-cell">₹{formatNumber(parseFloat(item.mrp) + getMarkupValue(item.id, item.markup_price))}</td>
                             <td className="variant-stock-cell">
                               <div className="stock-quantity">
                                 <span className="quantity-value">{item.quantity}</span>
@@ -835,8 +1008,16 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                                   e.target.placeholder = '0';
                                 }
                               }}
-                              onWheel={handleInputEvents}
-                              onKeyDown={handleInputEvents}
+                              onWheel={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                }
+                              }}
                               min="0"
                               className="quantity-input"
                               placeholder="0"
@@ -848,21 +1029,27 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
                               value={product.markup === 0 ? '' : product.markup}
                               onChange={(e) => handleMarkupChange(product.id, e.target.value)}
                               onFocus={(e) => {
-                                if (e.target.value === '') {
-                                  e.target.placeholder = '';
-                                }
+                                e.target.placeholder = '';
                               }}
                               onBlur={(e) => {
                                 if (e.target.value === '') {
-                                  e.target.placeholder = '0.00';
+                                  e.target.placeholder = '0';
                                 }
                               }}
-                              onWheel={handleInputEvents}
-                              onKeyDown={handleInputEvents}
+                              onWheel={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                }
+                              }}
                               min="0"
                               step="0.01"
                               className="markup-input"
-                              placeholder="0.00"
+                              placeholder="0"
                             />
                           </td>
                           <td>₹{finalPrice.toFixed(2)}</td>

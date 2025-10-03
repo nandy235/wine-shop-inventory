@@ -99,7 +99,7 @@ const stockOnboardingSchema = Joi.object({
     .items(
       Joi.object({
         id: Joi.number().integer().positive().required(),
-        quantity: Joi.number().integer().min(1).max(10000).required(),
+        quantity: Joi.number().integer().min(0).max(10000).required(),
         markup: Joi.number().min(0).max(1000).required()
       })
     )

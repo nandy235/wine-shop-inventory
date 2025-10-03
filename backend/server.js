@@ -1608,6 +1608,103 @@ app.post('/api/stock/initialize-today', requireAuth, async (req, res) => {
   }
 });
 
+// Price update endpoint (markup only)
+app.post('/api/shop/inventory/price-update', 
+  requireAuth, 
+  async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { updates } = req.body;
+    const userId = req.user.id;
+    const shopId = req.user.shopId;
+
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ message: 'No price updates provided' });
+    }
+
+    console.log(`💰 Price update: ${updates.length} items for shop ${shopId}`);
+
+    await client.query('BEGIN');
+
+    const results = {
+      updated: 0,
+      errors: []
+    };
+
+    for (const update of updates) {
+      try {
+        const { shopInventoryId, markup } = update;
+
+        if (!shopInventoryId || markup < 0 || isNaN(markup)) {
+          results.errors.push(`Invalid markup data for item ${shopInventoryId}`);
+          continue;
+        }
+
+        // Get MRP to calculate new final price
+        const mrpQuery = await client.query(
+          'SELECT mb.standard_mrp as mrp FROM master_brands mb JOIN shop_inventory si ON mb.id = si.master_brand_id WHERE si.id = $1 AND si.shop_id = $2',
+          [shopInventoryId, shopId]
+        );
+        
+        if (mrpQuery.rows.length === 0) {
+          results.errors.push(`Shop inventory item ${shopInventoryId} not found`);
+          continue;
+        }
+
+        const mrp = parseFloat(mrpQuery.rows[0].mrp);
+        const newFinalPrice = mrp + parseFloat(markup);
+
+        // Update only markup and final price, not quantity
+        const updateResult = await client.query(
+          `UPDATE shop_inventory 
+           SET markup_price = $1, final_price = $2, last_updated = CURRENT_TIMESTAMP
+           WHERE id = $3 AND shop_id = $4`,
+          [markup, newFinalPrice, shopInventoryId, shopId]
+        );
+        
+        console.log(`🔍 Update query affected ${updateResult.rowCount} rows for item ${shopInventoryId}`);
+
+        results.updated++;
+        console.log(`✅ Updated price for item ${shopInventoryId}: markup=${markup}, final_price=${newFinalPrice}`);
+        
+        // Verify the update by reading back from database
+        const verifyQuery = await client.query(
+          'SELECT markup_price, final_price FROM shop_inventory WHERE id = $1 AND shop_id = $2',
+          [shopInventoryId, shopId]
+        );
+        if (verifyQuery.rows.length > 0) {
+          const verified = verifyQuery.rows[0];
+          console.log(`🔍 Database verification for item ${shopInventoryId}: markup=${verified.markup_price}, final_price=${verified.final_price}`);
+        }
+
+      } catch (updateError) {
+        console.error(`❌ Error updating price for item ${update.shopInventoryId}:`, updateError);
+        results.errors.push(`Failed to update price for item ${update.shopInventoryId}: ${updateError.message}`);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    console.log(`💰 Price update completed: ${results.updated} items updated`);
+
+    res.json({
+      success: true,
+      message: `Successfully updated prices for ${results.updated} items`,
+      results
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Price update error:', error);
+    res.status(500).json({ 
+      message: 'Server error during price update', 
+      error: error.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
 
 // Stock onboarding save endpoint
 app.post('/api/stock-onboarding/save', 
@@ -1636,8 +1733,8 @@ app.post('/api/stock-onboarding/save',
 
     for (const product of products) {
       try {
-        // Validate required fields
-        if (!product.id || !product.quantity || product.quantity <= 0) {
+        // Validate required fields (allow quantity = 0 for markup-only updates)
+        if (!product.id || product.quantity < 0 || isNaN(product.quantity)) {
           results.errors.push(`Invalid product data: ${product.name || 'Unknown'}`);
           continue;
         }
@@ -2006,6 +2103,12 @@ app.get('/api/shop/products', requireAuth, async (req, res) => {
     if (filteredProducts.length > 0) {
       console.log('📋 Sample filtered product:', JSON.stringify(filteredProducts[0], null, 2));
       console.log('📋 Total sales value:', filteredProducts.reduce((sum, p) => sum + ((p.totalStock || 0) - (p.closingStock || p.totalStock || 0)) * (p.finalPrice || 0), 0));
+      
+      // Debug: Log markup prices for first few products
+      console.log('🔍 Markup prices in API response:');
+      filteredProducts.slice(0, 3).forEach((product, index) => {
+        console.log(`  ${index + 1}. ID: ${product.id}, Name: ${product.name}, Markup: ${product.markup_price}, Final: ${product.finalPrice}`);
+      });
     }
     
     // Check if closing stock is already saved

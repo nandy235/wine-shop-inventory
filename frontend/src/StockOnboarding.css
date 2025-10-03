@@ -326,6 +326,12 @@
 .stock-onboarding-container .inventory-stats {
   display: flex;
   gap: 20px;
+  align-items: center;
+}
+
+.stock-onboarding-container .inventory-controls {
+  display: flex;
+  align-items: center;
 }
 
 .stock-onboarding-container .inventory-value {
@@ -350,6 +356,117 @@
   font-size: 20px;
   font-weight: 800;
   color: #059669;
+}
+
+/* ===== EDIT MODE CONTROLS ===== */
+.stock-onboarding-container .edit-inventory-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 20px;
+  white-space: nowrap;
+}
+
+.stock-onboarding-container .edit-inventory-btn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+}
+
+.stock-onboarding-container .edit-inventory-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.stock-onboarding-container .edit-mode-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.stock-onboarding-container .edit-mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stock-onboarding-container .edit-mode-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #3b82f6;
+}
+
+.stock-onboarding-container .edit-mode-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.stock-onboarding-container .edit-action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.stock-onboarding-container .save-edit-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.stock-onboarding-container .save-edit-btn:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+}
+
+.stock-onboarding-container .save-edit-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.stock-onboarding-container .cancel-edit-btn {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.stock-onboarding-container .cancel-edit-btn:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+
+.stock-onboarding-container .cancel-edit-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* ===== EMPTY STATE ===== */
@@ -797,17 +914,50 @@
   transform: scale(1.05);
 }
 
+/* ===== EDIT MODE INPUT FIELDS ===== */
+.stock-onboarding-container .edit-quantity-input,
+.stock-onboarding-container .edit-markup-input {
+  padding: 8px 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 14px;
+  text-align: center;
+  background: #f8fafc;
+  transition: all 0.3s ease;
+  width: 80px;
+  font-weight: 500;
+  height: 36px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  display: block;
+}
+
+.stock-onboarding-container .edit-quantity-input:focus,
+.stock-onboarding-container .edit-markup-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  transform: scale(1.05);
+}
+
 /* Hide number input spinners */
 .stock-onboarding-container .quantity-input::-webkit-outer-spin-button,
 .stock-onboarding-container .quantity-input::-webkit-inner-spin-button,
 .stock-onboarding-container .markup-input::-webkit-outer-spin-button,
-.stock-onboarding-container .markup-input::-webkit-inner-spin-button {
+.stock-onboarding-container .markup-input::-webkit-inner-spin-button,
+.stock-onboarding-container .edit-quantity-input::-webkit-outer-spin-button,
+.stock-onboarding-container .edit-quantity-input::-webkit-inner-spin-button,
+.stock-onboarding-container .edit-markup-input::-webkit-outer-spin-button,
+.stock-onboarding-container .edit-markup-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
 .stock-onboarding-container .quantity-input[type=number],
-.stock-onboarding-container .markup-input[type=number] {
+.stock-onboarding-container .markup-input[type=number],
+.stock-onboarding-container .edit-quantity-input[type=number],
+.stock-onboarding-container .edit-markup-input[type=number] {
   -webkit-appearance: textfield;
   -moz-appearance: textfield;
   appearance: textfield;
