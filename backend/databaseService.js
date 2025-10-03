@@ -566,7 +566,7 @@ class DatabaseService {
     }
   }
 
-  // Initialize today's stock records for all shop products
+  // Initialize stock records for all shop products for a specific date
   async initializeTodayStock(shopId, date) {
     return await retryOperation(async () => {
       // First, let's check how many products exist in shop_inventory
@@ -1015,8 +1015,9 @@ class DatabaseService {
       let stockValue = 0;
       let totalSalesAmount = 0;
       
-      // If we have daily stock records, use them
+      // Calculate stock value based on actual inventory
       if (stockRecords.rows.length > 0) {
+        // If we have daily stock records, use them for accurate historical data
         for (const record of stockRecords.rows) {
           // Correct logic: Use closing_stock if set, otherwise use total_stock (opening + received)
           const stockForValue = record.closing_stock !== null ? record.closing_stock : (record.total_stock || 0);
@@ -1034,9 +1035,54 @@ class DatabaseService {
           }
         }
       } else {
-        // If no daily records for selected date, show 0 for historical accuracy
-        console.log(`📊 No daily records found for date ${date}, setting stock value to 0`);
-        stockValue = 0;
+        // If no daily records for this date, find the most recent previous daily records
+        
+        const previousRecordsQuery = `
+          SELECT 
+            dsr.shop_inventory_id,
+            dsr.stock_date,
+            dsr.closing_stock,
+            dsr.total_stock,
+            dsr.opening_stock,
+            dsr.received_stock,
+            dsr.sales,
+            dsr.price_per_unit,
+            dsr.sale_value,
+            mb.standard_mrp,
+            mb.brand_name
+          FROM daily_stock_records dsr
+          JOIN shop_inventory si ON si.id = dsr.shop_inventory_id
+          JOIN master_brands mb ON mb.id = si.master_brand_id
+          WHERE si.shop_id = $1 
+            AND dsr.stock_date < $2
+            AND si.is_active = true
+          ORDER BY dsr.stock_date DESC
+        `;
+        
+        const previousRecords = await pool.query(previousRecordsQuery, [shopId, date]);
+        
+        if (previousRecords.rows.length > 0) {
+          
+          // Group by shop_inventory_id to get the most recent record for each item
+          const latestRecordsByItem = {};
+          for (const record of previousRecords.rows) {
+            if (!latestRecordsByItem[record.shop_inventory_id]) {
+              latestRecordsByItem[record.shop_inventory_id] = record;
+            }
+          }
+          
+          // Calculate stock value from the most recent previous records
+          for (const record of Object.values(latestRecordsByItem)) {
+            // Use closing_stock if available, otherwise use total_stock
+            const stockForValue = record.closing_stock !== null ? record.closing_stock : (record.total_stock || 0);
+            
+            if (stockForValue > 0 && record.standard_mrp) {
+              const itemValue = stockForValue * parseFloat(record.standard_mrp);
+              stockValue += itemValue;
+            }
+          }
+          
+        }
       }
       
       // Calculate stock lifted - two values for this month

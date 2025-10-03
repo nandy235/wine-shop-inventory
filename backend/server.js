@@ -2348,7 +2348,6 @@ app.get('/api/summary', requireAuth, async (req, res) => {
       return res.status(400).json({ message: 'Shop ID not found in token' });
     }
     
-    console.log(`📊 Getting summary for shop ${shopId} on date ${targetDate}`);
     const summary = await dbService.getSummary(shopId, targetDate);
     res.json(summary);
   } catch (error) {
