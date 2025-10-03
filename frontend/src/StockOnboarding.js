@@ -103,14 +103,12 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       // Fetch all master brands without pack type filter
       const response = await apiGet('/api/master-brands');
       const brands = await response.json();
-      console.log('Loaded master brands:', brands.length);
         
         // Debug: Check pack types distribution
         const packTypeStats = brands.reduce((stats, brand) => {
           stats[brand.packType] = (stats[brand.packType] || 0) + 1;
           return stats;
         }, {});
-        console.log('Pack type distribution:', packTypeStats);
         
         // Debug: Find brands with both P and G pack types
         const brandGroups = brands.reduce((groups, brand) => {
@@ -125,10 +123,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         }, {});
         
         const brandsWithMultiplePackTypes = Object.values(brandGroups).filter(group => group.packTypes.length > 1);
-        console.log('Brands with multiple pack types:', brandsWithMultiplePackTypes.length);
-        if (brandsWithMultiplePackTypes.length > 0) {
-          console.log('Sample brand with multiple pack types:', brandsWithMultiplePackTypes[0]);
-        }
         setMasterBrands(brands);
     } catch (error) {
       console.error('Error fetching master brands:', error);
@@ -138,21 +132,9 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   const fetchShopInventory = async () => {
     try {
-      console.log('🔄 Fetching shop inventory...');
       const response = await apiGet('/api/shop/products');
       const data = await response.json();
       const products = data.products || [];
-      
-      console.log('📦 Loaded shop inventory:', products.length, 'items');
-      
-      // Debug: Show sort_order values for first few items
-      if (products.length > 0) {
-        console.log('🔍 First 3 items with sort_order:');
-        products.slice(0, 3).forEach((item, index) => {
-          console.log(`  ${index + 1}. ${item.name} - sort_order: ${item.sort_order}, id: ${item.id}`);
-        });
-      }
-      
       setShopInventory(products);
     } catch (error) {
       console.error('Error fetching shop inventory:', error);
@@ -196,18 +178,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         );
         
         const hasOpeningStock = inventoryItem?.openingStock > 0;
-        
-        // Debug logging for all searches to understand filtering
-        console.log('🔍 Filtering brand:', {
-          name: brand.name,
-          packType: brand.packType,
-          masterBrandId: brand.id,
-          existsInInventory: !!inventoryItem,
-          openingStock: inventoryItem?.openingStock || 0,
-          hasOpeningStock: hasOpeningStock,
-          willShow: !hasOpeningStock,
-          inventoryLength: shopInventory?.length || 0
-        });
         
         return !hasOpeningStock; // Show products with no opening stock or not in inventory
       });
@@ -302,24 +272,18 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         };
       });
 
-      console.log('🔍 Sending price updates:', updates);
-      console.log('🔍 Edited items:', editedItems);
-
       const response = await apiPost('/api/shop/inventory/price-update', {
         updates: updates
       });
 
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Backend response:', result);
         alert('✅ Prices updated successfully!');
         setIsEditMode(false);
         setEditedItems({});
-        console.log('🔄 Refreshing inventory...');
         // Add a small delay to ensure database transaction is committed
         await new Promise(resolve => setTimeout(resolve, 500));
         await fetchShopInventory(); // Refresh inventory
-        console.log('✅ Inventory refreshed');
       } else {
         const error = await response.json();
         console.error('❌ Backend error:', error);
@@ -355,7 +319,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
       const businessDateDisplay = getBusinessDate();
       // Convert DD-MM-YYYY to YYYY-MM-DD for API
       const businessDateForAPI = businessDateDisplay.split('-').reverse().join('-');
-      console.log('🗓️ Using business date for stock onboarding:', businessDateForAPI);
 
       const response = await apiPost('/api/stock-onboarding/save', {
         products: selectedProducts,
@@ -383,7 +346,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         const error = await response.json();
-        console.error('Server error response:', error);
         alert(`❌ Error: ${error.message || 'Server error during stock onboarding'}`);
       }
     } catch (error) {
@@ -412,7 +374,6 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   // Helper function to group inventory items by brand name (aggregated display)
   const groupInventoryByBrand = (inventory) => {
-    console.log('🔍 groupInventoryByBrand called with', inventory.length, 'items');
     const grouped = {};
     let serialCounter = 1;
     
@@ -456,18 +417,14 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
 
   // Move item to top function
   const moveToTop = (itemId) => {
-    console.log('🔝 Moving item to top:', itemId);
-    
     const currentInventory = [...(shopInventory || [])];
     const itemIndex = currentInventory.findIndex(item => item.id === itemId);
     
     if (itemIndex === -1) {
-      console.error('❌ Item not found:', itemId);
       return;
     }
     
     if (itemIndex === 0) {
-      console.log('ℹ️ Item is already at the top');
       return;
     }
     
@@ -477,31 +434,17 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
     // Add item to the beginning
     currentInventory.unshift(movedItem);
     
-    console.log('📦 Updated inventory order');
     setShopInventory(currentInventory);
     
     // Save the new sort order to the backend
-    console.log('💾 Saving new sort order after move to top...');
     saveSortOrder(currentInventory);
   };
 
   // Save sort order to backend
   const saveSortOrder = async (inventory) => {
     try {
-      console.log('🔄 Starting saveSortOrder with inventory length:', inventory.length);
-      
-      // Quick test to see if we can reach the API
-      console.log('🧪 Testing API connectivity...');
-      try {
-        const testResponse = await apiGet('/api/auth/status');
-        console.log('🧪 API test response status:', testResponse.status);
-      } catch (testError) {
-        console.error('🧪 API test failed:', testError);
-      }
-      
       // Group inventory by brand and create the sorted brand groups structure
       const brandGroups = groupInventoryByBrand(inventory);
-      console.log('📊 Brand groups created:', brandGroups.length);
       
       const sortedBrandGroups = brandGroups.map((brandGroup, groupIndex) => ({
         brandName: brandGroup.brandName,
@@ -509,32 +452,21 @@ function StockOnboarding({ onNavigate, onLogout, isAuthenticated }) {
         groupOrder: groupIndex + 1
       }));
 
-      console.log('🔄 Saving sort order for', sortedBrandGroups.length, 'brand groups');
-      console.log('📋 Sort order data:', JSON.stringify(sortedBrandGroups, null, 2));
-
       // Use apiPut with extended timeout (handled in apiUtils)
       const response = await apiPut('/api/shop/update-sort-order', {
         sortedBrandGroups: sortedBrandGroups
       });
 
-      console.log('📡 API Response status:', response.status);
-
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Sort order saved successfully:', result.message, `(${result.totalUpdated} items updated)`);
         
         // Refresh inventory to reflect the new sort order from database
-        console.log('🔄 Refreshing inventory to reflect new sort order...');
         await fetchShopInventory();
       } else {
         const error = await response.json();
-        console.error('❌ Failed to save sort order. Status:', response.status);
-        console.error('❌ Error details:', error.message || error);
         // Don't show alert for sort order errors to avoid disrupting UX
       }
     } catch (error) {
-      console.error('❌ Exception in saveSortOrder:', error.message || error);
-      console.error('❌ Full error:', error);
       // Don't show alert for sort order errors to avoid disrupting UX
     }
   };
